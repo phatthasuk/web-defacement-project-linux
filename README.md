@@ -91,46 +91,82 @@ flowchart LR
 
 ### Prerequisites
 
-- **Python:** 3.11 or higher
-- **Node.js:** 20 or higher
-- **Playwright:** Chromium browser binaries installed (`playwright install chromium`)
-- *(Optional)* **Docker & Docker Compose**
+- **Operating System:** Linux (Ubuntu 22.04 / 24.04 LTS recommended) or any modern Linux distribution
+- **Docker Deployment (Recommended):** Docker Engine 24.0+ & Docker Compose v2.0+
+- **Host / Bare-Metal Deployment (Alternative):**
+  - Python 3.11+ & `python3-venv`
+  - Node.js 20+ & `npm`
+  - System build dependencies: `build-essential`
 
 ---
 
-### Option A: Running with Docker Compose
+### Option A: Running with Docker Compose (Recommended for Linux Server)
 
-1. Copy environment variables for backend and frontend:
+The easiest and most isolated way to run the entire stack on a Linux server.
+
+1. **Configure environment variables:**
    ```bash
    cp backend/.env.example backend/.env
    cp frontend/.env.example frontend/.env
    ```
 
-2. Start the services:
+   > [!NOTE]
+   > For remote Linux server deployment:
+   > - In `backend/.env`, configure `CORS_ORIGINS` to include your server IP (e.g. `http://localhost:3030,http://<server-ip>:3030`).
+   > - In `frontend/.env`, set `VITE_API_BASE_URL=http://<server-ip>:8000` (or leave default for localhost).
+
+2. **Start the containers in detached daemon mode:**
    ```bash
-   docker compose up --build
+   docker compose up -d --build
    ```
 
-3. Open the dashboard at `http://localhost:3000` (Backend runs at `http://localhost:8000`).
+3. **Access the application:**
+   - **Operator Dashboard:** `http://localhost:3030` (or `http://<server-ip>:3030`)
+   - **Backend API & Swagger Docs:** `http://localhost:8000/docs` (or `http://<server-ip>:8000/docs`)
+
+4. **Useful container management commands:**
+   ```bash
+   # Follow live logs
+   docker compose logs -f
+
+   # Check container status
+   docker compose ps
+
+   # Stop containers (data in backend/data/ is preserved via bind volume)
+   docker compose down
+
+   # Restart containers
+   docker compose restart
+   ```
 
 ---
 
-### Option B: Local Manual Setup
+### Option B: Local Manual Setup on Linux (Bare-Metal)
 
-#### 1. Backend Setup
+Use this method if running directly on a Linux host without Docker.
+
+#### 1. Install System Prerequisites (Ubuntu / Debian)
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv nodejs npm build-essential
+```
+
+#### 2. Backend Setup
 
 ```bash
 cd backend
 
 # Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Install dependencies
+# Install Python dependencies
+pip install --upgrade pip
 pip install -r requirements.txt -r requirements-dev.txt
 
-# Install Playwright browser dependencies
-playwright install chromium
+# Install Playwright browser and Linux OS dependencies (libnss3, libasound2, etc.)
+playwright install --with-deps chromium
 
 # Copy environment configuration
 cp .env.example .env
@@ -139,13 +175,13 @@ cp .env.example .env
 alembic upgrade head
 
 # Bootstrap the initial admin user (interactive prompt)
-python scripts/create_user.py
+python3 scripts/create_user.py
 
 # Start the development server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-#### 2. Frontend Setup
+#### 3. Frontend Setup
 
 ```bash
 cd frontend
@@ -156,11 +192,11 @@ npm install
 # Copy environment configuration
 cp .env.example .env
 
-# Start the development server
-npm run dev
+# Start Vite dev server bound to all interfaces
+npm run dev -- --host 0.0.0.0
 ```
 
-Visit `http://localhost:5173` to access the dashboard and log in with your bootstrap admin credentials.
+Visit `http://localhost:5173` (or `http://<server-ip>:5173`) to access the dashboard and log in with your bootstrap admin credentials.
 
 ---
 
@@ -204,7 +240,7 @@ npm run build
 ## Project Structure
 
 ```text
-Web Defacement Project/
+web-defacement-project-linux/
 ├── backend/                      # FastAPI backend application
 │   ├── alembic/                  # Database migration scripts
 │   ├── app/
