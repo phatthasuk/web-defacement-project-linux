@@ -1,4 +1,4 @@
-﻿# Refinement Record: Linux Code Sync & Database Reset for Stage 2 Soak Test
+# Refinement Record: Linux Code Sync & Database Reset for Stage 2 Soak Test
 
 **Date:** September 8, 2026  
 **Document Name:** `Linux-Code-Sync-and-Database-Reset-8-9-2026.md`  
@@ -31,7 +31,7 @@ The Linux server had accumulated 45 checks across ~24 hours of execution on the 
 
 ## 2. Technical Actions & Execution Details
 
-### 2.1 Preserved Items (สิ่งที่คงไว้)
+### 2.1 Preserved Items & Configurations
 To prevent operational disruptions and preserve deployment topology on the Ubuntu server (`10.117.10.68`):
 1. **Network & Deployment Configurations (`docker-compose.yml`):**
    - Frontend container: `image: node:20-slim`
@@ -45,7 +45,7 @@ To prevent operational disruptions and preserve deployment topology on the Ubunt
    - `Web Defacement Project`: Kept `Bangkok Chain Hospital TH`.
    - `Web Defacement Project Linux`: Kept `Bangkok Chain Hospital` and `World Medical Hospital TH`.
 
-### 2.2 Synchronized Codebase (สิ่งที่ได้รับการอัปเดต)
+### 2.2 Synchronized Codebase & Updates
 The following directories and files were synchronized from `Web Defacement Project` to `Web Defacement Project Linux`:
 - `backend/app/`: Core services (`capture.py`, `checks.py`, `review.py`), API routes (`targets.py`, `config.py`), error definitions (`errors.py`), schemas (`target.py`, `config.py`).
 - `backend/tests/`: Complete automated test suites (123 test cases).
@@ -54,7 +54,7 @@ The following directories and files were synchronized from `Web Defacement Proje
 - Root & Documentation: `README.md`, `PROJECT_STRUCTURE.md`, `plan/PROJECT_PLAN.md`, and all refinement logs under `refinement/`.
 - `.gitignore`: Appended secret mask pattern `Bch@Web2026!.txt`.
 
-### 2.3 Safe Database & Artifact Reset (การเคลียร์ฐานข้อมูลและไฟล์ผลตรวจ)
+### 2.3 Safe Database & Artifact Reset
 A safe database purge script was executed simultaneously across both projects:
 1. **Safety Backup:** Created `backend/data/app.db.bak` prior to modification.
 2. **Check Results & Snapshots Purge:**
