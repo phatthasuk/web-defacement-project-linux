@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,14 +32,22 @@ async def lifespan(app: FastAPI):
     if settings.ENVIRONMENT == "production" and not settings.SESSION_COOKIE_SECURE:
         raise RuntimeError("Production environment must run with SESSION_COOKIE_SECURE=True")
     
-    # Create database tables (now mostly handled by alembic, but keeping for compatibility)
-    Base.metadata.create_all(bind=engine)
-    
-    # Create data directories if they don't exist
+    # Create data directories if they don't exist BEFORE opening the SQLite database
+    os.makedirs(settings.data_dir_path, exist_ok=True)
     os.makedirs(settings.data_dir_path / "screenshots", exist_ok=True)
     os.makedirs(settings.data_dir_path / "text", exist_ok=True)
     os.makedirs(settings.data_dir_path / "html", exist_ok=True)
     os.makedirs(settings.data_dir_path / "staging", exist_ok=True)
+
+    if settings.DATABASE_URL.startswith("sqlite"):
+        db_path_str = settings.DATABASE_URL.replace("sqlite:///", "").split("?")[0]
+        if db_path_str and not db_path_str.startswith(":memory:"):
+            db_dir = Path(db_path_str).parent
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
+
+    # Create database tables (now mostly handled by alembic, but keeping for compatibility)
+    Base.metadata.create_all(bind=engine)
 
     # Release targets stuck in "Checking" by a previous process, and clean up
     # orphaned staging/artifact files.

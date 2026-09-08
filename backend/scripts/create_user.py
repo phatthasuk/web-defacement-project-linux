@@ -7,7 +7,11 @@ returns a non-zero exit code.
 
 import argparse
 import getpass
+from pathlib import Path
 import sys
+
+# Ensure backend root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.security import get_password_hash
 from app.db.session import Base, SessionLocal, engine

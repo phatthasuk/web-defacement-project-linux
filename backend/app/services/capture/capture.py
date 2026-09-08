@@ -74,10 +74,28 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
         launch_args.append(f"--host-resolver-rules=MAP {hostname} {pinned_ip}")
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            args=launch_args,
-            chromium_sandbox=not settings.BROWSER_DISABLE_SANDBOX,
-        )
+        try:
+            browser = await playwright.chromium.launch(
+                args=launch_args,
+                chromium_sandbox=not settings.BROWSER_DISABLE_SANDBOX,
+            )
+        except Exception as launch_err:
+            err_msg = str(launch_err).lower()
+            if "sandboxing" in err_msg or "closed" in err_msg:
+                logger.warning(
+                    "Chromium sandbox launch failed, falling back to --no-sandbox: %s",
+                    launch_err,
+                )
+                fallback_args = list(launch_args)
+                for arg in ["--no-sandbox", "--disable-setuid-sandbox"]:
+                    if arg not in fallback_args:
+                        fallback_args.append(arg)
+                browser = await playwright.chromium.launch(
+                    args=fallback_args,
+                    chromium_sandbox=False,
+                )
+            else:
+                raise
         try:
             # An explicit context is needed to block service workers, which can
             # otherwise issue requests that escape page.route() and so bypass
