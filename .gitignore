@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+*.db
+*.db-*
+*.sqlite3
+*.bak
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright
+test-results/
+playwright-report/
+
+# Backend captured artifacts (keep folder structure)
+backend/data/screenshots/*
+backend/data/text/*
+backend/data/html/*
+!backend/data/screenshots/.gitkeep
+!backend/data/text/.gitkeep
+!backend/data/html/.gitkeep
+
+# Backend test/temp output
+backend/data/test-artifacts/
+backend/.pytest-tmp/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+Bch@Web2026!.txt
