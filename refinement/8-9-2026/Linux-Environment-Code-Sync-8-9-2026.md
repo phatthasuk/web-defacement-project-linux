@@ -1,4 +1,4 @@
-﻿# Linux Environment Code Sync & Preservation Summary
+# Linux Environment Code Sync & Preservation Summary
 
 **Date:** September 8, 2026  
 **Target Environment:** `Web Defacement Project Linux` (Ubuntu Server / Docker Compose Deployment)  
@@ -54,6 +54,8 @@ All latest fixes, security hardenings, and UX improvements from **CR-01 through 
 * **UI Overflow & Details Navigation (`CheckDetailPage.tsx`, `TargetDetailPage.tsx`):**
   - Added `break-words [overflow-wrap:anywhere] min-w-0` to prevent result summary text overflow.
   - Added "View Full Details →" navigation link to `/checks/:id`.
+* **Target Detail Action Buttons Repositioning (`TargetDetailPage.tsx`):**
+  - Relocated target management buttons (`Edit` and `Delete`) under the target URL on the left side of the header, cleanly separating entity configuration from operational triage buttons (`Approve as Baseline`, `Confirm Defacement`, `Acknowledge Change`).
 
 ### 2.3 Documentation & Plans
 * Added `README.md` and updated `PROJECT_STRUCTURE.md`.

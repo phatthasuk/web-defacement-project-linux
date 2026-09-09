@@ -218,7 +218,7 @@ export function TargetDetailPage() {
         </Link>
       </div>
 
-      <header className="mb-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+      <header className="mb-10 flex flex-col md:flex-row md:items-start md:justify-between gap-6">
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-3xl font-extrabold text-slate-100">{target.name}</h1>
@@ -227,14 +227,43 @@ export function TargetDetailPage() {
               title={target.status === 'Failed' ? target.last_error || undefined : undefined}
             />
           </div>
-          <a
-            href={target.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-slate-500 hover:text-cyan-400 font-mono transition-colors break-all"
-          >
-            {target.url}
-          </a>
+          <div>
+            <a
+              href={target.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-slate-500 hover:text-cyan-400 font-mono transition-colors break-all"
+            >
+              {target.url}
+            </a>
+          </div>
+
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              data-testid="detail-edit-target-btn"
+              onClick={() => setIsEditModalOpen(true)}
+              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5"
+              title="Edit Target"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+              Edit
+            </button>
+
+            <button
+              data-testid="detail-delete-target-btn"
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-rose-950/40 hover:border-rose-700/60 hover:text-rose-400 transition-all flex items-center gap-1.5"
+              title="Delete Target"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete
+            </button>
+          </div>
+
           {target.status === 'Failed' && target.last_error && (
             <div className="mt-3 p-4 bg-rose-950/40 border border-rose-800/40 rounded-xl text-rose-300 text-sm max-w-2xl flex gap-3">
               <svg className="h-5 w-5 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -277,30 +306,6 @@ export function TargetDetailPage() {
               {confirmDefacedMutation.isPending ? 'Confirming...' : 'Confirm Defacement'}
             </button>
           )}
-
-          <button
-            data-testid="detail-edit-target-btn"
-            onClick={() => setIsEditModalOpen(true)}
-            className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5"
-            title="Edit Target"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-            </svg>
-            Edit
-          </button>
-
-          <button
-            data-testid="detail-delete-target-btn"
-            onClick={() => setIsDeleteModalOpen(true)}
-            className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-rose-950/40 hover:border-rose-700/60 hover:text-rose-400 transition-all flex items-center gap-1.5"
-            title="Delete Target"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            Delete
-          </button>
         </div>
       </header>
 
