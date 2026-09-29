@@ -19,7 +19,13 @@ from app.core.status import (
 from app.db.session import Base
 from app.models import Snapshot, Target
 from app.services.capture.capture import CaptureResult
-from app.services.concurrency import RESULT_SKIPPED, run_checks_for_targets
+from app.services.concurrency import (
+    RESULT_SKIPPED,
+    is_target_in_flight,
+    release_in_flight,
+    run_checks_for_targets,
+    try_acquire_in_flight,
+)
 
 
 def make_session_factory(prefix: str, tmp_path: Path) -> tuple[Callable[[], Session], Path]:
@@ -272,3 +278,41 @@ class ActiveCounter:
     async def decrement(self) -> None:
         async with self.lock:
             self.active -= 1
+
+
+async def test_try_acquire_and_release_in_flight():
+    tid = f"target-{uuid4()}"
+    assert not is_target_in_flight(tid)
+    assert try_acquire_in_flight(tid) is True
+    assert is_target_in_flight(tid) is True
+    # Second attempt should return False
+    assert try_acquire_in_flight(tid) is False
+    release_in_flight(tid)
+    assert not is_target_in_flight(tid)
+    # Can acquire again after release
+    assert try_acquire_in_flight(tid) is True
+    release_in_flight(tid)
+
+
+async def test_run_checks_for_targets_with_pre_reserved(tmp_path: Path):
+    session_factory, work_dir = make_session_factory("concurrency-prereserved", tmp_path)
+    target_ids = create_targets(session_factory, ["https://reserved.example.com"])
+    tid = target_ids[0]
+
+    # Pre-reserve synchronously as route / scheduler does
+    assert try_acquire_in_flight(tid) is True
+
+    async def fake_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return write_capture(out_dir, f"preres-{uuid4()}", url, "white")
+
+    results = await run_checks_for_targets(
+        target_ids,
+        Settings(DATA_DIR=str(work_dir)),
+        capture_func=fake_capture,
+        session_factory=session_factory,
+        pre_reserved=True,
+    )
+
+    assert results[0].status == STATUS_OK
+    # In-flight reservation must have been released automatically
+    assert not is_target_in_flight(tid)

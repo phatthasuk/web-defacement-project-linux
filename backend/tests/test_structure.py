@@ -166,3 +166,24 @@ def test_malformed_html_still_yields_what_could_be_parsed():
     parsed = extract_structure(broken, BASE_URL)
 
     assert "script:https://evil.example.net/x.js" in parsed
+
+
+def test_inline_script_multiline_and_chunked_is_buffered_into_single_digest():
+    """Finding CR10-07: multiple handle_data chunks within <script> are buffered together."""
+    html = """
+    <html><body>
+    <script>
+        const a = 1;
+        const b = 2;
+        const c = "foo &amp; bar";
+    </script>
+    </body></html>
+    """
+    f = facts(html)
+    inline_facts = [fact for fact in f if fact.startswith("inline-script:")]
+    assert len(inline_facts) == 1
+
+    # Check that closing unclosed script also flushes
+    unclosed = "<html><body><script>const x = 42;"
+    f_unclosed = facts(unclosed)
+    assert len([fact for fact in f_unclosed if fact.startswith("inline-script:")]) == 1

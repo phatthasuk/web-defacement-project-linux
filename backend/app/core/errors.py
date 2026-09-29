@@ -2,6 +2,10 @@ class CaptureError(Exception):
     pass
 
 
+class DnsResolutionError(CaptureError):
+    pass
+
+
 class SsrfBlockedError(CaptureError):
     pass
 
@@ -14,5 +18,5 @@ class ValidationError(ValueError):
     pass
 
 
-class ConflictError(ValueError):
+class ConflictError(ValidationError):
     pass

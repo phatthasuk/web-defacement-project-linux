@@ -1,31 +1,7 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { useState, useEffect, useCallback, ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError, setCsrfToken } from '../api/client';
-
-export interface User {
-  id: number;
-  username: string;
-  is_active: boolean;
-  role: string;
-}
-
-interface AuthResponse extends User {
-  csrf_token: string;
-}
-
-interface AuthContextType {
-  user: User | null;
-  isLoading: boolean;
-  // Set when /auth/me fails for a reason other than "not logged in" (network
-  // error or HTTP 5xx). Distinguishing this from an expired session avoids a
-  // misleading redirect-to-login loop.
-  authError: boolean;
-  applyAuth: (auth: AuthResponse) => void;
-  logout: () => Promise<void>;
-  retry: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+import { AuthContext, type AuthResponse, type User } from './authContext';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -70,13 +46,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try {
       await apiFetch('/auth/logout', { method: 'POST' });
+      setCsrfToken(null);
+      setUser(null);
+      setAuthError(false);
+      queryClient.clear();
     } catch (e) {
-      console.error(e);
+      console.error('Logout failed:', e);
+      if (e instanceof ApiError && e.status === 401) {
+        setCsrfToken(null);
+        setUser(null);
+        setAuthError(false);
+        queryClient.clear();
+        return;
+      }
+      throw e;
     }
-    setCsrfToken(null);
-    setUser(null);
-    setAuthError(false);
-    queryClient.clear();
   }, [queryClient]);
 
   const retry = useCallback(() => setReloadKey((key) => key + 1), []);
@@ -86,12 +70,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 }

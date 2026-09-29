@@ -63,14 +63,31 @@ def get_domain_semaphore(domain: str, limit: int) -> asyncio.Semaphore:
 def is_target_in_flight(target_id: str) -> bool:
     return target_id in _in_flight_targets
 
+def try_acquire_in_flight(target_id: str) -> bool:
+    if target_id in _in_flight_targets:
+        return False
+    _in_flight_targets.add(target_id)
+    return True
+
+def release_in_flight(target_id: str) -> None:
+    _in_flight_targets.discard(target_id)
+
 async def run_checks_for_targets(
     target_ids: list[str],
     settings: Settings,
     capture_func: CaptureFunc = capture_snapshot,
     session_factory: SessionFactory = SessionLocal,
     timeout_seconds: float | None = None,
+    pre_reserved: bool = False,
 ) -> list[TargetCheckResult]:
-    domain_keys = load_domain_keys(target_ids, session_factory)
+    try:
+        domain_keys = load_domain_keys(target_ids, session_factory)
+    except Exception:
+        if pre_reserved:
+            for target_id in target_ids:
+                release_in_flight(target_id)
+        raise
+
     timeout = (
         timeout_seconds
         if timeout_seconds is not None
@@ -78,23 +95,23 @@ async def run_checks_for_targets(
     )
 
     async def worker(target_id: str) -> TargetCheckResult:
-        if target_id in _in_flight_targets:
-            return TargetCheckResult(
-                status=RESULT_SKIPPED,
-                snapshot=None,
-                check_result=None,
-                target_id=target_id,
-                error="Target check is already in progress",
-                skipped=True,
-            )
-        _in_flight_targets.add(target_id)
+        if not pre_reserved:
+            if not try_acquire_in_flight(target_id):
+                return TargetCheckResult(
+                    status=RESULT_SKIPPED,
+                    snapshot=None,
+                    check_result=None,
+                    target_id=target_id,
+                    error="Target check is already in progress",
+                    skipped=True,
+                )
 
         domain_key = domain_keys.get(target_id, fallback_domain_key(target_id))
         _active_domain_counts[domain_key] = _active_domain_counts.get(domain_key, 0) + 1
-        domain_semaphore = get_domain_semaphore(domain_key, settings.PER_DOMAIN_CONCURRENCY)
-        global_semaphore = get_global_semaphore(settings.MAX_CONCURRENT_CHECKS)
 
         try:
+            domain_semaphore = get_domain_semaphore(domain_key, settings.PER_DOMAIN_CONCURRENCY)
+            global_semaphore = get_global_semaphore(settings.MAX_CONCURRENT_CHECKS)
             with session_factory() as db:
                 target = db.get(Target, target_id)
                 if target is None:

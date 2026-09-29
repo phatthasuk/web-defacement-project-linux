@@ -11,7 +11,13 @@ from slowapi.errors import RateLimitExceeded
 from app.api.routes import auth, checks, config, review, snapshots, targets
 from app.api.routes.auth import limiter
 from app.core.config import get_settings
-from app.core.errors import ConflictError, NotFoundError, SsrfBlockedError, ValidationError
+from app.core.errors import (
+    ConflictError,
+    DnsResolutionError,
+    NotFoundError,
+    SsrfBlockedError,
+    ValidationError,
+)
 from app.core.status import InvalidStatusTransitionError
 from app.db.session import Base, SessionLocal, engine
 from app.models import (  # noqa: F401  (registers tables on Base)
@@ -65,7 +71,11 @@ async def lifespan(app: FastAPI):
     if scheduler is not None:
         await scheduler.stop()
 
-app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    root_path=settings.ROOT_PATH,
+    lifespan=lifespan,
+)
 
 # Add Rate Limiter
 app.state.limiter = limiter
@@ -113,6 +123,11 @@ async def validation_error_handler(request: Request, exc: ValidationError) -> JS
 
 @app.exception_handler(SsrfBlockedError)
 async def ssrf_blocked_error_handler(request: Request, exc: SsrfBlockedError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(DnsResolutionError)
+async def dns_resolution_error_handler(request: Request, exc: DnsResolutionError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 

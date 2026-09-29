@@ -5,6 +5,10 @@ export async function listTargetSnapshots(targetId: string): Promise<Snapshot[]>
   return apiFetch<Snapshot[]>(`/targets/${targetId}/snapshots`);
 }
 
+export async function getSnapshot(snapshotId: string): Promise<Snapshot> {
+  return apiFetch<Snapshot>(`/snapshots/${snapshotId}`);
+}
+
 export async function getSnapshotText(snapshotId: string): Promise<string> {
   return apiFetch<string>(`/snapshots/${snapshotId}/text`);
 }
@@ -22,4 +26,3 @@ export async function demoteTargetBaseline(targetId: string, snapshotId: string)
     method: 'POST',
   });
 }
-

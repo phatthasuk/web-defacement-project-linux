@@ -1,19 +1,23 @@
 """
 SSRF protection module.
 
-Known limitations:
-SSRF protection validates DNS at request time; hosts other than the primary target can
-theoretically rebind between validation and connection. Production deployments should
-run capture workers in an egress-restricted network segment.
+Validates URLs against permitted schemes and rejects non-public, loopback,
+link-local, multicast, RFC 6598 CGNAT / cloud overlay, and RFC 2544 benchmark addresses.
+Connection-time DNS rebinding protection is enforced at the socket level by SsrfProxy.
 """
 import ipaddress
 import socket
 from urllib.parse import urlparse
 
 from app.core.config import Settings
-from app.core.errors import SsrfBlockedError
+from app.core.errors import DnsResolutionError, SsrfBlockedError
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+BLOCKED_SPECIAL_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),  # RFC 6598 Shared Address Space / CGNAT / Cloud Overlays
+    ipaddress.ip_network("198.18.0.0/15"),  # RFC 2544 Network Interconnect Device Benchmark
+)
 
 
 def validate_url(url: str, settings: Settings) -> None:
@@ -42,7 +46,7 @@ def resolve_host_ips(hostname: str) -> list[IPAddress]:
     try:
         addrinfos = socket.getaddrinfo(hostname, None)
     except socket.gaierror as exc:
-        raise SsrfBlockedError(f"Blocked by SSRF guard: failed to resolve host {hostname}") from exc
+        raise DnsResolutionError(f"DNS resolution failed for host {hostname}") from exc
 
     ips: list[IPAddress] = []
     seen: set[IPAddress] = set()
@@ -59,7 +63,7 @@ def resolve_host_ips(hostname: str) -> list[IPAddress]:
             ips.append(ip)
 
     if not ips:
-        raise SsrfBlockedError(f"Blocked by SSRF guard: host resolved to no addresses {hostname}")
+        raise DnsResolutionError(f"Host resolved to no addresses: {hostname}")
     return ips
 
 
@@ -67,11 +71,14 @@ def is_blocked_address(ip: IPAddress) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
 
-    return (
+    if (
         ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
-    )
+    ):
+        return True
+
+    return any(ip in net for net in BLOCKED_SPECIAL_NETWORKS)

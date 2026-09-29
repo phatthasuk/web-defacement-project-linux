@@ -1,8 +1,12 @@
+import importlib
 from collections.abc import Callable
 from datetime import timedelta
 
 import httpx
+import pytest
 from sqlalchemy.orm import Session
+from starlette.requests import Request
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.deps import hash_token
 from app.core.security import get_password_hash, verify_password
@@ -11,6 +15,19 @@ from app.models.session import Session as AuthSession
 from app.models.user import User
 
 # --- Password storage -------------------------------------------------------
+
+
+async def test_production_startup_rejects_insecure_session_cookie(monkeypatch) -> None:
+    main_module = importlib.import_module("app.main")
+    monkeypatch.setattr(main_module.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(main_module.settings, "SESSION_COOKIE_SECURE", False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Production environment must run with SESSION_COOKIE_SECURE=True",
+    ):
+        async with main_module.lifespan(main_module.app):
+            pass
 
 
 def test_password_is_stored_as_argon2_hash() -> None:
@@ -307,3 +324,125 @@ async def test_successful_login_resets_failure_counter(
         assert user is not None
         assert user.failed_login_count == 0
         assert user.locked_until is None
+
+
+def test_get_client_ip_ignores_untrusted_forwarded_headers() -> None:
+    from app.api.routes.auth import get_client_ip
+
+    def make_mock_request(headers: dict[str, str], client_host: str = "127.0.0.1") -> Request:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/auth/login",
+            "headers": [
+                (key.lower().encode("latin-1"), value.encode("latin-1"))
+                for key, value in headers.items()
+            ],
+            "client": (client_host, 12345),
+        }
+        return Request(scope)
+
+    # Headers sent directly to the app must never decide the rate-limit key.
+    req1 = make_mock_request({"X-Forwarded-For": "203.0.113.195"})
+    assert get_client_ip(req1) == "127.0.0.1"
+
+    # A chain or X-Real-IP header has the same property.
+    req2 = make_mock_request({"X-Forwarded-For": "203.0.113.195, 198.51.100.1, 10.0.0.1"})
+    assert get_client_ip(req2) == "127.0.0.1"
+
+    req3 = make_mock_request({"X-Real-IP": "198.51.100.42"})
+    assert get_client_ip(req3) == "127.0.0.1"
+
+    req4 = make_mock_request({}, client_host="192.0.2.1")
+    assert get_client_ip(req4) == "192.0.2.1"
+
+
+async def test_uvicorn_accepts_forwarded_client_ip_only_from_frontend_proxy() -> None:
+    """Mirror the production Uvicorn proxy-header boundary without Docker."""
+    observed_clients: list[str] = []
+
+    async def inspect_client(scope, receive, send) -> None:
+        observed_clients.append(scope["client"][0])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    guarded_app = ProxyHeadersMiddleware(inspect_client, trusted_hosts="172.30.0.2")
+    headers = {"X-Forwarded-For": "198.51.100.20"}
+
+    trusted_transport = httpx.ASGITransport(app=guarded_app, client=("172.30.0.2", 12345))
+    async with httpx.AsyncClient(
+        transport=trusted_transport, base_url="http://testserver"
+    ) as client:
+        assert (await client.get("/", headers=headers)).status_code == 204
+
+    untrusted_transport = httpx.ASGITransport(app=guarded_app, client=("172.30.0.99", 12345))
+    async with httpx.AsyncClient(
+        transport=untrusted_transport, base_url="http://testserver"
+    ) as client:
+        assert (await client.get("/", headers=headers)).status_code == 204
+
+    assert observed_clients == ["198.51.100.20", "172.30.0.99"]
+
+
+async def test_login_rate_limit_cannot_be_bypassed_with_forwarded_headers() -> None:
+    """A direct caller gets one bucket even when it changes spoofed headers."""
+    from app.api.routes.auth import limiter
+    from app.main import app
+
+    limiter.reset()
+    original_enabled = limiter.enabled
+    limiter.enabled = True
+    transport = httpx.ASGITransport(app=app, client=("192.0.2.10", 12345))
+    try:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as test_client:
+            responses = [
+                await test_client.post(
+                    "/auth/login",
+                    json={"username": f"unknown-{index}", "password": "invalid"},
+                    headers={
+                        "X-Forwarded-For": f"198.51.100.{index}",
+                        "X-Real-IP": f"203.0.113.{index}",
+                    },
+                )
+                for index in range(6)
+            ]
+        assert [response.status_code for response in responses] == [401, 401, 401, 401, 401, 429]
+    finally:
+        limiter.reset()
+        limiter.enabled = original_enabled
+
+
+async def test_login_rate_limit_keeps_different_peer_ips_separate() -> None:
+    """One source exhausting its bucket does not throttle another source."""
+    from app.api.routes.auth import limiter
+    from app.main import app
+
+    limiter.reset()
+    original_enabled = limiter.enabled
+    limiter.enabled = True
+    try:
+        first_transport = httpx.ASGITransport(app=app, client=("192.0.2.10", 12345))
+        async with httpx.AsyncClient(
+            transport=first_transport, base_url="http://testserver"
+        ) as first_client:
+            for index in range(5):
+                response = await first_client.post(
+                    "/auth/login", json={"username": f"first-{index}", "password": "invalid"}
+                )
+                assert response.status_code == 401
+
+        second_transport = httpx.ASGITransport(app=app, client=("192.0.2.11", 12345))
+        async with httpx.AsyncClient(
+            transport=second_transport, base_url="http://testserver"
+        ) as second_client:
+            response = await second_client.post(
+                "/auth/login",
+                json={"username": "second-source", "password": "invalid"},
+                headers={"X-Forwarded-For": "198.51.100.99"},
+            )
+        assert response.status_code == 401
+    finally:
+        limiter.reset()
+        limiter.enabled = original_enabled

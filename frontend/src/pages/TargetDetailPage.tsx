@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   useTargetQuery,
   useTargetSnapshotsQuery,
+  useSnapshotQuery,
   useTargetBaselineSnapshotQuery,
   useTargetBaselinesQuery,
   useDemoteBaselineMutation,
@@ -13,7 +14,7 @@ import {
   useConfirmDefacedMutation,
   useConfigQuery,
 } from '../hooks/useTargetDetail';
-import { useUpdateTargetMutation, useDeleteTargetMutation } from '../hooks/useTargets';
+import { useUpdateTargetMutation, useDeleteTargetMutation, useTriggerCheckMutation } from '../hooks/useTargets';
 import { getSnapshotText } from '../api/snapshots';
 import { TargetStatusBadge } from '../components/TargetStatusBadge';
 import { ScreenshotCompare } from '../components/ScreenshotCompare';
@@ -40,7 +41,6 @@ export function TargetDetailPage() {
   const acknowledgeCheckMutation = useAcknowledgeCheckMutation();
   const confirmDefacedMutation = useConfirmDefacedMutation();
   const demoteBaselineMutation = useDemoteBaselineMutation();
-
   const [isBaselineModalOpen, setIsBaselineModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -48,13 +48,15 @@ export function TargetDetailPage() {
 
   const updateTargetMutation = useUpdateTargetMutation();
   const deleteTargetMutation = useDeleteTargetMutation();
+  const triggerCheckMutation = useTriggerCheckMutation();
+  const [triageError, setTriageError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
   const lastSignatureRef = useRef<{ targetId: string; signature: string | null } | null>(null);
 
   const latestCheckItem = checks?.[0];
-  const targetSignature = target ? `${target.status}:${target.updated_at}:${target.last_error ?? 'none'}` : '';
   const checkSignature = latestCheckItem ? `${latestCheckItem.id}:${latestCheckItem.acknowledged_at ?? 'null'}:${latestCheckItem.status}` : 'no-check';
+  const targetSignature = target ? `${target.status}:${target.updated_at}` : 'no-target';
   const currentSignature = target ? `${targetSignature}|${checkSignature}` : null;
 
   useEffect(() => {
@@ -76,24 +78,35 @@ export function TargetDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
   }, [currentSignature, targetId, queryClient]);
 
-  // Find baseline and latest snapshot
+  // A CheckResult is the sole source of snapshot IDs for an existing comparison.
   const latestSnapshot = snapshots?.[0] || null;
+  const compareBaselineId = latestCheckItem?.baseline_snapshot_id || baselineSnapshot?.id;
+  const compareCurrentId = latestCheckItem?.current_snapshot_id || baselineSnapshot?.id;
+
+  const cachedBaseline = [...baselines, ...(snapshots || [])].find(
+    (snapshot) => snapshot.id === compareBaselineId
+  );
+  const cachedCurrent = snapshots?.find((snapshot) => snapshot.id === compareCurrentId);
+  const baselineMetadataQuery = useSnapshotQuery(compareBaselineId, cachedBaseline);
+  const currentMetadataQuery = useSnapshotQuery(compareCurrentId, cachedCurrent);
+  const matchedBaseline = baselineMetadataQuery.data;
+  const currentSnapshot = currentMetadataQuery.data;
 
   // The latest snapshot may itself be the baseline; then one fetch covers both.
-  const isSameSnapshot = !!latestSnapshot?.id && latestSnapshot.id === baselineSnapshot?.id;
+  const isSameSnapshot = !!compareCurrentId && compareCurrentId === compareBaselineId;
 
   // Text retrieval queries. Note there is deliberately no `= ''` default: an
   // undefined artifact must stay distinguishable from one that loaded empty.
   const baselineTextQuery = useQuery({
-    queryKey: ['snapshotText', baselineSnapshot?.id],
-    queryFn: () => getSnapshotText(baselineSnapshot!.id),
-    enabled: !!baselineSnapshot?.id,
+    queryKey: ['snapshotText', compareBaselineId],
+    queryFn: () => getSnapshotText(compareBaselineId!),
+    enabled: !!compareBaselineId,
   });
 
   const latestTextQuery = useQuery({
-    queryKey: ['snapshotText', latestSnapshot?.id],
-    queryFn: () => getSnapshotText(latestSnapshot!.id),
-    enabled: !!latestSnapshot?.id && !isSameSnapshot,
+    queryKey: ['snapshotText', compareCurrentId],
+    queryFn: () => getSnapshotText(compareCurrentId!),
+    enabled: !!compareCurrentId && !isSameSnapshot,
   });
 
   const isTextLoading =
@@ -145,22 +158,30 @@ export function TargetDetailPage() {
   }
 
   const latestCheck = checks?.[0] || null;
-  const isOnceChecked = snapshots && snapshots.length === 1;
+  const isInitialBaseline = !latestCheck;
+  const latestCheckIsHistorical =
+    target.status === 'Failed' || target.status === 'Availability Issue';
+
+  const isChecking = target.status === 'Checking';
 
   const handleApproveBaseline = async () => {
-    if (!latestSnapshot) return;
+    const snapshotToApprove = currentSnapshot?.id;
+    if (!snapshotToApprove) return;
+    setTriageError(null);
     try {
       await approveBaselineMutation.mutateAsync({
         targetId: target.id,
-        snapshotId: latestSnapshot.id,
+        snapshotId: snapshotToApprove,
       });
     } catch (err) {
       console.error('Failed to approve baseline:', err);
+      setTriageError(err instanceof Error ? err.message : 'Failed to approve baseline');
     }
   };
 
   const handleAcknowledge = async () => {
     if (!latestCheck) return;
+    setTriageError(null);
     try {
       await acknowledgeCheckMutation.mutateAsync({
         targetId: target.id,
@@ -168,11 +189,13 @@ export function TargetDetailPage() {
       });
     } catch (err) {
       console.error('Failed to acknowledge check:', err);
+      setTriageError(err instanceof Error ? err.message : 'Failed to acknowledge check');
     }
   };
 
   const handleConfirmDefaced = async () => {
     if (!latestCheck) return;
+    setTriageError(null);
     try {
       await confirmDefacedMutation.mutateAsync({
         targetId: target.id,
@@ -180,6 +203,17 @@ export function TargetDetailPage() {
       });
     } catch (err) {
       console.error('Failed to confirm defacement:', err);
+      setTriageError(err instanceof Error ? err.message : 'Failed to confirm defacement');
+    }
+  };
+
+  const handleTriggerCheck = async () => {
+    setTriageError(null);
+    try {
+      await triggerCheckMutation.mutateAsync(target.id);
+    } catch (err) {
+      console.error('Failed to trigger check:', err);
+      setTriageError(err instanceof Error ? err.message : 'Failed to trigger check');
     }
   };
 
@@ -202,7 +236,9 @@ export function TargetDetailPage() {
     : '0.0%';
 
   // Determine which actions are available
-  const canApproveBaseline = latestSnapshot && !latestSnapshot.is_baseline;
+  const canApproveBaseline = Boolean(
+    latestCheck && currentSnapshot && !currentSnapshot.is_baseline && !isSameSnapshot
+  );
   const canAcknowledge = latestCheck && latestCheck.status === 'Changed' && !latestCheck.acknowledged_at;
   const canConfirmDefacement = latestCheck && latestCheck.status === 'Changed' && target.status !== 'Defaced';
 
@@ -217,6 +253,24 @@ export function TargetDetailPage() {
           <span className="transform group-hover:-translate-x-1 transition-transform">&larr;</span> Back to Dashboard
         </Link>
       </div>
+
+      {triageError && (
+        <div data-testid="triage-error-banner" className="mb-6 p-4 bg-rose-950/40 border border-rose-800/60 rounded-xl text-rose-300 text-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <svg className="h-5 w-5 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>{triageError}</span>
+          </div>
+          <button
+            onClick={() => setTriageError(null)}
+            className="text-rose-400 hover:text-rose-200 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-900/40 transition-colors"
+            title="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <header className="mb-10 flex flex-col md:flex-row md:items-start md:justify-between gap-6">
         <div>
@@ -239,6 +293,19 @@ export function TargetDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 mt-3">
+            <button
+              data-testid="detail-check-target-btn"
+              onClick={handleTriggerCheck}
+              disabled={isChecking || triggerCheckMutation.isPending || !target.is_active}
+              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-cyan-950/40 border border-cyan-700/60 text-cyan-300 hover:bg-cyan-900/60 hover:border-cyan-500 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+              title={isChecking ? 'Check in progress' : !target.is_active ? 'Target is disabled' : 'Check Target Now'}
+            >
+              <svg className={`w-4 h-4 ${isChecking || triggerCheckMutation.isPending ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {isChecking || triggerCheckMutation.isPending ? 'Checking...' : 'Check Now'}
+            </button>
+
             <button
               data-testid="detail-edit-target-btn"
               onClick={() => setIsEditModalOpen(true)}
@@ -282,16 +349,20 @@ export function TargetDetailPage() {
           {canApproveBaseline && (
             <button
               onClick={handleApproveBaseline}
-              disabled={approveBaselineMutation.isPending}
+              disabled={isChecking || approveBaselineMutation.isPending}
+              title={isChecking ? 'Cannot triage while check is in progress' : undefined}
               className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold text-sm rounded-lg px-4 py-2.5 transition-all shadow-md shadow-emerald-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {approveBaselineMutation.isPending ? 'Approving...' : 'Approve as Baseline'}
+              {approveBaselineMutation.isPending
+                ? 'Approving...'
+                : `Approve as Baseline (${currentSnapshot?.id})`}
             </button>
           )}
           {canAcknowledge && (
             <button
               onClick={handleAcknowledge}
-              disabled={acknowledgeCheckMutation.isPending}
+              disabled={isChecking || acknowledgeCheckMutation.isPending}
+              title={isChecking ? 'Cannot triage while check is in progress' : undefined}
               className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-semibold text-sm rounded-lg px-4 py-2.5 transition-all shadow-md shadow-indigo-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {acknowledgeCheckMutation.isPending ? 'Acknowledging...' : 'Acknowledge Change'}
@@ -300,7 +371,8 @@ export function TargetDetailPage() {
           {canConfirmDefacement && (
             <button
               onClick={handleConfirmDefaced}
-              disabled={confirmDefacedMutation.isPending}
+              disabled={isChecking || confirmDefacedMutation.isPending}
+              title={isChecking ? 'Cannot triage while check is in progress' : undefined}
               className="bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white font-semibold text-sm rounded-lg px-4 py-2.5 transition-all shadow-md shadow-rose-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {confirmDefacedMutation.isPending ? 'Confirming...' : 'Confirm Defacement'}
@@ -309,7 +381,6 @@ export function TargetDetailPage() {
         </div>
       </header>
 
-      {/* Target Status Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Baseline Snapshot Card */}
         <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-xl shadow-lg flex flex-col justify-between min-w-0">
@@ -320,19 +391,25 @@ export function TargetDetailPage() {
                 {baselines.length} / 20 Active
               </span>
             </div>
-            {baselineSnapshot ? (
+            {baselineMetadataQuery.isError ? (
+              <p className="text-rose-400 text-sm">Baseline metadata unavailable. Retry the page.</p>
+            ) : baselineMetadataQuery.isLoading ? (
+              <p className="text-slate-500 text-sm">Loading baseline metadata...</p>
+            ) : matchedBaseline ? (
               <div className="space-y-3 text-sm">
                 <div>
-                  <span className="text-slate-500 block text-xs">Primary Baseline ID</span>
-                  <span className="font-mono text-slate-300 text-xs break-all">{baselineSnapshot.id}</span>
+                  <span className="text-slate-500 block text-xs">
+                    {latestCheck ? 'Compared Baseline ID' : 'Primary Baseline ID'}
+                  </span>
+                  <span className="font-mono text-slate-300 text-xs break-all">{matchedBaseline.id}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-xs">Captured At</span>
-                  <span className="text-slate-300">{formatDateTime(baselineSnapshot.captured_at)}</span>
+                  <span className="text-slate-300">{formatDateTime(matchedBaseline.captured_at)}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-xs">Page Title</span>
-                  <span className="text-slate-300 italic break-words">{baselineSnapshot.title || 'No Title'}</span>
+                  <span className="text-slate-300 italic break-words">{matchedBaseline.title || 'No Title'}</span>
                 </div>
               </div>
             ) : (
@@ -357,7 +434,39 @@ export function TargetDetailPage() {
         {/* Latest Snapshot Card */}
         <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-xl shadow-lg min-w-0">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Info</h3>
-          {latestSnapshot ? (
+          {latestCheck && isSameSnapshot ? (
+            <div className="space-y-3 text-sm">
+              <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-950/80 border border-emerald-800/60 text-emerald-400">
+                Matched Baseline (Clean)
+              </div>
+              <div>
+                <span className="text-slate-500 block text-xs">Referenced Baseline ID</span>
+                <span className="font-mono text-slate-300 text-xs break-all">{compareBaselineId}</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Latest check detected no changes. Live capture matched baseline and was discarded.
+              </p>
+            </div>
+          ) : currentMetadataQuery.isError ? (
+            <p className="text-rose-400 text-sm">Snapshot metadata unavailable. Retry the page.</p>
+          ) : currentMetadataQuery.isLoading ? (
+            <p className="text-slate-500 text-sm">Loading snapshot metadata...</p>
+          ) : currentSnapshot ? (
+            <div className="space-y-3 text-sm">
+              <div>
+                <span className="text-slate-500 block text-xs">Snapshot ID</span>
+                <span className="font-mono text-slate-300 text-xs break-all">{currentSnapshot.id}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-xs">Captured At</span>
+                <span className="text-slate-300">{formatDateTime(currentSnapshot.captured_at)}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-xs">Page Title</span>
+                <span className="text-slate-300 italic break-words">{currentSnapshot.title || 'No Title'}</span>
+              </div>
+            </div>
+          ) : latestSnapshot ? (
             <div className="space-y-3 text-sm">
               <div>
                 <span className="text-slate-500 block text-xs">Snapshot ID</span>
@@ -380,9 +489,16 @@ export function TargetDetailPage() {
         {/* Latest Check Card */}
         <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-xl shadow-lg flex flex-col justify-between min-w-0">
           <div>
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Latest Check Results</h3>
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
+              {latestCheckIsHistorical ? 'Last Successful Comparison' : 'Latest Check Results'}
+            </h3>
             {latestCheck ? (
               <div className="space-y-3 text-sm">
+                {latestCheckIsHistorical && (
+                  <p className="text-xs text-amber-400">
+                    The current check failed. These results are from {formatDateTime(latestCheck.created_at)}.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <span className="text-slate-500 block text-xs">Text Score</span>
@@ -419,7 +535,7 @@ export function TargetDetailPage() {
                   </p>
                 </div>
               </div>
-            ) : isOnceChecked ? (
+            ) : isInitialBaseline ? (
               <div className="text-slate-400 text-sm leading-relaxed">
                 <p className="font-semibold text-slate-300 mb-1">Initial Baseline Capture</p>
                 <p className="text-xs text-slate-500">
@@ -447,14 +563,14 @@ export function TargetDetailPage() {
       {/* Screenshot Compare Component */}
       <div className="mb-8">
         <ScreenshotCompare
-          baselineSnapshotId={baselineSnapshot?.id}
-          currentSnapshotId={latestSnapshot?.id}
+          baselineSnapshotId={compareBaselineId}
+          currentSnapshotId={compareCurrentId}
         />
       </div>
 
       {/* Text Diff Component */}
       <div>
-        {isOnceChecked ? (
+        {isInitialBaseline ? (
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-6 text-center text-slate-500 font-mono text-sm">
             This is the initial snapshot. No differences to calculate.
           </div>

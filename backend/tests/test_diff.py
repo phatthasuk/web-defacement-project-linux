@@ -69,9 +69,12 @@ def test_compare_snapshot_artifacts_summarizes_no_change(tmp_path: Path):
 
     assert result.text_change_score == 0.0
     assert result.visual_change_score == 0.0
-    # No HTML artifacts were passed, so the structural detector stays silent.
+    # No HTML artifacts were passed, so structural detector reports unavailable.
     assert result.structure_change_score == 0.0
-    assert result.summary == "No text, visual or structural changes detected."
+    assert result.structure_available is False
+    assert result.summary == (
+        "No text or visual changes detected. Structural comparison unavailable."
+    )
 
 
 def make_work_dir(tmp_path: Path) -> Path:

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    ROOT_PATH: str = ""
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # Session cookie behaviour is centralised here so login, logout, and tests

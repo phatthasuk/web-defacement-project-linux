@@ -63,9 +63,11 @@ export function useTriggerCheckMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (targetId: string) => triggerCheck(targetId),
-    onSuccess: () => {
+    onSuccess: (_data, targetId) => {
       queryClient.invalidateQueries({ queryKey: TARGETS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
       queryClient.refetchQueries({ queryKey: TARGETS_QUERY_KEY, type: 'active' });
+      queryClient.refetchQueries({ queryKey: ['targets', targetId], type: 'active' });
     },
   });
 }

@@ -10,7 +10,9 @@ export class ApiError extends Error {
   }
 }
 
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Production uses the same origin and lets Nginx proxy /api to FastAPI.
+// Development may override this with VITE_API_BASE_URL in frontend/.env.
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const CSRF_HEADER = 'X-CSRF-Token';
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);

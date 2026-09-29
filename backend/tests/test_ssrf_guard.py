@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 from app.core.config import Settings
-from app.core.errors import SsrfBlockedError
+from app.core.errors import DnsResolutionError, SsrfBlockedError
 from app.core.ssrf_guard import validate_url
 
 
@@ -34,6 +34,9 @@ def test_validate_url_blocks_private_and_non_public_ranges():
         "::1",
         "fc00::1",
         "fe80::1",
+        "100.64.0.1",
+        "100.127.255.254",
+        "198.18.0.1",
     ]
 
     for address in blocked_addresses:
@@ -87,8 +90,8 @@ def test_validate_url_fails_closed_on_dns_error():
     ):
         try:
             validate_url("https://missing.example", Settings())
-        except SsrfBlockedError as exc:
-            assert "failed to resolve" in str(exc)
+        except DnsResolutionError as exc:
+            assert "DNS resolution failed" in str(exc)
         else:
             raise AssertionError("Expected DNS failure to be blocked")
 

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.status import (
     STATUS_ACKNOWLEDGED,
     STATUS_CHANGED,
@@ -18,6 +18,7 @@ from app.core.status import (
 )
 from app.models import CheckResult, Snapshot, Target
 from app.services.checks import prune_baselines
+from app.services.concurrency import is_target_in_flight
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,8 @@ def approve_baseline(
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
 
-    if target.status == STATUS_CHECKING:
-        raise ValidationError("Cannot approve a baseline while a check is in progress")
+    if target.status == STATUS_CHECKING or is_target_in_flight(target_id):
+        raise ConflictError("Cannot approve a baseline while a check is in progress")
 
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None:

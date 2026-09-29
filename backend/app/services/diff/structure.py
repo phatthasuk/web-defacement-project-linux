@@ -85,8 +85,17 @@ class _StructureParser(HTMLParser):
         self.stylesheet_hrefs: list[str] = []
         self.meta_refreshes: list[str] = []
         self.link_hrefs: list[str] = []
-        self._inline_script_parts: list[str] = []
+        self.inline_scripts: list[str] = []
+        self._current_inline_chunks: list[str] = []
         self._in_inline_script = False
+
+    def _flush_inline_script(self) -> None:
+        if self._in_inline_script:
+            body = "".join(self._current_inline_chunks).strip()
+            if body:
+                self.inline_scripts.append(body)
+            self._current_inline_chunks = []
+            self._in_inline_script = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = {name.lower(): (value or "") for name, value in attrs}
@@ -96,7 +105,9 @@ class _StructureParser(HTMLParser):
             if src:
                 self.script_srcs.append(src)
             else:
+                self._flush_inline_script()
                 self._in_inline_script = True
+                self._current_inline_chunks = []
         elif tag == "iframe":
             src = attributes.get("src", "").strip()
             if src:
@@ -123,15 +134,15 @@ class _StructureParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "script":
-            self._in_inline_script = False
+            self._flush_inline_script()
 
     def handle_data(self, data: str) -> None:
-        if self._in_inline_script and data.strip():
-            self._inline_script_parts.append(data.strip())
+        if self._in_inline_script:
+            self._current_inline_chunks.append(data)
 
-    @property
-    def inline_scripts(self) -> list[str]:
-        return self._inline_script_parts
+    def close(self) -> None:
+        super().close()
+        self._flush_inline_script()
 
 
 @dataclass(frozen=True)
@@ -140,6 +151,7 @@ class StructureDiff:
     added: tuple[str, ...] = ()
     removed: tuple[str, ...] = ()
     summary: str = ""
+    available: bool = True
 
     @property
     def changed(self) -> bool:

@@ -1,15 +1,18 @@
+import asyncio
 import math
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from PIL import Image
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.core.errors import SsrfBlockedError
+from app.core.errors import DnsResolutionError, SsrfBlockedError
 from app.core.status import (
     STATUS_AVAILABILITY_ISSUE,
     STATUS_CHANGED,
@@ -147,6 +150,29 @@ async def test_run_target_check_reports_ssrf_block_as_failed(tmp_path: Path):
     assert result.status == STATUS_FAILED
     assert result.error == "Blocked by SSRF guard: metadata address"
     assert target.status == STATUS_FAILED
+
+
+async def test_run_target_check_dns_failure_recorded_as_availability_issue(tmp_path: Path):
+    work_dir = make_work_dir("checks-dns", tmp_path)
+    db = make_session()
+    target = Target(name="Example", url="https://nonexistent.invalid")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    async def fake_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        raise DnsResolutionError("DNS resolution failed for host nonexistent.invalid")
+
+    result = await run_target_check(
+        db,
+        target,
+        Settings(DATA_DIR=str(work_dir)),
+        capture_func=fake_capture,
+    )
+
+    assert result.status == STATUS_AVAILABILITY_ISSUE
+    assert "DNS resolution failed" in (result.error or "")
+    assert target.status == STATUS_AVAILABILITY_ISSUE
 
 
 async def test_run_target_check_commits_checking_before_capture(tmp_path: Path):
@@ -681,6 +707,86 @@ async def test_run_target_check_ignores_allowlisted_third_party(tmp_path: Path):
     assert result.status == STATUS_OK
 
 
+async def test_run_target_check_fails_when_structural_artifact_missing(tmp_path: Path):
+    """When a baseline has missing/unreadable HTML, check must fail rather than score 0.0 / OK."""
+    work_dir = make_work_dir("checks-structure-missing", tmp_path)
+    db = make_session()
+    target = Target(name="Example", url="https://example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    cap1 = _write_capture_with_html(work_dir, "b1", "Clean", "white", "<h1>Clean</h1>")
+    settings = Settings(DATA_DIR=str(work_dir))
+
+    async def fake_cap1(*args):
+        return cap1
+
+    await run_target_check(db, target, settings, capture_func=fake_cap1)
+
+    baseline_snapshot = db.scalar(
+        select(Snapshot).where(Snapshot.target_id == target.id, Snapshot.is_baseline.is_(True))
+    )
+    assert baseline_snapshot is not None
+    Path(baseline_snapshot.html_path).unlink()
+
+    cap2 = _write_capture_with_html(work_dir, "c2", "Clean", "white", "<h1>Clean</h1>")
+
+    async def fake_cap2(*args):
+        return cap2
+
+    result = await run_target_check(db, target, settings, capture_func=fake_cap2)
+
+    assert result.status == STATUS_FAILED
+    assert "Structural comparison unavailable" in (result.error or "")
+    assert target.status == STATUS_FAILED
+
+
+async def test_multi_baseline_missing_html_does_not_win_over_injected_baseline(tmp_path: Path):
+    """Missing baseline HTML must not score 0.0 and win over injection-detecting baseline."""
+    work_dir = make_work_dir("checks-structure-multi", tmp_path)
+    db = make_session()
+    target = Target(name="Example", url="https://example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    cap1 = _write_capture_with_html(work_dir, "b1", "Clean", "white", "<h1>Clean</h1>")
+    settings = Settings(DATA_DIR=str(work_dir))
+
+    async def fake_cap1(*args):
+        return cap1
+
+    await run_target_check(db, target, settings, capture_func=fake_cap1)
+
+    cap2 = _write_capture_with_html(work_dir, "b2", "Clean2", "white", "<h1>Clean2</h1>")
+
+    async def fake_cap2(*args):
+        return cap2
+
+    await run_target_check(db, target, settings, capture_func=fake_cap2)
+    snap2 = db.scalar(select(Snapshot).where(Snapshot.id == cap2.id))
+    assert snap2 is not None
+    snap2.is_baseline = True
+    db.commit()
+
+    snap1 = db.scalar(select(Snapshot).where(Snapshot.id == cap1.id))
+    assert snap1 is not None
+    Path(snap1.html_path).unlink()
+
+    cap3 = _write_capture_with_html(
+        work_dir, "c3", "Clean2", "white", '<h1>Clean2</h1><script src="https://evil.example.net/p.js"></script>'
+    )
+
+    async def fake_cap3(*args):
+        return cap3
+
+    result = await run_target_check(db, target, settings, capture_func=fake_cap3)
+
+    assert result.status == STATUS_FAILED
+    assert "Structural comparison unavailable" in (result.error or "")
+
+
 def _write_staged_capture(out_dir: Path, snapshot_id: str, text: str, color: str) -> CaptureResult:
     staging_dir = out_dir / "staging" / snapshot_id
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -893,3 +999,262 @@ def test_reconcile_artifacts_purges_expired_staging_and_orphans(tmp_path: Path):
     assert not orphan_file.exists()
     assert not expired_staging.exists()
 
+
+def test_sqlite_foreign_keys_pragma(tmp_path: Path):
+    from sqlalchemy import event
+
+    from app.db.session import set_sqlite_pragmas
+
+    test_engine = create_engine(f"sqlite:///{tmp_path / 'pragma.db'}")
+    event.listen(test_engine, "connect", set_sqlite_pragmas)
+    with test_engine.connect() as conn:
+        result = conn.exec_driver_sql("PRAGMA foreign_keys").scalar()
+        assert result == 1
+
+
+def test_sqlite_foreign_keys_restrict_parent_delete():
+    db = make_session()
+    target = Target(name="FK Parent", url="https://parent.example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    snapshot = Snapshot(
+        id="referenced-snapshot",
+        target_id=target.id,
+        final_url=target.url,
+        screenshot_path="shot.png",
+        text_path="text.txt",
+        html_path="page.html",
+        is_baseline=True,
+    )
+    db.add(snapshot)
+    db.commit()
+
+    db.delete(target)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+async def test_run_target_check_cleans_staging_on_cancellation(tmp_path: Path):
+    work_dir = tmp_path / "cancel-test"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    db = make_session()
+    target = Target(name="Cancel Target", url="https://cancel.example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    staging = work_dir / "staging" / "test-cancel-staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "shot.png").write_text("dummy")
+
+    async def fake_capture_cancelling(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return CaptureResult(
+            id="cancel-snap",
+            url=url,
+            final_url=url,
+            http_status=200,
+            title="Cancel",
+            screenshot_path=str(staging / "shot.png"),
+            text_path="",
+            html_path="",
+            redirect_count=0,
+            staging_dir=str(staging),
+        )
+
+    # Monkeypatch get_baseline_snapshot to raise CancelledError simulating task cancellation
+    with pytest.MonkeyPatch.context() as mp:
+        def raise_cancel(*args, **kwargs):
+            raise asyncio.CancelledError("Simulated task cancellation")
+
+        mp.setattr("app.services.checks.get_baseline_snapshot", raise_cancel)
+
+        with pytest.raises(asyncio.CancelledError):
+            await run_target_check(
+                db,
+                target,
+                Settings(DATA_DIR=str(work_dir)),
+                capture_func=fake_capture_cancelling,
+            )
+
+    # Verify staging directory was removed by the finally block
+    assert not staging.exists()
+
+
+async def test_run_target_check_foreign_key_ordering_on_change(tmp_path: Path):
+    work_dir = make_work_dir("checks-fk-change", tmp_path)
+    db = make_session()
+    target = Target(name="FK Change Target", url="https://fk.example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    captures = [
+        write_capture(work_dir, "base-snap", "Baseline text", "white"),
+        write_capture(work_dir, "curr-snap", "Changed text", "black"),
+    ]
+
+    async def fake_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return captures.pop(0)
+
+    settings = Settings(DATA_DIR=str(work_dir))
+    first_res = await run_target_check(db, target, settings, capture_func=fake_capture)
+    assert first_res.status == STATUS_OK
+    assert first_res.snapshot is not None
+
+    second_res = await run_target_check(db, target, settings, capture_func=fake_capture)
+    assert second_res.status == STATUS_CHANGED
+    assert second_res.snapshot is not None
+    assert second_res.check_result is not None
+    assert second_res.check_result.current_snapshot_id == second_res.snapshot.id
+    assert second_res.check_result.baseline_snapshot_id == first_res.snapshot.id
+
+    # Verify both snapshots exist in the database satisfying foreign keys
+    assert db.get(Snapshot, second_res.check_result.current_snapshot_id) is not None
+    assert db.get(Snapshot, second_res.check_result.baseline_snapshot_id) is not None
+
+
+def test_check_result_foreign_key_violation_on_invalid_snapshot_id():
+    db = make_session()
+    target = Target(name="FK Violation Target", url="https://violate.example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    bad_check = CheckResult(
+        target_id=target.id,
+        baseline_snapshot_id=str(uuid4()),
+        current_snapshot_id=str(uuid4()),
+        status=STATUS_CHANGED,
+        text_change_score=0.5,
+        visual_change_score=0.5,
+        structure_change_score=0.5,
+        summary="Violation test",
+    )
+    db.add(bad_check)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+async def test_run_target_check_rollback_and_promoted_files_cleanup_on_commit_error(tmp_path: Path):
+    work_dir = make_work_dir("checks-rollback-clean", tmp_path)
+    db = make_session()
+    target = Target(name="Rollback Target", url="https://rollback.example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    # Establish baseline
+    base_cap = write_capture(work_dir, "base-snap", "Initial", "white")
+
+    async def fake_base_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return base_cap
+
+    settings = Settings(DATA_DIR=str(work_dir))
+    await run_target_check(db, target, settings, capture_func=fake_base_capture)
+
+    # Prepare changed capture in staging
+    staging = work_dir / "staging" / "test-change-staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    shot_file = staging / "curr-snap.png"
+    text_file = staging / "curr-snap.txt"
+    html_file = staging / "curr-snap.html"
+    Image.new("RGB", (2, 2), "black").save(shot_file)
+    text_file.write_text("Defaced text content")
+    html_file.write_text("<html><body>Defaced text content</body></html>")
+
+    curr_cap = CaptureResult(
+        id="curr-snap",
+        url=target.url,
+        final_url=target.url,
+        http_status=200,
+        title="Defaced",
+        screenshot_path=str(shot_file),
+        text_path=str(text_file),
+        html_path=str(html_file),
+        redirect_count=0,
+        staging_dir=str(staging),
+    )
+
+    async def fake_change_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return curr_cap
+
+    orig_commit = db.commit
+    commit_count = 0
+
+    def failing_commit():
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 2:
+            raise RuntimeError("Simulated DB commit error during changed check")
+        orig_commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(db, "commit", failing_commit)
+        result = await run_target_check(db, target, settings, capture_func=fake_change_capture)
+
+    assert result.status == STATUS_FAILED
+    assert "Simulated DB commit error" in (result.error or "")
+    assert target.status == STATUS_FAILED
+
+    # Promoted permanent files should have been cleaned up!
+    perm_shot = work_dir / "screenshots" / "curr-snap.png"
+    perm_text = work_dir / "text" / "curr-snap.txt"
+    perm_html = work_dir / "html" / "curr-snap.html"
+    assert not perm_shot.exists()
+    assert not perm_text.exists()
+    assert not perm_html.exists()
+
+
+async def test_run_target_check_keeps_committed_artifacts_when_refresh_fails(tmp_path: Path):
+    work_dir = make_work_dir("checks-refresh-failure", tmp_path)
+    db = make_session()
+    target = Target(name="Refresh Failure Target", url="https://refresh.example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    staging = work_dir / "staging" / "committed-snap"
+    staging.mkdir(parents=True, exist_ok=True)
+    shot_file = staging / "committed-snap.png"
+    text_file = staging / "committed-snap.txt"
+    html_file = staging / "committed-snap.html"
+    Image.new("RGB", (2, 2), "white").save(shot_file)
+    text_file.write_text("Committed baseline", encoding="utf-8")
+    html_file.write_text("<html><body>Committed baseline</body></html>", encoding="utf-8")
+
+    capture = CaptureResult(
+        id="committed-snap",
+        url=target.url,
+        final_url=target.url,
+        http_status=200,
+        title="Committed",
+        screenshot_path=str(shot_file),
+        text_path=str(text_file),
+        html_path=str(html_file),
+        redirect_count=0,
+        staging_dir=str(staging),
+    )
+
+    async def fake_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return capture
+
+    with pytest.MonkeyPatch.context() as mp:
+        def fail_refresh(*args, **kwargs):
+            raise RuntimeError("Simulated refresh failure after commit")
+
+        mp.setattr(db, "refresh", fail_refresh)
+        result = await run_target_check(
+            db,
+            target,
+            Settings(DATA_DIR=str(work_dir)),
+            capture_func=fake_capture,
+        )
+
+    assert result.status == STATUS_OK
+    assert db.get(Snapshot, "committed-snap") is not None
+    assert (work_dir / "screenshots" / "committed-snap.png").is_file()
+    assert (work_dir / "text" / "committed-snap.txt").is_file()
+    assert (work_dir / "html" / "committed-snap.html").is_file()

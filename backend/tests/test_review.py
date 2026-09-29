@@ -315,6 +315,30 @@ def test_approve_baseline_while_checking_raises_validation_error():
         raise AssertionError("Expected approve_baseline while Checking to raise ValidationError")
 
 
+def test_approve_baseline_while_in_flight_raises_conflict():
+    from app.core.errors import ConflictError
+    from app.services.concurrency import _in_flight_targets
+
+    db = make_session()
+    target = create_target(db, status=STATUS_CHANGED)
+    create_snapshot(db, target.id, "baseline-in-flight", is_baseline=True)
+    candidate = create_snapshot(db, target.id, "candidate-in-flight", is_baseline=False)
+
+    _in_flight_targets.add(target.id)
+    try:
+        try:
+            approve_baseline(db, target.id, candidate.id)
+        except ConflictError as exc:
+            assert "while a check is in progress" in str(exc)
+        else:
+            raise AssertionError("Expected in-flight baseline approval to be rejected")
+    finally:
+        _in_flight_targets.discard(target.id)
+
+    db.refresh(candidate)
+    assert candidate.is_baseline is False
+
+
 
 
 def test_approve_baseline_demotes_oldest_beyond_the_cap():
@@ -453,4 +477,3 @@ def test_approve_baseline_transitions_from_defaced_and_acknowledged():
     db.refresh(chk2)
     assert target_ack.status == STATUS_OK
     assert chk2.acknowledged_at is not None
-

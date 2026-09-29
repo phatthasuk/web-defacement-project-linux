@@ -4,11 +4,13 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { useQuery } from '@tanstack/react-query';
 import { TargetDetailPage } from './TargetDetailPage';
 import * as useTargetDetailHooks from '../hooks/useTargetDetail';
+import * as useTargetsHooks from '../hooks/useTargets';
 
 // Mock the hooks
 vi.mock('../hooks/useTargetDetail', () => ({
   useTargetQuery: vi.fn(),
   useTargetSnapshotsQuery: vi.fn(),
+  useSnapshotQuery: vi.fn(),
   useTargetBaselineSnapshotQuery: vi.fn(),
   useTargetBaselinesQuery: vi.fn(),
   useDemoteBaselineMutation: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock('../hooks/useTargetDetail', () => ({
 vi.mock('../hooks/useTargets', () => ({
   useUpdateTargetMutation: vi.fn().mockReturnValue({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteTargetMutation: vi.fn().mockReturnValue({ mutateAsync: vi.fn(), isPending: false }),
+  useTriggerCheckMutation: vi.fn().mockReturnValue({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // Mock react-query useQuery for text diff fetching
@@ -88,6 +91,7 @@ describe('TargetDetailPage', () => {
   const mockMutateAsyncApprove = vi.fn();
   const mockMutateAsyncAcknowledge = vi.fn();
   const mockMutateAsyncConfirmDefaced = vi.fn();
+  const mockMutateAsyncTriggerCheck = vi.fn();
 
   const useQueryMock = useQuery as unknown as Mock;
 
@@ -130,6 +134,12 @@ describe('TargetDetailPage', () => {
       isLoading: false,
     } as unknown as ReturnType<typeof useTargetDetailHooks.useTargetSnapshotsQuery>);
 
+    vi.mocked(useTargetDetailHooks.useSnapshotQuery).mockImplementation((snapshotId) => ({
+      data: mockSnapshots.find((snapshot) => snapshot.id === snapshotId),
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useSnapshotQuery>));
+
     vi.mocked(useTargetDetailHooks.useTargetBaselineSnapshotQuery).mockReturnValue({
       data: mockSnapshots[1],
       isLoading: false,
@@ -164,6 +174,11 @@ describe('TargetDetailPage', () => {
       mutateAsync: mockMutateAsyncConfirmDefaced,
       isPending: false,
     } as unknown as ReturnType<typeof useTargetDetailHooks.useConfirmDefacedMutation>);
+
+    vi.mocked(useTargetsHooks.useTriggerCheckMutation).mockReturnValue({
+      mutateAsync: mockMutateAsyncTriggerCheck,
+      isPending: false,
+    } as unknown as ReturnType<typeof useTargetsHooks.useTriggerCheckMutation>);
 
     vi.mocked(useTargetDetailHooks.useConfigQuery).mockReturnValue({
       data: { text_change_threshold: 0.02, visual_change_threshold: 0.01, structure_change_threshold: 0.0 },
@@ -207,6 +222,40 @@ describe('TargetDetailPage', () => {
     });
   });
 
+  it('does not fall back to approving an unrelated latest snapshot', () => {
+    vi.mocked(useTargetDetailHooks.useSnapshotQuery).mockImplementation((snapshotId) => ({
+      data: snapshotId === 'snap-baseline' ? mockSnapshots[1] : undefined,
+      isLoading: false,
+      isError: snapshotId === 'snap-latest',
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useSnapshotQuery>));
+
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>
+    );
+
+    expect(screen.queryByRole('button', { name: /Approve as Baseline/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Snapshot metadata unavailable/i)).toBeInTheDocument();
+  });
+
+  it('labels a stored comparison as historical when the current check failed', () => {
+    vi.mocked(useTargetDetailHooks.useTargetQuery).mockReturnValue({
+      data: { ...mockTarget, status: 'Failed', last_error: 'Capture timed out' },
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useTargetQuery>);
+
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>
+    );
+
+    expect(screen.getByText('Last Successful Comparison')).toBeInTheDocument();
+    expect(screen.getByText(/The current check failed/i)).toBeInTheDocument();
+  });
+
   it('calls acknowledgeCheck when clicking Acknowledge Change button', async () => {
     render(
       <BrowserRouter>
@@ -241,6 +290,77 @@ describe('TargetDetailPage', () => {
         checkId: 'check-1',
       });
     });
+  });
+
+  it('calls triggerCheck when clicking Check Now button', async () => {
+    mockMutateAsyncTriggerCheck.mockResolvedValueOnce({ status: 'queued' });
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>
+    );
+
+    const checkBtn = screen.getByTestId('detail-check-target-btn');
+    expect(checkBtn).toBeInTheDocument();
+    expect(checkBtn).not.toBeDisabled();
+    fireEvent.click(checkBtn);
+
+    await waitFor(() => {
+      expect(mockMutateAsyncTriggerCheck).toHaveBeenCalledWith('target-1');
+    });
+  });
+
+  it('disables triage actions and Check Now button when target is Checking', () => {
+    vi.mocked(useTargetDetailHooks.useTargetQuery).mockReturnValue({
+      data: { ...mockTarget, status: 'Checking' },
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useTargetQuery>);
+
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>
+    );
+
+    const checkBtn = screen.getByTestId('detail-check-target-btn');
+    expect(checkBtn).toBeDisabled();
+    expect(checkBtn).toHaveTextContent(/Checking.../i);
+
+    const approveBtn = screen.getByRole('button', { name: /Approve as Baseline/i });
+    expect(approveBtn).toBeDisabled();
+    expect(approveBtn).toHaveAttribute('title', 'Cannot triage while check is in progress');
+
+    const ackBtn = screen.getByRole('button', { name: /Acknowledge Change/i });
+    expect(ackBtn).toBeDisabled();
+    expect(ackBtn).toHaveAttribute('title', 'Cannot triage while check is in progress');
+
+    const defacedBtn = screen.getByRole('button', { name: /Confirm Defacement/i });
+    expect(defacedBtn).toBeDisabled();
+    expect(defacedBtn).toHaveAttribute('title', 'Cannot triage while check is in progress');
+  });
+
+  it('displays and dismisses triage error banner when triage mutation fails', async () => {
+    mockMutateAsyncApprove.mockRejectedValueOnce(new Error('Backend triage failed'));
+
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>
+    );
+
+    const approveBtn = screen.getByRole('button', { name: /Approve as Baseline/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('triage-error-banner')).toBeInTheDocument();
+      expect(screen.getByText('Backend triage failed')).toBeInTheDocument();
+    });
+
+    const dismissBtn = screen.getByRole('button', { name: /Dismiss/i });
+    fireEvent.click(dismissBtn);
+
+    expect(screen.queryByTestId('triage-error-banner')).not.toBeInTheDocument();
   });
 
   // --- Artifact retrieval failures must never read as "unchanged" (Finding 4) ---

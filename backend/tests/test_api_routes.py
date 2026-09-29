@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -120,6 +121,9 @@ async def test_double_check_trigger_skips_in_flight_duplicate(
 
     assert first_response.status_code == 202
     assert second_response.status_code == 202
+    results = [first_response.json(), second_response.json()]
+    assert {"target_id": target_id, "accepted": True} in results
+    assert {"target_id": target_id, "accepted": False} in results
     assert api_capture_calls == ["https://93.184.216.34"]
 
 
@@ -168,6 +172,7 @@ async def test_checks_and_snapshots_read_paths(
     text_response = await client.get(f"/snapshots/{snapshot_id}/text")
     assert text_response.status_code == 200
     assert text_response.text == "hello"
+    assert "charset=utf-8" in text_response.headers["content-type"].lower()
 
     Path(capture.text_path).unlink()
     missing_file_response = await client.get(f"/snapshots/{snapshot_id}/text")
@@ -175,6 +180,38 @@ async def test_checks_and_snapshots_read_paths(
 
     assert (await client.get(f"/checks/{uuid4()}")).status_code == 404
     assert (await client.get(f"/snapshots/{uuid4()}")).status_code == 404
+
+
+async def test_snapshot_artifact_rejects_path_traversal(
+    client: httpx.AsyncClient,
+    api_session_factory: Callable[[], Session],
+    tmp_path: Path,
+):
+    target_id = await create_target(client)
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("secret outside data", encoding="utf-8")
+
+    snapshot_id = str(uuid4())
+    with api_session_factory() as db:
+        snapshot = Snapshot(
+            id=snapshot_id,
+            target_id=target_id,
+            final_url="https://93.184.216.34",
+            http_status=200,
+            title="Traversal Attempt",
+            screenshot_path=str(outside_file),
+            text_path=str(outside_file),
+            html_path=str(outside_file),
+            is_baseline=True,
+        )
+        db.add(snapshot)
+        db.commit()
+
+    screenshot_res = await client.get(f"/snapshots/{snapshot_id}/screenshot")
+    assert screenshot_res.status_code == 404
+
+    text_res = await client.get(f"/snapshots/{snapshot_id}/text")
+    assert text_res.status_code == 404
 
 
 async def test_review_flow_end_to_end(
@@ -520,6 +557,82 @@ async def test_list_and_demote_target_baselines(
     assert demote_404.status_code == 404
 
 
+async def test_demote_fails_with_conflict_when_target_is_checking(
+    client: httpx.AsyncClient,
+    api_session_factory,
+):
+    target_id = await create_target(client)
+    with api_session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None
+        target.status = STATUS_CHECKING
+        s1 = Snapshot(
+            id="s-base-check-1",
+            target_id=target_id,
+            final_url="https://93.184.216.34",
+            http_status=200,
+            title="Ex 1",
+            screenshot_path="m1.png",
+            text_path="m1.txt",
+            html_path="m1.html",
+            is_baseline=True,
+        )
+        s2 = Snapshot(
+            id="s-base-check-2",
+            target_id=target_id,
+            final_url="https://93.184.216.34",
+            http_status=200,
+            title="Ex 2",
+            screenshot_path="m2.png",
+            text_path="m2.txt",
+            html_path="m2.html",
+            is_baseline=True,
+        )
+        db.add_all([s1, s2])
+        db.commit()
+
+    resp = await client.post(f"/targets/{target_id}/baselines/s-base-check-1/demote")
+    assert resp.status_code == 409
+    assert "Cannot demote baseline while check is in progress" in resp.json()["detail"]
+
+
+async def test_demote_fails_with_conflict_while_target_is_queued_in_flight(
+    client: httpx.AsyncClient,
+    api_session_factory,
+):
+    from app.services.concurrency import _in_flight_targets
+
+    target_id = await create_target(client)
+    with api_session_factory() as db:
+        db.add_all([
+            Snapshot(
+                id=f"queued-base-{index}",
+                target_id=target_id,
+                final_url="https://93.184.216.34",
+                http_status=200,
+                title=f"Baseline {index}",
+                screenshot_path=f"queued-{index}.png",
+                text_path=f"queued-{index}.txt",
+                html_path=f"queued-{index}.html",
+                is_baseline=True,
+            )
+            for index in (1, 2)
+        ])
+        db.commit()
+
+    _in_flight_targets.add(target_id)
+    try:
+        response = await client.post(f"/targets/{target_id}/baselines/queued-base-1/demote")
+    finally:
+        _in_flight_targets.discard(target_id)
+
+    assert response.status_code == 409
+    with api_session_factory() as db:
+        snapshot = db.get(Snapshot, "queued-base-1")
+        assert snapshot is not None
+        assert snapshot.is_baseline is True
+
+
 
 
 
@@ -674,6 +787,47 @@ async def test_update_target_guards_url_change_while_in_flight(
         _in_flight_targets.discard(target_id)
 
 
+async def test_dns_failure_on_create_and_update_returns_400_without_partial_write(
+    client: httpx.AsyncClient,
+    api_session_factory,
+):
+    from unittest.mock import patch
+
+    from app.core.errors import DnsResolutionError
+    from app.models import Target
+
+    with patch(
+        "app.api.routes.targets.validate_url",
+        side_effect=DnsResolutionError("DNS resolution failed for host missing.invalid"),
+    ):
+        create_response = await client.post(
+            "/targets",
+            json={"name": "Missing", "url": "https://missing.invalid"},
+        )
+    assert create_response.status_code == 400
+    assert "DNS resolution failed" in create_response.json()["detail"]
+
+    with api_session_factory() as db:
+        assert db.query(Target).filter(Target.name == "Missing").count() == 0
+
+    target_id = await create_target(client)
+    with patch(
+        "app.api.routes.targets.validate_url",
+        side_effect=DnsResolutionError("DNS resolution failed for host missing.invalid"),
+    ):
+        update_response = await client.patch(
+            f"/targets/{target_id}",
+            json={"name": "Should Roll Back", "url": "https://missing.invalid"},
+        )
+    assert update_response.status_code == 400
+
+    with api_session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None
+        assert target.name != "Should Roll Back"
+        assert target.url == "https://93.184.216.34"
+
+
 async def test_paginated_targets_route(
     client: httpx.AsyncClient,
     api_session_factory,
@@ -733,5 +887,3 @@ async def test_paginated_targets_route(
     assert res_all.status_code == 200
     assert res_all.json()["total"] == 53
     assert len(res_all.json()["items"]) == 53
-
-

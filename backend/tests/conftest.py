@@ -1,4 +1,6 @@
+import os
 import secrets
+import sqlite3
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -8,8 +10,14 @@ import httpx
 import pytest
 import pytest_asyncio
 from PIL import Image
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+# Never allow imports of app.db.session during tests to resolve to the production
+# database. Individual tests still use their own temporary engines.
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["SCHEDULER_ENABLED"] = "false"
 
 from app.api.deps import get_capture_func, get_db, get_session_factory, get_settings, hash_token
 from app.api.routes.auth import limiter
@@ -21,6 +29,14 @@ from app.main import app
 from app.models.session import Session as AuthSession
 from app.models.user import User
 from app.services.capture.capture import CaptureResult
+
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_foreign_keys_pragma(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 @pytest.fixture(autouse=True)

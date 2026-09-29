@@ -18,8 +18,18 @@ from app.schemas.auth import AuthResponse, LoginRequest
 
 logger = logging.getLogger("app.auth")
 
+def get_client_ip(request: Request) -> str:
+    """Return the peer IP after the ASGI server has applied its proxy policy.
+
+    Uvicorn only rewrites ``request.client`` from forwarding headers received
+    from an explicitly trusted proxy.  Reading those headers here would bypass
+    that trust boundary and let a direct caller choose its own rate-limit key.
+    """
+    return get_remote_address(request)
+
+
 router = APIRouter(tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_client_ip)
 
 DatabaseSession = Annotated[DbSession, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]

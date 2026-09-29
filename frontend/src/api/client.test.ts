@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-   import { apiFetch, ApiError } from './client';
+   import { apiFetch, ApiError, BASE_URL } from './client';
 
    describe('apiFetch', () => {
      beforeEach(() => {
@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
        const result = await apiFetch('/targets');
        expect(result).toEqual(mockData);
-       expect(fetch).toHaveBeenCalledWith('http://localhost:8000/targets', expect.any(Object));
+       expect(fetch).toHaveBeenCalledWith(`${BASE_URL}/targets`, expect.any(Object));
      });
 
      it('throws ApiError with detail on non-2xx response', async () => {

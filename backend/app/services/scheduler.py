@@ -10,7 +10,12 @@ from app.core.config import Settings
 from app.core.status import STATUS_CHECKING
 from app.db.session import SessionLocal
 from app.models import Target
-from app.services.concurrency import SessionFactory, is_target_in_flight, run_checks_for_targets
+from app.services.concurrency import (
+    SessionFactory,
+    release_in_flight,
+    run_checks_for_targets,
+    try_acquire_in_flight,
+)
 
 logger = logging.getLogger("app.scheduler")
 
@@ -126,7 +131,7 @@ class CheckScheduler:
             if now >= self._next_due_times[target.id]:
                 # If target is already checking or in flight, retry in 60s rather than
                 # advancing a full interval (Review 6.3)
-                if target.status == STATUS_CHECKING or is_target_in_flight(target.id):
+                if target.status == STATUS_CHECKING or not try_acquire_in_flight(target.id):
                     logger.debug(
                         "Skipping scheduled check for target %s: "
                         "check already in progress; retrying in 60s",
@@ -147,13 +152,18 @@ class CheckScheduler:
                     target.name,
                     float(self.settings.CHECK_INTERVAL_SECONDS) + jitter,
                 )
-                task = asyncio.create_task(
-                    run_checks_for_targets(
-                        [target.id],
-                        self.settings,
-                        session_factory=self.session_factory,
-                    ),
-                    name=f"scheduled_check_{target.id}",
-                )
-                self._background_tasks.add(task)
-                task.add_done_callback(self._on_task_done)
+                try:
+                    task = asyncio.create_task(
+                        run_checks_for_targets(
+                            [target.id],
+                            self.settings,
+                            session_factory=self.session_factory,
+                            pre_reserved=True,
+                        ),
+                        name=f"scheduled_check_{target.id}",
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._on_task_done)
+                except Exception:
+                    release_in_flight(target.id)
+                    raise

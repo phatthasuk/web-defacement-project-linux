@@ -107,13 +107,25 @@ The easiest and most isolated way to run the entire stack on a Linux server.
 1. **Configure environment variables:**
    ```bash
    cp backend/.env.example backend/.env
-   cp frontend/.env.example frontend/.env
+   mkdir -p deploy/certs
    ```
 
    > [!NOTE]
    > For remote Linux server deployment:
-   > - In `backend/.env`, configure `CORS_ORIGINS` to include your server IP (e.g. `http://localhost:3030,http://<server-ip>:3030`).
-   > - In `frontend/.env`, set `VITE_API_BASE_URL=http://<server-ip>:8000` (or leave default for localhost).
+   > - In `backend/.env`, configure `CORS_ORIGINS` with the exact HTTPS origin operators use (for example `https://10.117.10.68:3030`).
+   > - The production frontend uses the same-origin `/api` reverse proxy; no frontend API URL is required at runtime.
+   > - For local development, copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_BASE_URL` when the backend is not at `http://localhost:8000`.
+
+   Install a trusted TLS certificate as `deploy/certs/fullchain.pem` and its
+   private key as `deploy/certs/privkey.pem`. See `deploy/certs/README.md` for
+   certificate requirements and a temporary self-signed smoke-test command.
+
+   On Linux, run the backend as the owner of the preserved data directory:
+   ```bash
+   export APP_UID="$(id -u)"
+   export APP_GID="$(id -g)"
+   export PUBLIC_HOST="10.117.10.68"
+   ```
 
 2. **Start the containers in detached daemon mode:**
    ```bash
@@ -121,8 +133,9 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    ```
 
 3. **Access the application:**
-   - **Operator Dashboard:** `http://localhost:3030` (or `http://<server-ip>:3030`)
-   - **Backend API & Swagger Docs:** `http://localhost:8000/docs` (or `http://<server-ip>:8000/docs`)
+   - **Operator Dashboard:** `https://localhost:3030` (or `https://<server-ip>:3030`)
+   - **Swagger Docs through the authenticated TLS endpoint:** `https://localhost:3030/api/docs`
+   - Port `3080` redirects HTTP requests to HTTPS. The backend is not published directly.
 
 4. **Useful container management commands:**
    ```bash
@@ -137,7 +150,14 @@ The easiest and most isolated way to run the entire stack on a Linux server.
 
    # Restart containers
    docker compose restart
+
+   # For local development with live hot-reloading:
+   docker compose -f docker-compose.dev.yml up
    ```
+
+   Production runs the backend with a read-only root filesystem, all Linux
+   capabilities dropped, `no-new-privileges`, a non-root UID/GID, and Chromium's
+   sandbox enabled. Only `backend/data` and `/tmp` are writable.
 
 ---
 

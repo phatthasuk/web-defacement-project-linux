@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getTarget } from '../api/targets';
 import { listTargetChecks } from '../api/checks';
 import {
-  getSnapshotText, getTargetBaselineSnapshot, listTargetBaselines, listTargetSnapshots,
+  getSnapshot, getSnapshotText, getTargetBaselineSnapshot, listTargetBaselines,
+  listTargetSnapshots,
 } from '../api/snapshots';
 import { Target } from '../types/target';
 import { Snapshot } from '../types/snapshot';
@@ -17,6 +18,7 @@ import { TargetDetailPage } from './TargetDetailPage';
 vi.mock('../api/targets', () => ({ getTarget: vi.fn() }));
 vi.mock('../api/checks', () => ({ listTargetChecks: vi.fn() }));
 vi.mock('../api/snapshots', () => ({
+  getSnapshot: vi.fn(),
   getSnapshotText: vi.fn(),
   getTargetBaselineSnapshot: vi.fn(),
   listTargetBaselines: vi.fn(),
@@ -64,6 +66,8 @@ function seed(state: ServerState) {
   client.setQueryData(['baselines', id], [state.baseline]);
   client.setQueryData(['snapshotText', state.baseline.id], 'baseline text');
   client.setQueryData(['snapshotText', state.current.id], 'current text');
+  client.setQueryData(['snapshot', state.baseline.id], state.baseline);
+  client.setQueryData(['snapshot', state.current.id], state.current);
 }
 
 function openPage(strict = false) {
@@ -105,6 +109,13 @@ beforeEach(() => {
   vi.mocked(getTargetBaselineSnapshot).mockImplementation(async (id) => server.get(id)!.baseline);
   vi.mocked(listTargetBaselines).mockImplementation(async (id) => [server.get(id)!.baseline]);
   vi.mocked(getSnapshotText).mockImplementation(async (id) => `text for ${id}`);
+  vi.mocked(getSnapshot).mockImplementation(async (id) => {
+    for (const state of server.values()) {
+      if (state.baseline.id === id) return state.baseline;
+      if (state.current.id === id) return state.current;
+    }
+    throw new Error(`Snapshot not found: ${id}`);
+  });
 });
 
 afterEach(() => {

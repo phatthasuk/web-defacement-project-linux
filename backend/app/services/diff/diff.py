@@ -21,6 +21,7 @@ class DiffResult:
     structure_summary: str = ""
     structure_added: tuple[str, ...] = ()
     structure_removed: tuple[str, ...] = ()
+    structure_available: bool = True
 
 
 def compare_snapshot_artifacts(
@@ -51,11 +52,18 @@ def compare_snapshot_artifacts(
     return DiffResult(
         text_change_score=text_score,
         visual_change_score=visual_score,
-        summary=summarize_diff(text_score, visual_score, structure.score, structure.summary),
+        summary=summarize_diff(
+            text_score,
+            visual_score,
+            structure.score,
+            structure.summary,
+            structure_available=structure.available,
+        ),
         structure_change_score=structure.score,
         structure_summary=structure.summary,
         structure_added=structure.added,
         structure_removed=structure.removed,
+        structure_available=structure.available,
     )
 
 
@@ -74,14 +82,22 @@ def compare_html_files(
     snapshots, which is why the summary distinguishes the two cases.
     """
     if not baseline_html_path or not current_html_path:
-        return StructureDiff(score=0.0, summary="Structural comparison unavailable.")
+        return StructureDiff(
+            score=0.0,
+            summary="Structural comparison unavailable.",
+            available=False,
+        )
 
     try:
         baseline_html = Path(baseline_html_path).read_text(encoding="utf-8", errors="replace")
         current_html = Path(current_html_path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         logger.warning("Could not read an HTML artifact; skipping structural comparison")
-        return StructureDiff(score=0.0, summary="Structural comparison unavailable.")
+        return StructureDiff(
+            score=0.0,
+            summary="Structural comparison unavailable.",
+            available=False,
+        )
 
     baseline_facts = extract_structure(baseline_html, baseline_url, allowed_hosts)
     current_facts = extract_structure(current_html, current_url, allowed_hosts)
@@ -149,7 +165,16 @@ def summarize_diff(
     visual_change_score: float,
     structure_change_score: float = 0.0,
     structure_summary: str = "",
+    structure_available: bool = True,
 ) -> str:
+    if not structure_available:
+        if text_change_score == 0.0 and visual_change_score == 0.0:
+            return "No text or visual changes detected. Structural comparison unavailable."
+        return (
+            f"Detected text change score {text_change_score:.4f} and "
+            f"visual change score {visual_change_score:.4f}. Structural comparison unavailable."
+        )
+
     if text_change_score == 0.0 and visual_change_score == 0.0 and structure_change_score == 0.0:
         return "No text, visual or structural changes detected."
 

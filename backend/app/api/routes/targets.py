@@ -198,6 +198,9 @@ async def demote_target_baseline(
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
 
+    if target.status == STATUS_CHECKING or is_target_in_flight(target_id):
+        raise ConflictError("Cannot demote baseline while check is in progress")
+
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None or snapshot.target_id != target_id:
         raise NotFoundError(f"Snapshot not found for target {target_id}: {snapshot_id}")

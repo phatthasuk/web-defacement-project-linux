@@ -1,16 +1,19 @@
 import asyncio
+import json
 import logging
+import shutil
 import uuid
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlsplit
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Request, Route, WebSocketRoute, async_playwright
 
 from app.core.config import Settings
-from app.core.errors import CaptureError, SsrfBlockedError
-from app.core.ssrf_guard import is_blocked_address, resolve_host_ips, validate_url
+from app.core.errors import CaptureError, DnsResolutionError, SsrfBlockedError
+from app.core.ssrf_guard import validate_url
 from app.services.capture.overlays import OverlayDismissal, dismiss_overlays
 from app.services.capture.page_ready import (
     SCROLL_NEUTRALISER_SCRIPT,
@@ -18,6 +21,7 @@ from app.services.capture.page_ready import (
     pin_for_capture,
     wait_page_ready,
 )
+from app.services.capture.ssrf_proxy import SsrfProxy
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,28 @@ class CaptureResult:
     staging_dir: str = ""
 
 
+def _navigation_redirect_document(target_url: str) -> str:
+    """Turn a server redirect into a new browser navigation intercepted by routing.
+
+    Playwright does not route server-generated redirect hops. Capture navigation
+    requests are GETs, so replacing the location keeps their redirect semantics
+    while making every hop pass through the guard before it can connect.
+    """
+    script_url = json.dumps(target_url)
+    return "<!doctype html><meta charset=utf-8>" f"<script>location.replace({script_url})</script>"
+
+
+def _redirect_key(url: str) -> tuple[str, str, int | None, str, str]:
+    parsed = urlsplit(url)
+    return (
+        parsed.scheme.lower(),
+        (parsed.hostname or "").lower(),
+        parsed.port,
+        parsed.path or "/",
+        parsed.query,
+    )
+
+
 def build_wait_options(settings: Settings) -> WaitPageOptions:
     return WaitPageOptions(
         load_timeout_ms=settings.PAGE_TIMEOUT_SECONDS * 1000,
@@ -51,11 +77,33 @@ def build_wait_options(settings: Settings) -> WaitPageOptions:
 
 
 async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
-    validate_url(url, settings)
+    """Capture a page and retain staging only after the complete lifecycle succeeds."""
     snapshot_id = str(uuid.uuid4())
-    max_bytes = settings.MAX_ARTIFACT_SIZE_MB * 1024 * 1024
+    staging_dir = out_dir / "staging" / snapshot_id
+    completed = False
+    try:
+        result = await _capture_snapshot_impl(url, settings, out_dir, snapshot_id)
+        completed = True
+        return result
+    finally:
+        # Context-manager shutdown happens after browser.close(). If cancellation
+        # lands there, no CaptureResult reaches the caller and this function still
+        # owns the staging directory.
+        if not completed and staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
-    hostname = urlparse(url).hostname
+
+async def _capture_snapshot_impl(
+    url: str,
+    settings: Settings,
+    out_dir: Path,
+    snapshot_id: str,
+) -> CaptureResult:
+    validate_url(url, settings)
+    max_bytes = settings.MAX_ARTIFACT_SIZE_MB * 1024 * 1024
+    staging_dir: Path | None = None
+    capture_succeeded = False
+
     launch_args: list[str] = []
     if settings.BROWSER_DISABLE_SANDBOX:
         # Only for containers that cannot run the sandbox. Requires compensating
@@ -63,42 +111,15 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
         logger.warning("Chromium sandbox disabled by configuration")
         launch_args += ["--no-sandbox", "--disable-setuid-sandbox"]
 
-    if hostname:
-        ips = resolve_host_ips(hostname)
-        for ip in ips:
-            if is_blocked_address(ip):
-                raise SsrfBlockedError(
-                    f"Blocked by SSRF guard: {hostname} resolved to blocked address {ip}"
-                )
-        pinned_ip = str(ips[0])
-        launch_args.append(f"--host-resolver-rules=MAP {hostname} {pinned_ip}")
-
-    async with async_playwright() as playwright:
-        try:
-            browser = await playwright.chromium.launch(
-                args=launch_args,
-                chromium_sandbox=not settings.BROWSER_DISABLE_SANDBOX,
-            )
-        except Exception as launch_err:
-            err_msg = str(launch_err).lower()
-            if "sandboxing" in err_msg or "closed" in err_msg:
-                logger.warning(
-                    "Chromium sandbox launch failed, falling back to --no-sandbox: %s",
-                    launch_err,
-                )
-                fallback_args = list(launch_args)
-                for arg in ["--no-sandbox", "--disable-setuid-sandbox"]:
-                    if arg not in fallback_args:
-                        fallback_args.append(arg)
-                browser = await playwright.chromium.launch(
-                    args=fallback_args,
-                    chromium_sandbox=False,
-                )
-            else:
-                raise
+    async with SsrfProxy(settings) as ssrf_proxy, async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            args=launch_args,
+            chromium_sandbox=not settings.BROWSER_DISABLE_SANDBOX,
+            proxy=ssrf_proxy.playwright_proxy,
+        )
         try:
             # An explicit context is needed to block service workers, which can
-            # otherwise issue requests that escape page.route() and so bypass
+            # otherwise issue requests that escape context.route() and so bypass
             # the SSRF guard below.
             context = await browser.new_context(
                 service_workers="block",
@@ -109,70 +130,204 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
                 reduced_motion="reduce",
             )
             await context.add_init_script(SCROLL_NEUTRALISER_SCRIPT)
-            page = await context.new_page()
-            navigation_request_count = 0
+
             blocked_error: SsrfBlockedError | None = None
-            hostname_cache: dict[str, bool] = {}
+            availability_error: DnsResolutionError | None = None
+            capture_error: CaptureError | None = None
+            main_redirect_count = 0
+            pending_redirect_depths: dict[
+                tuple[str, str, int | None, str, str], deque[int]
+            ] = defaultdict(deque)
+            main_navigation_complete = asyncio.Event()
+            final_http_status: int | None = None
 
-            def get_hostname(test_url: str) -> str | None:
+            def is_main_navigation(request: Request) -> bool:
+                if not request.is_navigation_request():
+                    return False
                 try:
-                    return urlparse(test_url).hostname
-                except Exception:
-                    return None
-
-            async def is_url_safe(test_url: str) -> bool:
-                if test_url.startswith(("data:", "blob:")):
-                    return True
-                hostname = get_hostname(test_url)
-                if hostname is not None and hostname in hostname_cache:
-                    return hostname_cache[hostname]
-                try:
-                    await asyncio.to_thread(validate_url, test_url, settings)
-                    if hostname is not None:
-                        hostname_cache[hostname] = True
-                    return True
-                except SsrfBlockedError:
-                    if hostname is not None:
-                        hostname_cache[hostname] = False
+                    frame = request.frame
+                    return frame == page.main_frame or (
+                        frame.parent_frame is None and frame.page == page
+                    )
+                except PlaywrightError:
+                    # Popup navigation can start before its frame exists.  It is
+                    # still guarded and gets its own redirect-chain limit, but it
+                    # is not the capture's main document.
                     return False
 
-            async def guard_navigation(route: Route, request: Request) -> None:
-                nonlocal navigation_request_count, blocked_error
+            def redirect_depth(request: Request) -> int:
+                depth = 0
+                previous = request.redirected_from
+                while previous is not None:
+                    depth += 1
+                    previous = previous.redirected_from
+                return depth
 
-                # SSRF guard validation
-                is_safe = await is_url_safe(request.url)
-                if not is_safe:
-                    if request.is_navigation_request():
-                        blocked_error = SsrfBlockedError(f"Blocked by SSRF guard: {request.url}")
+            async def guard_navigation(route: Route, request: Request) -> None:
+                nonlocal blocked_error, availability_error, capture_error
+                nonlocal final_http_status, main_redirect_count
+
+                url_to_check = request.url
+                main_navigation = is_main_navigation(request)
+
+                # In-memory browser schemes never open an external socket.
+                if url_to_check.startswith(("data:", "blob:", "about:")):
+                    await route.continue_()
+                    return
+
+                # Local file scheme is permitted ONLY if the initial target URL itself
+                # is a local file URL (e.g. offline test fixtures), never when monitoring
+                # an external HTTP/HTTPS target.
+                if url_to_check.startswith("file://"):
+                    if url.startswith("file://"):
+                        await route.continue_()
+                        return
+                    logger.warning("Blocked file:// subresource from remote target: %s", url_to_check)
                     await route.abort()
                     return
 
-                # Main frame navigation tracking
-                if request.is_navigation_request():
-                    if request.frame == page.main_frame:
-                        navigation_request_count += 1
-                        redirects_seen = navigation_request_count - 1
-                        if redirects_seen > settings.REDIRECT_LIMIT:
-                            blocked_error = SsrfBlockedError(
+                # SSRF guard validation before connection
+                try:
+                    await asyncio.to_thread(validate_url, url_to_check, settings)
+                except SsrfBlockedError as exc:
+                    if main_navigation:
+                        blocked_error = exc
+                        main_navigation_complete.set()
+                    await route.abort()
+                    return
+                except DnsResolutionError as exc:
+                    if main_navigation:
+                        availability_error = exc
+                        main_navigation_complete.set()
+                    await route.abort()
+                    return
+                except Exception as exc:
+                    if main_navigation:
+                        capture_error = CaptureError(f"Request validation failed: {exc}")
+                        main_navigation_complete.set()
+                    await route.abort()
+                    return
+
+                redirect_key = _redirect_key(url_to_check)
+                queued_depths = pending_redirect_depths.get(redirect_key)
+                redirects_seen = (
+                    queued_depths.popleft()
+                    if queued_depths
+                    else redirect_depth(request)
+                )
+                if queued_depths is not None and not queued_depths:
+                    pending_redirect_depths.pop(redirect_key, None)
+                if request.is_navigation_request() and redirects_seen > settings.REDIRECT_LIMIT:
+                    error = SsrfBlockedError(
+                        "Blocked by SSRF guard: redirect limit exceeded "
+                        f"{redirects_seen} > {settings.REDIRECT_LIMIT}"
+                    )
+                    if main_navigation:
+                        blocked_error = error
+                        main_navigation_complete.set()
+                    await route.abort()
+                    return
+
+                # Fetch exactly one response through the validating proxy. For a
+                # navigation, a 3xx becomes a fresh browser navigation so routing
+                # sees every hop. Resource redirects remain browser-managed, but
+                # every connection still has to pass through the proxy.
+                try:
+                    response = await route.fetch(max_redirects=0)
+                except Exception as exc:
+                    if main_navigation:
+                        proxy_rejection = ssrf_proxy.pop_rejection(url_to_check)
+                        if isinstance(proxy_rejection, SsrfBlockedError):
+                            blocked_error = proxy_rejection
+                        elif isinstance(proxy_rejection, DnsResolutionError):
+                            availability_error = proxy_rejection
+                        else:
+                            capture_error = CaptureError(f"Guarded request failed: {exc}")
+                        main_navigation_complete.set()
+                    await route.abort()
+                    return
+
+                proxy_rejection = ssrf_proxy.pop_rejection(url_to_check)
+                if proxy_rejection is not None:
+                    if main_navigation:
+                        if isinstance(proxy_rejection, SsrfBlockedError):
+                            blocked_error = proxy_rejection
+                        elif isinstance(proxy_rejection, DnsResolutionError):
+                            availability_error = proxy_rejection
+                        else:
+                            capture_error = CaptureError(str(proxy_rejection))
+                        main_navigation_complete.set()
+                    await route.abort()
+                    return
+
+                if response.status in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location")
+                    if location:
+                        target_url = urljoin(url_to_check, location)
+                        if redirects_seen >= settings.REDIRECT_LIMIT:
+                            error = SsrfBlockedError(
                                 "Blocked by SSRF guard: redirect limit exceeded "
-                                f"{redirects_seen} > {settings.REDIRECT_LIMIT}"
+                                f"{redirects_seen + 1} > {settings.REDIRECT_LIMIT}"
                             )
+                            if main_navigation:
+                                blocked_error = error
+                                main_navigation_complete.set()
+                            await route.abort()
+                            return
+                        try:
+                            await asyncio.to_thread(validate_url, target_url, settings)
+                        except SsrfBlockedError as exc:
+                            if main_navigation:
+                                blocked_error = exc
+                                main_navigation_complete.set()
+                            await route.abort()
+                            return
+                        except DnsResolutionError as exc:
+                            if main_navigation:
+                                availability_error = exc
+                                main_navigation_complete.set()
+                            await route.abort()
+                            return
+                        except Exception as exc:
+                            if main_navigation:
+                                capture_error = CaptureError(
+                                    f"Redirect validation failed: {exc}"
+                                )
+                                main_navigation_complete.set()
                             await route.abort()
                             return
 
-                await route.continue_()
+                        if request.is_navigation_request():
+                            next_depth = redirects_seen + 1
+                            pending_redirect_depths[_redirect_key(target_url)].append(next_depth)
+                            if main_navigation:
+                                main_redirect_count = next_depth
+                            await route.fulfill(
+                                status=200,
+                                headers={
+                                    "cache-control": "no-store",
+                                    "content-type": "text/html; charset=utf-8",
+                                },
+                                body=_navigation_redirect_document(target_url),
+                            )
+                            return
 
-            await page.route("**/*", guard_navigation)
+                await route.fulfill(response=response)
+                if main_navigation:
+                    main_redirect_count = max(main_redirect_count, redirects_seen)
+                    final_http_status = response.status
+                    main_navigation_complete.set()
+
+            await context.route("**/*", guard_navigation)
 
             if settings.BLOCK_WEBSOCKETS:
-                # Registered before navigation so it is in place before any page
-                # script runs. Observing via page.on("websocket") would not
-                # prevent the connection, only report it.
                 async def block_websocket(ws: WebSocketRoute) -> None:
                     logger.warning("Blocked WebSocket connection during capture: %s", ws.url)
                     await ws.close()
 
-                await page.route_web_socket("**/*", block_websocket)
+                await context.route_web_socket("**/*", block_websocket)
+
+            page = await context.new_page()
 
             try:
                 # Navigate only as far as domcontentloaded, then hand over to
@@ -183,9 +338,24 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
                     timeout=settings.PAGE_TIMEOUT_SECONDS * 1000,
                     wait_until="domcontentloaded",
                 )
+                if main_redirect_count > 0 and not main_navigation_complete.is_set():
+                    await asyncio.wait_for(
+                        main_navigation_complete.wait(),
+                        timeout=float(settings.PAGE_TIMEOUT_SECONDS),
+                    )
+                if blocked_error is not None:
+                    raise blocked_error
+                if availability_error is not None:
+                    raise availability_error
+                if capture_error is not None:
+                    raise capture_error
             except PlaywrightError as exc:
                 if blocked_error is not None:
                     raise blocked_error from exc
+                if availability_error is not None:
+                    raise availability_error from exc
+                if capture_error is not None:
+                    raise capture_error from exc
                 raise
 
             overlays = OverlayDismissal()
@@ -209,11 +379,10 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
                             ),
                         )
 
-            redirect_count = 0
-            request = response.request if response else None
-            while request is not None and request.redirected_from is not None:
-                redirect_count += 1
-                request = request.redirected_from
+            redirect_count = max(
+                redirect_depth(response.request) if response else 0,
+                main_redirect_count,
+            )
             if redirect_count > settings.REDIRECT_LIMIT:
                 raise CaptureError(
                     f"Redirect limit exceeded: {redirect_count} > {settings.REDIRECT_LIMIT}"
@@ -238,7 +407,9 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
 
             title = await page.title()
             final_url = page.url
-            http_status = response.status if response else None
+            http_status = final_http_status if final_http_status is not None else (
+                response.status if response else None
+            )
 
             staging_dir = out_dir / "staging" / snapshot_id
             screenshot_path = staging_dir / f"{snapshot_id}.png"
@@ -250,8 +421,19 @@ async def capture_snapshot(url: str, settings: Settings, out_dir: Path) -> Captu
             screenshot_path.write_bytes(screenshot_bytes)
             text_path.write_text(text, encoding="utf-8")
             html_path.write_text(html, encoding="utf-8")
+            capture_succeeded = True
         finally:
-            await browser.close()
+            try:
+                await browser.close()
+            except BaseException:
+                # No CaptureResult reaches the caller when shutdown is cancelled
+                # or fails, so staged artifacts must be reclaimed here.
+                if staging_dir and staging_dir.exists():
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+                raise
+            finally:
+                if not capture_succeeded and staging_dir and staging_dir.exists():
+                    shutil.rmtree(staging_dir, ignore_errors=True)
 
     return CaptureResult(
         id=snapshot_id,

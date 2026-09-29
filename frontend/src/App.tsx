@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TargetListPage } from './pages/TargetListPage';
 import { TargetDetailPage } from './pages/TargetDetailPage';
 import { CheckDetailPage } from './pages/CheckDetailPage';
 import { LoginPage } from './pages/LoginPage';
-import { AuthProvider, useAuth } from './hooks/useAuth';
+import { useAuth } from './hooks/authContext';
+import { AuthProvider } from './hooks/useAuth';
 import { LogOut } from 'lucide-react';
 
 const queryClient = new QueryClient({
@@ -53,7 +55,22 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function NavBar() {
   const { user, logout } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
   if (!user) return null;
+
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      setLogoutError(null);
+      await logout();
+    } catch {
+      setLogoutError('Logout failed. Please try again.');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <nav className="bg-slate-900 border-b border-slate-800 px-6 py-3 flex justify-between items-center sticky top-0 z-10">
@@ -61,15 +78,21 @@ function NavBar() {
         Web Defacement Monitor
       </div>
       <div className="flex items-center gap-4">
+        {logoutError && (
+          <span className="text-xs text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2 py-1 rounded">
+            {logoutError}
+          </span>
+        )}
         <span className="text-sm text-slate-400">
           Welcome, <span className="text-slate-200 font-medium">{user.username}</span>
         </span>
         <button
-          onClick={logout}
-          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-600"
+          onClick={handleLogout}
+          disabled={isLoggingOut}
+          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <LogOut className="w-4 h-4" />
-          Logout
+          {isLoggingOut ? 'Logging out...' : 'Logout'}
         </button>
       </div>
     </nav>

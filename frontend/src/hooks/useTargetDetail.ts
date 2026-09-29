@@ -1,6 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getTarget } from '../api/targets';
-import { listTargetSnapshots, getTargetBaselineSnapshot, listTargetBaselines, demoteTargetBaseline } from '../api/snapshots';
+import {
+  demoteTargetBaseline,
+  getSnapshot,
+  getTargetBaselineSnapshot,
+  listTargetBaselines,
+  listTargetSnapshots,
+} from '../api/snapshots';
+import type { Snapshot } from '../types/snapshot';
 import { listTargetChecks, acknowledgeCheck, confirmDefacedCheck, getCheck } from '../api/checks';
 import { approveBaseline } from '../api/review';
 import { getConfig } from '../api/config';
@@ -27,6 +34,15 @@ export function useTargetSnapshotsQuery(targetId: string) {
     queryKey: ['snapshots', targetId],
     queryFn: () => listTargetSnapshots(targetId),
     enabled: !!targetId,
+  });
+}
+
+export function useSnapshotQuery(snapshotId?: string, initialData?: Snapshot) {
+  return useQuery({
+    queryKey: ['snapshot', snapshotId],
+    queryFn: () => getSnapshot(snapshotId!),
+    enabled: !!snapshotId,
+    initialData,
   });
 }
 

@@ -10,7 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import SsrfBlockedError, ValidationError
+from app.core.errors import (
+    CaptureError,
+    DnsResolutionError,
+    SsrfBlockedError,
+    ValidationError,
+)
 from app.core.status import (
     STATUS_AVAILABILITY_ISSUE,
     STATUS_CHANGED,
@@ -53,7 +58,7 @@ def is_availability_error(exc: Exception) -> bool:
     """
     if isinstance(exc, SsrfBlockedError):
         return False
-    if isinstance(exc, TimeoutError):
+    if isinstance(exc, TimeoutError | DnsResolutionError):
         return True
     msg = str(exc).lower()
     if "blocked by ssrf guard" in msg:
@@ -114,6 +119,16 @@ def _promote_staging_artifacts(
     return fallback_paths
 
 
+def _cleanup_promoted_files(*paths: str | None) -> None:
+    """Clean up files promoted to permanent storage if database commit failed."""
+    for p in paths:
+        if p:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _discard_snapshot_files(capture: CaptureResult) -> None:
     """Discard temporary capture artifacts.
 
@@ -161,6 +176,11 @@ async def run_target_check(
         )
 
     staging_dir = Path(capture.staging_dir) if capture.staging_dir else None
+    artifacts_promoted = False
+    artifacts_committed = False
+    perm_screenshot: str | None = None
+    perm_text: str | None = None
+    perm_html: str | None = None
 
     # Check for HTTP 5xx responses -> Availability Issue (Stage 1.3)
     if capture.http_status is not None and capture.http_status >= 500:
@@ -189,6 +209,7 @@ async def run_target_check(
                 settings.data_dir_path,
                 (capture.screenshot_path, capture.text_path, capture.html_path),
             )
+            artifacts_promoted = True
             snapshot = Snapshot(
                 id=capture.id,
                 target_id=target.id,
@@ -203,7 +224,14 @@ async def run_target_check(
             db.add(snapshot)
             transition_target(target, STATUS_OK)
             db.commit()
-            db.refresh(snapshot)
+            artifacts_committed = True
+            try:
+                db.refresh(snapshot)
+            except Exception:
+                logger.exception(
+                    "Baseline snapshot %s committed but could not be refreshed",
+                    snapshot.id,
+                )
             return TargetCheckResult(
                 status=STATUS_OK,
                 snapshot=snapshot,
@@ -238,6 +266,13 @@ async def run_target_check(
             capture.final_url,
             allowed_hosts,
         )
+        for baseline_id, d in comparisons:
+            if not d.structure_available:
+                raise CaptureError(
+                    f"Structural comparison unavailable for baseline {baseline_id}: "
+                    "HTML artifact is missing or unreadable"
+                )
+
         matched_baseline_id, diff = select_best_baseline(comparisons, settings)
         has_changes = diff_severity(diff, settings) > 1.0
 
@@ -259,6 +294,7 @@ async def run_target_check(
                 settings.data_dir_path,
                 (capture.screenshot_path, capture.text_path, capture.html_path),
             )
+            artifacts_promoted = True
             snapshot = Snapshot(
                 id=capture.id,
                 target_id=target.id,
@@ -271,6 +307,7 @@ async def run_target_check(
                 is_baseline=False,
             )
             db.add(snapshot)
+            db.flush()
             check_result = CheckResult(
                 target_id=target.id,
                 baseline_snapshot_id=matched_baseline_id,
@@ -284,8 +321,15 @@ async def run_target_check(
             transition_target(target, STATUS_CHANGED)
             db.add(check_result)
             db.commit()
-            db.refresh(snapshot)
-            db.refresh(check_result)
+            artifacts_committed = True
+            try:
+                db.refresh(snapshot)
+                db.refresh(check_result)
+            except Exception:
+                logger.exception(
+                    "Changed result for target %s committed but could not be refreshed",
+                    target.id,
+                )
             return TargetCheckResult(
                 status=STATUS_CHANGED,
                 snapshot=snapshot,
@@ -317,11 +361,16 @@ async def run_target_check(
                 target_id=target.id,
             )
     except Exception as exc:
-        # F5: Discard staging files on diff or commit failure so no orphans remain
-        _discard_snapshot_files(capture)
-        target.last_error = str(exc)
+        db.rollback()
+        # F5: Discard staging files on diff failure, or clean promoted files if commit failed
+        if artifacts_promoted and not artifacts_committed:
+            _cleanup_promoted_files(perm_screenshot, perm_text, perm_html)
+        elif not artifacts_promoted:
+            _discard_snapshot_files(capture)
+        target_in_db = db.get(Target, target.id) or target
+        target_in_db.last_error = str(exc)
         next_status = STATUS_AVAILABILITY_ISSUE if is_availability_error(exc) else STATUS_FAILED
-        transition_target(target, next_status)
+        transition_target(target_in_db, next_status)
         db.commit()
         logger.exception("Error checking target %s: %s", target.id, exc)
         return TargetCheckResult(
@@ -331,6 +380,9 @@ async def run_target_check(
             target_id=target.id,
             error=str(exc),
         )
+    finally:
+        if not artifacts_promoted:
+            _discard_snapshot_files(capture)
 
 
 def recover_stale_checks(db: Session) -> list[str]:

@@ -13,12 +13,17 @@ engine = create_engine(
     connect_args={"check_same_thread": False, "timeout": 30} if is_sqlite else {},
 )
 
+
+def set_sqlite_pragmas(dbapi_connection, _connection_record=None) -> None:
+    """Apply the per-connection SQLite guarantees used by every app engine."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 if is_sqlite:
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.close()
+    event.listen(engine, "connect", set_sqlite_pragmas)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

@@ -1,33 +1,91 @@
-# Local dev environment. Requires backend/.env and frontend/.env
-# (copy from the .env.example in each folder) before running `docker compose up`.
+# Production environment. HTTPS certificates must exist in deploy/certs.
+# Set APP_UID/APP_GID to the owner of backend/data on the Linux deployment host.
 services:
   backend:
-    image: mcr.microsoft.com/playwright/python:v1.48.0-noble
-    working_dir: /app
-    command: >
-      sh -c "pip install -r requirements.txt &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --reload"
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    init: true
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
     volumes:
-      - ./backend:/app
-    ipc: host
+      - ./backend/data:/app/data:rw
+    shm_size: "1gb"
+    cap_drop:
+      - ALL
     security_opt:
-      - seccomp:unconfined
-    ports:
-      - "8000:8000"
+      - no-new-privileges:true
+    expose:
+      - "8000"
     environment:
-      - BROWSER_DISABLE_SANDBOX=true
+      ENVIRONMENT: production
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SAMESITE: strict
+      BROWSER_DISABLE_SANDBOX: "false"
+      ROOT_PATH: /api
+      CORS_ORIGINS: "https://${PUBLIC_HOST:-localhost}:${PUBLIC_HTTPS_PORT:-3030}"
+      DATABASE_URL: sqlite:////app/data/app.db
+      DATA_DIR: /app/data
+      HOME: /tmp
     env_file:
       - ./backend/.env
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.create_connection(('127.0.0.1', 8000), 3); s.close()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Backend accepts proxy headers only from the fixed frontend address.
+    # It is intentionally not published on the host.
+    networks:
+      app_net:
+        ipv4_address: 172.30.0.3
 
   frontend:
-    image: node:20-slim
-    working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    volumes:
-      - ./frontend:/app
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    init: true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=64m
+      - /var/run:size=8m
+      - /tmp:size=16m
+      - /etc/nginx/conf.d:size=1m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PUBLIC_HTTPS_PORT: "${PUBLIC_HTTPS_PORT:-3030}"
+    secrets:
+      - tls_cert
+      - tls_key
     ports:
-      - "3030:5173"
-    env_file:
-      - ./frontend/.env
+      - "${PUBLIC_HTTP_PORT:-3080}:8080"
+      - "${PUBLIC_HTTPS_PORT:-3030}:8443"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    networks:
+      app_net:
+        ipv4_address: 172.30.0.2
+
+networks:
+  app_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+secrets:
+  tls_cert:
+    file: ./deploy/certs/fullchain.pem
+  tls_key:
+    file: ./deploy/certs/privkey.pem

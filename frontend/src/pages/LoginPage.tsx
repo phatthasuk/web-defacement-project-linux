@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { apiFetch, ApiError } from '../api/client';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/authContext';
 import { LogIn } from 'lucide-react';
 
 interface AuthResponse {

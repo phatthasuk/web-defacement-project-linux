@@ -17,7 +17,12 @@ from app.core.status import STATUS_CHECKING
 from app.models import CheckResult, Target
 from app.schemas import CheckResultRead, CheckTriggerResponse
 from app.services.checks import CaptureFunc
-from app.services.concurrency import SessionFactory, is_target_in_flight, run_checks_for_targets
+from app.services.concurrency import (
+    SessionFactory,
+    release_in_flight,
+    run_checks_for_targets,
+    try_acquire_in_flight,
+)
 
 router = APIRouter(tags=["checks"], dependencies=[Depends(get_current_user)])
 
@@ -41,16 +46,21 @@ async def trigger_target_check(
         raise NotFoundError(f"Target not found: {target_id}")
     if not target.is_active:
         raise ValidationError("Target is inactive")
-    if target.status == STATUS_CHECKING or is_target_in_flight(target_id):
+    if target.status == STATUS_CHECKING or not try_acquire_in_flight(target_id):
         return CheckTriggerResponse(target_id=target_id, accepted=False)
 
-    background_tasks.add_task(
-        run_checks_for_targets,
-        [target_id],
-        settings,
-        capture_func=capture_func,
-        session_factory=session_factory,
-    )
+    try:
+        background_tasks.add_task(
+            run_checks_for_targets,
+            [target_id],
+            settings,
+            capture_func=capture_func,
+            session_factory=session_factory,
+            pre_reserved=True,
+        )
+    except Exception:
+        release_in_flight(target_id)
+        raise
     return CheckTriggerResponse(target_id=target_id, accepted=True)
 
 
