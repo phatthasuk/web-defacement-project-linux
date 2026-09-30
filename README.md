@@ -132,6 +132,11 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    docker compose up -d --build
    ```
 
+   The backend runs pending Alembic migrations before it starts. For upgrades,
+   back up `backend/data/app.db` first. URL edits now create a new URL revision:
+   the next successful capture waits for operator baseline approval, while older
+   snapshots and checks remain available through the history endpoints.
+
 3. **Access the application:**
    - **Operator Dashboard:** `https://localhost:3030` (or `https://<server-ip>:3030`)
    - **Swagger Docs through the authenticated TLS endpoint:** `https://localhost:3030/api/docs`

@@ -20,4 +20,4 @@ USER 1000:1000
 
 # Only the frontend Nginx container is allowed to supply proxy headers.  Its
 # address is fixed in docker-compose.yml so this remains a real trust boundary.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=172.30.0.2"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=172.30.0.2"]

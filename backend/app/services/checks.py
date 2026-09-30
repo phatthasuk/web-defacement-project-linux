@@ -18,6 +18,7 @@ from app.core.errors import (
 )
 from app.core.status import (
     STATUS_AVAILABILITY_ISSUE,
+    STATUS_AWAITING_BASELINE,
     STATUS_CHANGED,
     STATUS_CHECKING,
     STATUS_FAILED,
@@ -182,16 +183,25 @@ async def run_target_check(
     perm_text: str | None = None
     perm_html: str | None = None
 
-    # Check for HTTP 5xx responses -> Availability Issue (Stage 1.3)
-    if capture.http_status is not None and capture.http_status >= 500:
+    # Only a successful document can become a trusted baseline or comparison.
+    if capture.http_status is None or not 200 <= capture.http_status < 300:
         _discard_snapshot_files(capture)
-        error_msg = f"Target returned HTTP {capture.http_status}"
+        error_msg = (
+            f"Target returned HTTP {capture.http_status}"
+            if capture.http_status is not None
+            else "Target returned no HTTP response"
+        )
         target.last_error = error_msg
-        transition_target(target, STATUS_AVAILABILITY_ISSUE)
+        next_status = (
+            STATUS_AVAILABILITY_ISSUE
+            if capture.http_status is not None and capture.http_status >= 400
+            else STATUS_FAILED
+        )
+        transition_target(target, next_status)
         db.commit()
-        logger.warning(f"Target {target.id} returned HTTP {capture.http_status}")
+        logger.warning("Target %s: %s", target.id, error_msg)
         return TargetCheckResult(
-            status=STATUS_AVAILABILITY_ISSUE,
+            status=next_status,
             snapshot=None,
             check_result=None,
             target_id=target.id,
@@ -199,10 +209,11 @@ async def run_target_check(
         )
 
     try:
-        baseline = get_baseline_snapshot(db, target.id)
+        baseline = get_baseline_snapshot(db, target.id, target.url_revision)
 
         if baseline is None:
-            # First snapshot: promote to baseline and retain permanently
+            # A new target can establish its first baseline. After a URL edit,
+            # keep the capture as a candidate until an operator approves it.
             perm_screenshot, perm_text, perm_html = _promote_staging_artifacts(
                 capture.id,
                 staging_dir,
@@ -213,16 +224,20 @@ async def run_target_check(
             snapshot = Snapshot(
                 id=capture.id,
                 target_id=target.id,
+                url_revision=target.url_revision,
                 final_url=capture.final_url,
                 http_status=capture.http_status,
                 title=capture.title,
                 screenshot_path=perm_screenshot,
                 text_path=perm_text,
                 html_path=perm_html,
-                is_baseline=True,
+                is_baseline=target.url_revision == 1,
             )
             db.add(snapshot)
-            transition_target(target, STATUS_OK)
+            next_status = (
+                STATUS_OK if target.url_revision == 1 else STATUS_AWAITING_BASELINE
+            )
+            transition_target(target, next_status)
             db.commit()
             artifacts_committed = True
             try:
@@ -233,14 +248,16 @@ async def run_target_check(
                     snapshot.id,
                 )
             return TargetCheckResult(
-                status=STATUS_OK,
+                status=next_status,
                 snapshot=snapshot,
                 check_result=None,
                 target_id=target.id,
             )
 
         # Compare against approved baselines using the staged files
-        baselines = get_baseline_snapshots(db, target.id, settings.MAX_BASELINES_PER_TARGET)
+        baselines = get_baseline_snapshots(
+            db, target.id, target.url_revision, settings.MAX_BASELINES_PER_TARGET
+        )
         if not baselines:
             baselines = [baseline]
         baseline_artifacts = [
@@ -298,6 +315,7 @@ async def run_target_check(
             snapshot = Snapshot(
                 id=capture.id,
                 target_id=target.id,
+                url_revision=target.url_revision,
                 final_url=capture.final_url,
                 http_status=capture.http_status,
                 title=capture.title,
@@ -425,30 +443,40 @@ def recover_stale_checks(db: Session) -> list[str]:
     return released_ids
 
 
-def get_baseline_snapshot(db: Session, target_id: str) -> Snapshot | None:
+def get_baseline_snapshot(db: Session, target_id: str, revision: int) -> Snapshot | None:
     """The newest approved baseline, for display and for "does one exist" checks."""
     return db.scalar(
         select(Snapshot)
-        .where(Snapshot.target_id == target_id, Snapshot.is_baseline.is_(True))
+        .where(
+            Snapshot.target_id == target_id,
+            Snapshot.url_revision == revision,
+            Snapshot.is_baseline.is_(True),
+        )
         .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
     )
 
 
-def get_baseline_snapshots(db: Session, target_id: str, limit: int) -> list[Snapshot]:
+def get_baseline_snapshots(
+    db: Session, target_id: str, revision: int, limit: int
+) -> list[Snapshot]:
     """Every approved baseline for a target, newest first."""
     if limit <= 0:
         return []
     return list(
         db.scalars(
             select(Snapshot)
-            .where(Snapshot.target_id == target_id, Snapshot.is_baseline.is_(True))
+            .where(
+                Snapshot.target_id == target_id,
+                Snapshot.url_revision == revision,
+                Snapshot.is_baseline.is_(True),
+            )
             .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
             .limit(limit)
         )
     )
 
 
-def prune_baselines(db: Session, target_id: str, keep: int) -> list[str]:
+def prune_baselines(db: Session, target_id: str, revision: int, keep: int) -> list[str]:
     """Demote all but the `keep` newest baselines. Returns the demoted ids.
 
     Only the `is_baseline` flag is cleared: the snapshots and their artifacts
@@ -459,7 +487,11 @@ def prune_baselines(db: Session, target_id: str, keep: int) -> list[str]:
     baselines = list(
         db.scalars(
             select(Snapshot)
-            .where(Snapshot.target_id == target_id, Snapshot.is_baseline.is_(True))
+            .where(
+                Snapshot.target_id == target_id,
+                Snapshot.url_revision == revision,
+                Snapshot.is_baseline.is_(True),
+            )
             .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
         )
     )

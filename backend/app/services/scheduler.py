@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.core.config import Settings
 from app.core.status import STATUS_CHECKING
 from app.db.session import SessionLocal
-from app.models import Target
+from app.models import Snapshot, Target
 from app.services.concurrency import (
     SessionFactory,
     release_in_flight,
@@ -106,6 +106,35 @@ class CheckScheduler:
         now = time.time()
         with self.session_factory() as db:
             active_targets = list(db.scalars(select(Target).where(Target.is_active.is_(True))))
+            candidate_exists = (
+                select(Snapshot.id)
+                .where(
+                    Snapshot.target_id == Target.id,
+                    Snapshot.url_revision == Target.url_revision,
+                    Snapshot.is_baseline.is_(False),
+                )
+                .correlate(Target)
+                .exists()
+            )
+            baseline_exists = (
+                select(Snapshot.id)
+                .where(
+                    Snapshot.target_id == Target.id,
+                    Snapshot.url_revision == Target.url_revision,
+                    Snapshot.is_baseline.is_(True),
+                )
+                .correlate(Target)
+                .exists()
+            )
+            pending_candidate_ids = set(
+                db.scalars(
+                    select(Target.id).where(
+                        Target.url_revision > 1,
+                        candidate_exists,
+                        ~baseline_exists,
+                    )
+                )
+            )
 
         active_ids = {target.id for target in active_targets}
 
@@ -129,6 +158,11 @@ class CheckScheduler:
                 continue
 
             if now >= self._next_due_times[target.id]:
+                if target.id in pending_candidate_ids:
+                    # Keep the candidate until an operator reviews it. A manual
+                    # check can still replace it with a fresher capture.
+                    self._next_due_times[target.id] = now + 60.0
+                    continue
                 # If target is already checking or in flight, retry in 60s rather than
                 # advancing a full interval (Review 6.3)
                 if target.status == STATUS_CHECKING or not try_acquire_in_flight(target.id):

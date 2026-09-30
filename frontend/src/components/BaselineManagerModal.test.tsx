@@ -7,6 +7,7 @@ const mockBaselines: Snapshot[] = [
   {
     id: 'snap-b1',
     target_id: 't-1',
+    url_revision: 1,
     captured_at: '2026-09-03T07:30:00Z',
     final_url: 'https://example.com',
     http_status: 200,
@@ -16,6 +17,7 @@ const mockBaselines: Snapshot[] = [
   {
     id: 'snap-b2',
     target_id: 't-1',
+    url_revision: 1,
     captured_at: '2026-09-03T07:35:00Z',
     final_url: 'https://example.com',
     http_status: 200,

@@ -8,6 +8,7 @@ class SnapshotRead(BaseModel):
 
     id: str
     target_id: str
+    url_revision: int
     captured_at: datetime
     final_url: str
     http_status: int | None

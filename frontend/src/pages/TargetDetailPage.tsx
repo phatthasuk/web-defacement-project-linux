@@ -16,6 +16,7 @@ import {
 } from '../hooks/useTargetDetail';
 import { useUpdateTargetMutation, useDeleteTargetMutation, useTriggerCheckMutation } from '../hooks/useTargets';
 import { getSnapshotText } from '../api/snapshots';
+import { listTargetChecks } from '../api/checks';
 import { TargetStatusBadge } from '../components/TargetStatusBadge';
 import { ScreenshotCompare } from '../components/ScreenshotCompare';
 import { BaselineManagerModal } from '../components/BaselineManagerModal';
@@ -36,6 +37,11 @@ export function TargetDetailPage() {
   const { data: baselines = [], isLoading: isBaselinesLoading } = useTargetBaselinesQuery(targetId);
   const { data: checks, isLoading: isChecksLoading } = useTargetChecksQuery(targetId);
   const { data: appConfig } = useConfigQuery();
+  const { data: historicalChecks = [] } = useQuery({
+    queryKey: ['historicalChecks', targetId, target?.url_revision],
+    queryFn: () => listTargetChecks(targetId, true),
+    enabled: Boolean(target && target.url_revision > 1),
+  });
 
   const approveBaselineMutation = useApproveBaselineMutation();
   const acknowledgeCheckMutation = useAcknowledgeCheckMutation();
@@ -78,10 +84,13 @@ export function TargetDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
   }, [currentSignature, targetId, queryClient]);
 
-  // A CheckResult is the sole source of snapshot IDs for an existing comparison.
+  // A new URL has no comparison yet; display its captured candidate for approval.
   const latestSnapshot = snapshots?.[0] || null;
+  const pendingCandidate = target && target.url_revision > 1 && !baselineSnapshot && !latestCheckItem
+    ? latestSnapshot
+    : null;
   const compareBaselineId = latestCheckItem?.baseline_snapshot_id || baselineSnapshot?.id;
-  const compareCurrentId = latestCheckItem?.current_snapshot_id || baselineSnapshot?.id;
+  const compareCurrentId = latestCheckItem?.current_snapshot_id || pendingCandidate?.id || baselineSnapshot?.id;
 
   const cachedBaseline = [...baselines, ...(snapshots || [])].find(
     (snapshot) => snapshot.id === compareBaselineId
@@ -237,7 +246,7 @@ export function TargetDetailPage() {
 
   // Determine which actions are available
   const canApproveBaseline = Boolean(
-    latestCheck && currentSnapshot && !currentSnapshot.is_baseline && !isSameSnapshot
+    currentSnapshot && !currentSnapshot.is_baseline && !isSameSnapshot && (latestCheck || pendingCandidate)
   );
   const canAcknowledge = latestCheck && latestCheck.status === 'Changed' && !latestCheck.acknowledged_at;
   const canConfirmDefacement = latestCheck && latestCheck.status === 'Changed' && target.status !== 'Defaced';
@@ -291,6 +300,12 @@ export function TargetDetailPage() {
               {target.url}
             </a>
           </div>
+          {target.status === 'Awaiting Baseline' && (
+            <p className="mt-3 max-w-2xl rounded-lg border border-amber-800/60 bg-amber-950/40 p-3 text-sm text-amber-200">
+              URL revision {target.url_revision} is awaiting baseline approval.
+              {pendingCandidate ? ' Review the latest capture, then approve it to resume comparisons.' : ' Run a check to capture the new URL.'}
+            </p>
+          )}
 
           <div className="flex items-center gap-2 mt-3">
             <button
@@ -535,6 +550,11 @@ export function TargetDetailPage() {
                   </p>
                 </div>
               </div>
+            ) : pendingCandidate ? (
+              <div className="text-slate-400 text-sm leading-relaxed">
+                <p className="font-semibold text-amber-300 mb-1">Baseline Review Required</p>
+                <p className="text-xs text-slate-500">The new URL has been captured. Approve the snapshot above before comparisons resume.</p>
+              </div>
             ) : isInitialBaseline ? (
               <div className="text-slate-400 text-sm leading-relaxed">
                 <p className="font-semibold text-slate-300 mb-1">Initial Baseline Capture</p>
@@ -572,7 +592,7 @@ export function TargetDetailPage() {
       <div>
         {isInitialBaseline ? (
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-6 text-center text-slate-500 font-mono text-sm">
-            This is the initial snapshot. No differences to calculate.
+            {pendingCandidate ? 'New URL candidate awaiting approval. No differences to calculate.' : 'This is the initial snapshot. No differences to calculate.'}
           </div>
         ) : isTextLoading ? (
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-12 text-center text-slate-500 flex items-center justify-center gap-3">
@@ -597,6 +617,19 @@ export function TargetDetailPage() {
           </div>
         )}
       </div>
+
+      {target.url_revision > 1 && historicalChecks.length > 0 && (
+        <section className="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="mb-3 text-sm font-semibold text-slate-300">Check history across URL revisions</h2>
+          <div className="space-y-2">
+            {historicalChecks.filter((check) => !checks?.some((current) => current.id === check.id)).map((check) => (
+              <Link key={check.id} to={`/checks/${check.id}`} className="block text-xs text-cyan-400 hover:text-cyan-300">
+                {formatDateTime(check.created_at)} · {check.status} · {check.id}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <BaselineManagerModal
         isOpen={isBaselineModalOpen}

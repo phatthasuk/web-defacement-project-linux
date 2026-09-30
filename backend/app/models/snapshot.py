@@ -12,6 +12,7 @@ class Snapshot(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     target_id: Mapped[str] = mapped_column(String(36), ForeignKey("targets.id"), nullable=False)
+    url_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

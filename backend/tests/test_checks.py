@@ -950,6 +950,30 @@ async def test_run_target_check_reports_availability_issue_on_5xx(tmp_path: Path
     assert not (work_dir / "staging" / "server-error").exists()
 
 
+async def test_http_404_never_becomes_initial_baseline(tmp_path: Path):
+    work_dir = make_work_dir("checks-first-404", tmp_path)
+    db = make_session()
+    target = Target(name="Example", url="https://example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    capture = _write_staged_capture(work_dir, "missing-page", "Not Found", "white")
+    capture.http_status = 404
+
+    async def fake_capture(u: str, s: Settings, o: Path) -> CaptureResult:
+        return capture
+
+    result = await run_target_check(
+        db, target, Settings(DATA_DIR=str(work_dir)), capture_func=fake_capture
+    )
+
+    assert result.status == STATUS_AVAILABILITY_ISSUE
+    assert result.snapshot is None
+    assert db.scalar(select(Snapshot).where(Snapshot.target_id == target.id)) is None
+    assert not (work_dir / "staging" / "missing-page").exists()
+
+
 def test_reconcile_artifacts_purges_expired_staging_and_orphans(tmp_path: Path):
     """Finding F5: reconcile_artifacts cleans expired staging dirs and unreferenced files."""
     work_dir = make_work_dir("checks-reconcile", tmp_path)

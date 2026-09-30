@@ -19,6 +19,10 @@ export function TargetStatusBadge({ status, title }: TargetStatusBadgeProps) {
       badgeStyles = 'bg-cyan-950/60 border border-cyan-800/50 text-cyan-400 font-medium shadow-[0_0_8px_rgba(34,211,238,0.15)]';
       dotStyles = 'bg-cyan-400 animate-pulse';
       break;
+    case 'Awaiting Baseline':
+      badgeStyles = 'bg-amber-950/60 border border-amber-800/50 text-amber-300 font-medium';
+      dotStyles = 'bg-amber-400';
+      break;
     case 'OK':
       badgeStyles = 'bg-emerald-950/60 border border-emerald-800/50 text-emerald-400 font-medium shadow-[0_0_8px_rgba(52,211,153,0.15)]';
       dotStyles = 'bg-emerald-400';

@@ -1,6 +1,7 @@
 export interface Snapshot {
   id: string;
   target_id: string;
+  url_revision: number;
   captured_at: string;
   final_url: string;
   http_status: number | null;

@@ -36,6 +36,7 @@ class TargetRead(BaseModel):
     id: str
     name: str
     url: str
+    url_revision: int
     status: str
     is_active: bool
     last_error: str | None = None

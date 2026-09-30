@@ -8,7 +8,7 @@ from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.ssrf_guard import validate_url
-from app.core.status import STATUS_CHECKING
+from app.core.status import STATUS_AWAITING_BASELINE, STATUS_CHECKING
 from app.models import Snapshot, Target
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
 from app.services.concurrency import is_target_in_flight
@@ -110,7 +110,14 @@ async def update_target(
                     "URL cannot be modified until the check finishes."
                 )
             validate_url(new_url, settings)
+            has_history = db.scalar(
+                select(Snapshot.id).where(Snapshot.target_id == target_id).limit(1)
+            ) is not None
             target.url = new_url
+            if has_history:
+                target.url_revision += 1
+                target.status = STATUS_AWAITING_BASELINE
+                target.last_error = None
     if "is_active" in update_data:
         target.is_active = update_data["is_active"]
     if "allowed_domains" in update_data:
@@ -139,16 +146,18 @@ async def list_target_snapshots(
     db: DbSession,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    include_history: bool = False,
 ) -> list[Snapshot]:
     target = db.get(Target, target_id)
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
 
+    statement = select(Snapshot).where(Snapshot.target_id == target_id)
+    if not include_history:
+        statement = statement.where(Snapshot.url_revision == target.url_revision)
     return list(
         db.scalars(
-            select(Snapshot)
-            .where(Snapshot.target_id == target_id)
-            .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
+            statement.order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -166,7 +175,12 @@ async def get_target_baseline_snapshot(
 
     return db.scalar(
         select(Snapshot)
-        .where(Snapshot.target_id == target_id, Snapshot.is_baseline.is_(True))
+        .where(
+            Snapshot.target_id == target_id,
+            Snapshot.url_revision == target.url_revision,
+            Snapshot.is_baseline.is_(True),
+        )
+        .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
     )
 
 
@@ -182,7 +196,11 @@ async def list_target_baselines(
     return list(
         db.scalars(
             select(Snapshot)
-            .where(Snapshot.target_id == target_id, Snapshot.is_baseline.is_(True))
+            .where(
+                Snapshot.target_id == target_id,
+                Snapshot.url_revision == target.url_revision,
+                Snapshot.is_baseline.is_(True),
+            )
             .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
         )
     )
@@ -202,7 +220,11 @@ async def demote_target_baseline(
         raise ConflictError("Cannot demote baseline while check is in progress")
 
     snapshot = db.get(Snapshot, snapshot_id)
-    if snapshot is None or snapshot.target_id != target_id:
+    if (
+        snapshot is None
+        or snapshot.target_id != target_id
+        or snapshot.url_revision != target.url_revision
+    ):
         raise NotFoundError(f"Snapshot not found for target {target_id}: {snapshot_id}")
 
     if not snapshot.is_baseline:
@@ -221,6 +243,7 @@ async def demote_target_baseline(
             .select_from(Snapshot)
             .where(
                 Snapshot.target_id == target_id,
+                Snapshot.url_revision == target.url_revision,
                 Snapshot.is_baseline.is_(True),
                 Snapshot.id != snapshot_id,
             )

@@ -165,6 +165,11 @@ export function EditTargetModal({
                 <span>URL cannot be modified while target check is in progress.</span>
               </p>
             )}
+            {url.trim() !== target.url && (
+              <p className="text-xs text-amber-400 mt-1.5">
+                Changing the URL starts a new baseline review. Earlier snapshots and checks remain in history.
+              </p>
+            )}
           </div>
 
           {formError && (

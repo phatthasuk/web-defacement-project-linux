@@ -1,6 +1,7 @@
 export type TargetStatus =
   | 'Never Checked'
   | 'Checking'
+  | 'Awaiting Baseline'
   | 'OK'
   | 'Changed'
   | 'Failed'
@@ -12,6 +13,7 @@ export interface Target {
   id: string;
   name: string;
   url: string;
+  url_revision: number;
   status: TargetStatus;
   is_active: boolean;
   last_error: string | null;

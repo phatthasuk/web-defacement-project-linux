@@ -1,8 +1,8 @@
 import { apiFetch } from './client';
 import { Snapshot } from '../types/snapshot';
 
-export async function listTargetSnapshots(targetId: string): Promise<Snapshot[]> {
-  return apiFetch<Snapshot[]>(`/targets/${targetId}/snapshots`);
+export async function listTargetSnapshots(targetId: string, includeHistory = false): Promise<Snapshot[]> {
+  return apiFetch<Snapshot[]>(`/targets/${targetId}/snapshots${includeHistory ? '?include_history=true' : ''}`);
 }
 
 export async function getSnapshot(snapshotId: string): Promise<Snapshot> {

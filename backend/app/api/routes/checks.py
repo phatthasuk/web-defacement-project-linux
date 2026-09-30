@@ -14,7 +14,7 @@ from app.api.deps import (
 from app.core.config import Settings
 from app.core.errors import NotFoundError, ValidationError
 from app.core.status import STATUS_CHECKING
-from app.models import CheckResult, Target
+from app.models import CheckResult, Snapshot, Target
 from app.schemas import CheckResultRead, CheckTriggerResponse
 from app.services.checks import CaptureFunc
 from app.services.concurrency import (
@@ -78,16 +78,25 @@ async def list_target_check_results(
     db: DbSession,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    include_history: bool = False,
 ) -> list[CheckResult]:
     target = db.get(Target, target_id)
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
 
+    statement = select(CheckResult).where(CheckResult.target_id == target_id)
+    if not include_history:
+        statement = statement.where(
+            CheckResult.current_snapshot_id.in_(
+                select(Snapshot.id).where(
+                    Snapshot.target_id == target_id,
+                    Snapshot.url_revision == target.url_revision,
+                )
+            )
+        )
     return list(
         db.scalars(
-            select(CheckResult)
-            .where(CheckResult.target_id == target_id)
-            .order_by(CheckResult.created_at.desc(), CheckResult.id.desc())
+            statement.order_by(CheckResult.created_at.desc(), CheckResult.id.desc())
             .limit(limit)
             .offset(offset)
         )

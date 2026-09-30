@@ -43,6 +43,10 @@ def approve_baseline(
         raise NotFoundError(f"Snapshot not found: {snapshot_id}")
     if snapshot.target_id != target_id:
         raise ValidationError("Cannot approve a snapshot for a different target")
+    if snapshot.url_revision != target.url_revision:
+        raise ValidationError("Cannot approve a snapshot from a previous target URL")
+    if snapshot.http_status is None or not 200 <= snapshot.http_status < 300:
+        raise ValidationError("Only a successful HTTP response can become a baseline")
 
     if target.status == STATUS_NEVER_CHECKED:
         require_valid_transition(target.status, STATUS_OK)
@@ -55,7 +59,11 @@ def approve_baseline(
     active_baselines = list(
         db.scalars(
             select(Snapshot)
-            .where(Snapshot.target_id == target_id, Snapshot.is_baseline.is_(True))
+            .where(
+                Snapshot.target_id == target_id,
+                Snapshot.url_revision == target.url_revision,
+                Snapshot.is_baseline.is_(True),
+            )
             .order_by(Snapshot.captured_at.desc(), Snapshot.id.desc())
         )
     )
@@ -74,7 +82,7 @@ def approve_baseline(
     # variant. The oldest are demoted once the configured cap is reached.
     snapshot.is_baseline = True
     db.flush()
-    demoted = prune_baselines(db, target_id, cap)
+    demoted = prune_baselines(db, target_id, target.url_revision, cap)
     if demoted:
         logger.info(
             "Target %s reached the %d-baseline cap; demoted %s",
@@ -83,11 +91,12 @@ def approve_baseline(
             ", ".join(demoted),
         )
 
-    latest_check = db.scalar(
-        select(CheckResult)
-        .where(CheckResult.target_id == target_id)
-        .order_by(CheckResult.created_at.desc(), CheckResult.id.desc())
-    )
+    latest_check = get_latest_check_result(db, target_id)
+
+    if target.url_revision > 1 and not active_baselines:
+        require_valid_transition(target.status, STATUS_OK)
+        target.status = STATUS_OK
+        target.last_error = None
 
     if latest_check is not None and latest_check.current_snapshot_id == snapshot_id:
         if latest_check.acknowledged_at is None:
@@ -161,8 +170,19 @@ def confirm_defacement(db: Session, check_result_id: str) -> CheckResult:
 
 
 def get_latest_check_result(db: Session, target_id: str) -> CheckResult | None:
+    target = db.get(Target, target_id)
+    if target is None:
+        return None
     return db.scalar(
         select(CheckResult)
-        .where(CheckResult.target_id == target_id)
+        .where(
+            CheckResult.target_id == target_id,
+            CheckResult.current_snapshot_id.in_(
+                select(Snapshot.id).where(
+                    Snapshot.target_id == target_id,
+                    Snapshot.url_revision == target.url_revision,
+                )
+            ),
+        )
         .order_by(CheckResult.created_at.desc(), CheckResult.id.desc())
     )

@@ -35,10 +35,12 @@ function makeState(targetId: string, revision = 1) {
   const timestamp = `2026-09-08T0${revision}:00:00Z`;
   const target: Target = {
     id: targetId, name: targetId, url: 'https://example.com', status: 'Changed',
+    url_revision: revision,
     is_active: true, last_error: null, created_at: timestamp, updated_at: timestamp,
   };
   const baseline: Snapshot = {
     id: `${targetId}-baseline-${revision}`, target_id: targetId, captured_at: timestamp,
+    url_revision: revision,
     final_url: target.url, http_status: 200, title: 'Baseline', is_baseline: true,
   };
   const current: Snapshot = { ...baseline, id: `${targetId}-current-${revision}`, is_baseline: false };
@@ -125,6 +127,24 @@ afterEach(() => {
 });
 
 describe('TargetDetailPage cache refresh', () => {
+  it('offers approval for a new URL candidate without a comparison result', async () => {
+    const state = makeState('target-1', 2);
+    state.target.status = 'Awaiting Baseline';
+    server.set('target-1', state);
+    vi.mocked(listTargetChecks).mockImplementation(async (_id, includeHistory) =>
+      includeHistory ? [state.check] : []
+    );
+    vi.mocked(listTargetSnapshots).mockResolvedValue([state.current]);
+    vi.mocked(getTargetBaselineSnapshot).mockResolvedValue(null);
+    vi.mocked(listTargetBaselines).mockResolvedValue([]);
+
+    openPage();
+    await waitFor(() => expect(screen.getByTestId('screenshot-pair'))
+      .toHaveTextContent(`|${state.current.id}`));
+    expect(await screen.findByRole('button', { name: /Approve as Baseline/ })).toBeTruthy();
+    expect(screen.getByText(/awaiting baseline approval/i)).toBeTruthy();
+  });
+
   it.each([false, true])('refreshes the first result after a cached mount (StrictMode=%s)', async (strict) => {
     seed(server.get('target-1')!);
     openPage(strict);

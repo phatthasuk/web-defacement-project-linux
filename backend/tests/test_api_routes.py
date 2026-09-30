@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_capture_func
 from app.core.status import (
     STATUS_ACKNOWLEDGED,
+    STATUS_AWAITING_BASELINE,
     STATUS_CHANGED,
     STATUS_CHECKING,
     STATUS_DEFACED,
@@ -255,6 +256,79 @@ async def test_review_flow_end_to_end(
     )
     assert approve_response.status_code == 200
     assert approve_response.json()["is_baseline"] is True
+    assert (await client.get(f"/targets/{target_id}")).json()["status"] == STATUS_OK
+
+
+async def test_url_edit_requires_new_baseline_and_preserves_history(
+    client: httpx.AsyncClient,
+    api_capture_calls: list[str],
+):
+    target_id = await create_target(client)
+    captures = [
+        ("old-baseline", "Original", "white"),
+        ("old-change", "Changed", "black"),
+        ("new-candidate", "New URL", "white"),
+    ]
+
+    async def queued_capture(url: str, settings, out_dir: Path) -> CaptureResult:
+        api_capture_calls.append(url)
+        snapshot_id, content, color = captures.pop(0)
+        return write_capture(out_dir, snapshot_id, content, color)
+
+    app.dependency_overrides[get_capture_func] = lambda: queued_capture
+    await client.post(f"/targets/{target_id}/check")
+    await client.post(f"/targets/{target_id}/check")
+    old_check = (await client.get(f"/targets/{target_id}/checks")).json()[0]
+
+    patched = await client.patch(
+        f"/targets/{target_id}", json={"url": "https://93.184.216.35"}
+    )
+    assert patched.status_code == 200
+    assert patched.json()["url_revision"] == 2
+    assert patched.json()["status"] == STATUS_AWAITING_BASELINE
+    assert (await client.get(f"/targets/{target_id}/baseline")).json() is None
+    assert (await client.get(f"/targets/{target_id}/checks")).json() == []
+    assert (await client.get(f"/targets/{target_id}/snapshots")).json() == []
+
+    await client.post(f"/targets/{target_id}/check")
+    candidate = (await client.get(f"/targets/{target_id}/snapshots")).json()[0]
+    assert candidate["id"] == "new-candidate"
+    assert candidate["url_revision"] == 2
+    assert candidate["is_baseline"] is False
+    assert (await client.get(f"/targets/{target_id}")).json()["status"] == STATUS_AWAITING_BASELINE
+    assert (await client.get(f"/targets/{target_id}/baseline")).json() is None
+
+    historical = (await client.get(f"/targets/{target_id}/checks?include_history=true")).json()
+    assert historical[0]["id"] == old_check["id"]
+    all_snapshots = (
+        await client.get(f"/targets/{target_id}/snapshots?include_history=true")
+    ).json()
+    assert {snapshot["id"] for snapshot in all_snapshots} == {
+        "old-baseline", "old-change", "new-candidate"
+    }
+
+    rejected = await client.post(
+        f"/targets/{target_id}/baseline/approve", json={"snapshot_id": "old-baseline"}
+    )
+    assert rejected.status_code == 400
+
+    async def missing_capture(url: str, settings, out_dir: Path) -> CaptureResult:
+        capture = write_capture(out_dir, "new-url-404", "Missing", "white")
+        capture.http_status = 404
+        return capture
+
+    app.dependency_overrides[get_capture_func] = lambda: missing_capture
+    await client.post(f"/targets/{target_id}/check")
+    assert (await client.get(f"/targets/{target_id}")).json()["status"] == "Availability Issue"
+    assert [s["id"] for s in (await client.get(f"/targets/{target_id}/snapshots")).json()] == [
+        "new-candidate"
+    ]
+
+    approved = await client.post(
+        f"/targets/{target_id}/baseline/approve", json={"snapshot_id": candidate["id"]}
+    )
+    assert approved.status_code == 200
+    assert approved.json()["is_baseline"] is True
     assert (await client.get(f"/targets/{target_id}")).json()["status"] == STATUS_OK
 
 

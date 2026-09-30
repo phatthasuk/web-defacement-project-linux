@@ -7,9 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.core.status import STATUS_CHECKING
+from app.core.status import STATUS_AVAILABILITY_ISSUE, STATUS_CHECKING
 from app.db.session import Base
-from app.models import Target
+from app.models import Snapshot, Target
 from app.services.scheduler import CheckScheduler
 
 
@@ -103,6 +103,40 @@ async def test_scheduler_retries_in_flight_target_in_60s(tmp_path: Path):
     assert scheduler._next_due_times[target_id] < now + 120.0
     assert scheduler._next_due_times[target_id] >= now + 50.0
 
+    await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_holds_new_url_candidate_after_failed_retry(tmp_path: Path):
+    session_factory, _ = make_test_db(tmp_path)
+    with session_factory() as db:
+        target = Target(
+            name="Pending Target",
+            url="https://example.com/new",
+            url_revision=2,
+            status=STATUS_AVAILABILITY_ISSUE,
+            is_active=True,
+        )
+        db.add(target)
+        db.flush()
+        db.add(Snapshot(
+            target_id=target.id,
+            url_revision=2,
+            final_url=target.url,
+            http_status=200,
+            screenshot_path="candidate.png",
+            text_path="candidate.txt",
+            html_path="candidate.html",
+            is_baseline=False,
+        ))
+        db.commit()
+        target_id = target.id
+
+    scheduler = CheckScheduler(Settings(DATA_DIR=str(tmp_path)), session_factory=session_factory)
+    scheduler._next_due_times[target_id] = time.time() - 1
+    await scheduler._tick()
+    assert scheduler.active_tasks_count == 0
+    assert scheduler._next_due_times[target_id] > time.time()
     await scheduler.stop()
 
 
