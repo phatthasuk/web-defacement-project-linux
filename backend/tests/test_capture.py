@@ -207,7 +207,8 @@ async def test_capture_snapshot_sandbox_configuration(tmp_path: Path):
 
 
 
-async def test_capture_does_not_hide_overlay_content(tmp_path: Path):
+@pytest.mark.parametrize("button_name", ["close", "accept"])
+async def test_capture_does_not_hide_overlay_content(tmp_path: Path, button_name: str):
     """An overlay-shaped defacement must survive into the diffed artifacts.
 
     Capture used to inject `display: none` for `.modal`, `.modal-backdrop`,
@@ -215,23 +216,24 @@ async def test_capture_does_not_hide_overlay_content(tmp_path: Path):
     screenshot *and* from inner_text("body"), so a defacement delivered as an
     overlay would have been reported as "no change". Nothing may be hidden.
     """
-    settings = Settings()
+    settings = Settings(DISMISS_OVERLAYS=True)
     out_dir = tmp_path / f"capture-{uuid4()}"
 
     # Class names taken from the rules that used to hide content, plus a
-    # dismiss control that deliberately does not work.
+    # working dismiss control that removes the entire payload when clicked.
     html_content = """
     <html><body>
       <main><h1>Normal page content</h1></main>
       <div class="modal-backdrop"></div>
       <div class="modal show">
-        <button class="btn-close" onclick="return false;">close</button>
+        <button class="btn-close" onclick="this.parentElement.remove()">BUTTON_NAME</button>
         <p>DEFACED-BY-OVERLAY</p>
       </div>
       <div class="preloader"><p>DEFACED-IN-PRELOADER</p></div>
       <div class="loading-overlay"><p>DEFACED-IN-LOADER</p></div>
     </body></html>
     """
+    html_content = html_content.replace("BUTTON_NAME", button_name)
     page_file = tmp_path / "overlay_defacement.html"
     page_file.write_text(html_content, encoding="utf-8")
 
@@ -243,6 +245,8 @@ async def test_capture_does_not_hide_overlay_content(tmp_path: Path):
     assert "DEFACED-IN-PRELOADER" in captured_text
     assert "DEFACED-IN-LOADER" in captured_text
     assert "Normal page content" in captured_text
+    assert "DEFACED-BY-OVERLAY" in Path(result.html_path).read_text(encoding="utf-8")
+    assert not result.overlays.changed_page
 
 
 async def test_capture_snapshot_sandbox_failure_does_not_fallback(tmp_path: Path):

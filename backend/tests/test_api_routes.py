@@ -961,3 +961,25 @@ async def test_paginated_targets_route(
     assert res_all.status_code == 200
     assert res_all.json()["total"] == 53
     assert len(res_all.json()["items"]) == 53
+
+
+async def test_target_patch_rejects_null_required_fields_and_allows_omission(
+    client: httpx.AsyncClient,
+):
+    target_id = await create_target(client)
+    before = (await client.get(f"/targets/{target_id}")).json()
+    for field in ("name", "url", "is_active"):
+        response = await client.patch(f"/targets/{target_id}", json={field: None})
+        assert response.status_code == 422
+        assert (await client.get(f"/targets/{target_id}")).json() == before
+
+    response = await client.patch(f"/targets/{target_id}", json={})
+    assert response.status_code == 200
+    assert response.json() == before
+    response = await client.patch(
+        f"/targets/{target_id}", json={"is_active": False, "allowed_domains": None}
+    )
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+    assert response.json()["allowed_domains"] is None
+    assert response.json()["name"] == before["name"]

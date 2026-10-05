@@ -79,7 +79,9 @@ class Settings(BaseSettings):
     PAGE_NETWORK_MAX_WAIT_MS: int = 15000
     PAGE_VISIBLE_CONTENT_TIMEOUT_MS: int = 5000
     PAGE_EXTRA_WAIT_MS: int = 1000
-    DISMISS_OVERLAYS: bool = True
+    # Legacy setting retained for config compatibility; dismissal is disabled
+    # regardless of its value to preserve potentially malicious overlays.
+    DISMISS_OVERLAYS: bool = False
 
     # A target may hold several approved baselines at once. A page with content
     # that legitimately rotates (hero carousels, promo panels) has more than one

@@ -33,6 +33,8 @@ __all__ = ["StructureDiff", "compare_structure", "extract_structure"]
 KIND_SCRIPT = "script"
 KIND_INLINE_SCRIPT = "inline-script"
 KIND_IFRAME = "iframe"
+KIND_IFRAME_SRCDOC = "iframe-srcdoc"
+KIND_BASE = "base"
 KIND_FORM = "form"
 KIND_STYLESHEET = "stylesheet"
 KIND_META_REFRESH = "meta-refresh"
@@ -81,6 +83,8 @@ class _StructureParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.script_srcs: list[str] = []
         self.iframe_srcs: list[str] = []
+        self.iframe_srcdocs: list[str] = []
+        self.base_href: str | None = None
         self.form_actions: list[str] = []
         self.stylesheet_hrefs: list[str] = []
         self.meta_refreshes: list[str] = []
@@ -109,9 +113,15 @@ class _StructureParser(HTMLParser):
                 self._in_inline_script = True
                 self._current_inline_chunks = []
         elif tag == "iframe":
+            if "srcdoc" in attributes:
+                self.iframe_srcdocs.append(attributes["srcdoc"])
             src = attributes.get("src", "").strip()
             if src:
                 self.iframe_srcs.append(src)
+        elif tag == "base":
+            # The first base with an href wins, even if that href is empty.
+            if self.base_href is None and "href" in attributes:
+                self.base_href = attributes["href"].strip()
         elif tag == "form":
             # An empty action posts back to the current URL, which is not a change.
             action = attributes.get("action", "").strip()
@@ -165,7 +175,8 @@ def extract_structure(
 ) -> set[str]:
     """Return the set of security-relevant facts about a page.
 
-    Relative URLs are resolved against `base_url` so the same asset does not
+    Relative URLs are resolved against the first document base href (itself
+    resolved against `base_url`), or `base_url` when absent, so an asset does not
     read as a change just because the markup spelled it differently. Anything
     served from an allowlisted host is dropped, which is what keeps expected
     third parties (analytics, tag managers, CDNs) from firing on every check.
@@ -178,11 +189,18 @@ def extract_structure(
         # A defaced page may well be malformed; keep whatever was parsed.
         logger.debug("HTML parsing ended early", exc_info=True)
 
+    effective_base = base_url
+    if parser.base_href is not None:
+        try:
+            effective_base = urljoin(base_url, parser.base_href)
+        except ValueError:
+            pass
+
     def resolve(value: str) -> str:
-        if not base_url:
+        if not effective_base:
             return value
         try:
-            return urljoin(base_url, value)
+            return urljoin(effective_base, value)
         except ValueError:
             return value
 
@@ -194,10 +212,20 @@ def extract_structure(
             facts.add(f"{kind}:{resolved}")
 
     facts: set[str] = set()
+    if parser.base_href is not None:
+        # Track the base independently, including changes on allowlisted hosts.
+        facts.add(f"{KIND_BASE}:{effective_base}")
     add_urls(facts, KIND_SCRIPT, parser.script_srcs)
     add_urls(facts, KIND_IFRAME, parser.iframe_srcs)
     add_urls(facts, KIND_FORM, parser.form_actions)
     add_urls(facts, KIND_STYLESHEET, parser.stylesheet_hrefs)
+
+    # srcdoc overrides src and may execute even in an invisible iframe. Hash
+    # the decoded attribute verbatim; do not expose inline content in summaries
+    # or suppress it because the iframe's fallback src is allowlisted.
+    for body in parser.iframe_srcdocs:
+        digest = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest()
+        facts.add(f"{KIND_IFRAME_SRCDOC}:{digest}")
 
     for content in parser.meta_refreshes:
         facts.add(f"{KIND_META_REFRESH}:{content}")

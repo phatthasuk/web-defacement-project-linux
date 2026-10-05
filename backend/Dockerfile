@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY scripts/create_user.py ./scripts/create_user.py
 
 # Production Compose supplies a host-selected non-root UID/GID. Only /app/data
 # and /tmp are writable at runtime.

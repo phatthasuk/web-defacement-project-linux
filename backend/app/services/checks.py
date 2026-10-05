@@ -14,6 +14,7 @@ from app.core.errors import (
     CaptureError,
     DnsResolutionError,
     SsrfBlockedError,
+    UpstreamConnectionError,
     ValidationError,
 )
 from app.core.status import (
@@ -59,7 +60,7 @@ def is_availability_error(exc: Exception) -> bool:
     """
     if isinstance(exc, SsrfBlockedError):
         return False
-    if isinstance(exc, TimeoutError | DnsResolutionError):
+    if isinstance(exc, TimeoutError | DnsResolutionError | UpstreamConnectionError):
         return True
     msg = str(exc).lower()
     if "blocked by ssrf guard" in msg:

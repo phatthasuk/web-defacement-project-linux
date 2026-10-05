@@ -12,9 +12,14 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Request, Route, WebSocketRoute, async_playwright
 
 from app.core.config import Settings
-from app.core.errors import CaptureError, DnsResolutionError, SsrfBlockedError
+from app.core.errors import (
+    CaptureError,
+    DnsResolutionError,
+    SsrfBlockedError,
+    UpstreamConnectionError,
+)
 from app.core.ssrf_guard import validate_url
-from app.services.capture.overlays import OverlayDismissal, dismiss_overlays
+from app.services.capture.overlays import OverlayDismissal
 from app.services.capture.page_ready import (
     SCROLL_NEUTRALISER_SCRIPT,
     WaitPageOptions,
@@ -132,7 +137,7 @@ async def _capture_snapshot_impl(
             await context.add_init_script(SCROLL_NEUTRALISER_SCRIPT)
 
             blocked_error: SsrfBlockedError | None = None
-            availability_error: DnsResolutionError | None = None
+            availability_error: DnsResolutionError | UpstreamConnectionError | None = None
             capture_error: CaptureError | None = None
             main_redirect_count = 0
             pending_redirect_depths: dict[
@@ -182,7 +187,9 @@ async def _capture_snapshot_impl(
                     if url.startswith("file://"):
                         await route.continue_()
                         return
-                    logger.warning("Blocked file:// subresource from remote target: %s", url_to_check)
+                    logger.warning(
+                        "Blocked file:// subresource from remote target: %s", url_to_check
+                    )
                     await route.abort()
                     return
 
@@ -235,12 +242,18 @@ async def _capture_snapshot_impl(
                 try:
                     response = await route.fetch(max_redirects=0)
                 except Exception as exc:
+                    # Pop even for subresources so a stale rejection cannot be
+                    # attributed to a later request to the same host.
+                    proxy_rejection = ssrf_proxy.pop_rejection(url_to_check)
                     if main_navigation:
-                        proxy_rejection = ssrf_proxy.pop_rejection(url_to_check)
                         if isinstance(proxy_rejection, SsrfBlockedError):
                             blocked_error = proxy_rejection
-                        elif isinstance(proxy_rejection, DnsResolutionError):
+                        elif isinstance(
+                            proxy_rejection, DnsResolutionError | UpstreamConnectionError
+                        ):
                             availability_error = proxy_rejection
+                        elif isinstance(proxy_rejection, CaptureError):
+                            capture_error = proxy_rejection
                         else:
                             capture_error = CaptureError(f"Guarded request failed: {exc}")
                         main_navigation_complete.set()
@@ -252,7 +265,9 @@ async def _capture_snapshot_impl(
                     if main_navigation:
                         if isinstance(proxy_rejection, SsrfBlockedError):
                             blocked_error = proxy_rejection
-                        elif isinstance(proxy_rejection, DnsResolutionError):
+                        elif isinstance(
+                            proxy_rejection, DnsResolutionError | UpstreamConnectionError
+                        ):
                             availability_error = proxy_rejection
                         else:
                             capture_error = CaptureError(str(proxy_rejection))
@@ -364,20 +379,8 @@ async def _capture_snapshot_impl(
                 wait_options = build_wait_options(settings)
                 readiness = await wait_page_ready(page, wait_options)
 
-                if settings.DISMISS_OVERLAYS:
-                    overlays = await dismiss_overlays(page)
-                    if overlays.changed_page:
-                        # Dismissing reflows the page, so settle it again before
-                        # capturing. Skip the slow phases: the page is warm now.
-                        readiness = await wait_page_ready(
-                            page,
-                            WaitPageOptions(
-                                load_timeout_ms=wait_options.load_timeout_ms,
-                                network_quiet=False,
-                                visible_content_timeout_ms=1_000,
-                                extra_wait_ms=min(wait_options.extra_wait_ms, 500),
-                            ),
-                        )
+                # Page-controlled dismissal handlers can erase defacement.
+                # Preserve overlays in every artifact used by the detectors.
 
             redirect_count = max(
                 redirect_depth(response.request) if response else 0,

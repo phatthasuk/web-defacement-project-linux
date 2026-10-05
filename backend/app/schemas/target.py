@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 ALLOWED_DOMAINS_DESCRIPTION = (
     "Hosts whose scripts, iframes, forms and outbound links are expected on this "
@@ -28,6 +28,14 @@ class TargetUpdate(BaseModel):
     allowed_domains: list[str] | None = Field(
         default=None, max_length=200, description=ALLOWED_DOMAINS_DESCRIPTION
     )
+
+    @field_validator("name", "url", "is_active", mode="before")
+    @classmethod
+    def reject_explicit_null(cls, value: object) -> object:
+        # Defaults are not validated: omitted fields still support partial PATCH.
+        if value is None:
+            raise ValueError("Field must not be null")
+        return value
 
 
 class TargetRead(BaseModel):

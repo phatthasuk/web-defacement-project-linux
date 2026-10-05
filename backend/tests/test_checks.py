@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.core.errors import DnsResolutionError, SsrfBlockedError
+from app.core.errors import DnsResolutionError, SsrfBlockedError, UpstreamConnectionError
 from app.core.status import (
     STATUS_AVAILABILITY_ISSUE,
     STATUS_CHANGED,
@@ -173,6 +173,34 @@ async def test_run_target_check_dns_failure_recorded_as_availability_issue(tmp_p
     assert result.status == STATUS_AVAILABILITY_ISSUE
     assert "DNS resolution failed" in (result.error or "")
     assert target.status == STATUS_AVAILABILITY_ISSUE
+
+
+async def test_run_target_check_upstream_connection_failure_is_availability_issue(
+    tmp_path: Path,
+):
+    work_dir = make_work_dir("checks-upstream", tmp_path)
+    db = make_session()
+    target = Target(name="Example", url="https://down.example")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    async def fake_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        raise UpstreamConnectionError(
+            "Upstream connection to down.example:443 failed: connection refused"
+        )
+
+    result = await run_target_check(
+        db,
+        target,
+        Settings(DATA_DIR=str(work_dir)),
+        capture_func=fake_capture,
+    )
+
+    assert result.status == STATUS_AVAILABILITY_ISSUE
+    assert "connection refused" in (result.error or "")
+    assert target.status == STATUS_AVAILABILITY_ISSUE
+    assert target.last_error == result.error
 
 
 async def test_run_target_check_commits_checking_before_capture(tmp_path: Path):
