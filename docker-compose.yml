@@ -17,6 +17,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      # Permit Chromium's user-namespace sandbox without disabling seccomp.
+      - seccomp:./deploy/playwright-seccomp.json
     expose:
       - "8000"
     environment:
@@ -57,7 +59,8 @@ services:
       - /var/cache/nginx:size=64m
       - /var/run:size=8m
       - /tmp:size=16m
-      - /etc/nginx/conf.d:size=1m
+      # Nginx runs unprivileged and must write the generated server config.
+      - /etc/nginx/conf.d:size=1m,mode=1777
     cap_drop:
       - ALL
     security_opt:

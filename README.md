@@ -173,6 +173,18 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    capabilities dropped, `no-new-privileges`, a non-root UID/GID, and Chromium's
    sandbox enabled. Only `backend/data` and `/tmp` are writable.
 
+   The backend uses `deploy/playwright-seccomp.json`, copied from the official
+   [Playwright v1.48.0 profile](https://github.com/microsoft/playwright/blob/v1.48.0/utils/docker/seccomp_profile.json).
+   It permits the user-namespace operations needed by Chromium while retaining
+   seccomp filtering. The frontend's config tmpfs is writable by its unprivileged
+   user so Nginx can render its HTTPS and API proxy configuration at startup.
+
+   If capture reports `No usable sandbox`, check the host's user namespace and
+   AppArmor restrictions; see the
+   [Chromium troubleshooting guide](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+   The seccomp profile does not override host AppArmor or kernel restrictions.
+   Keep `BROWSER_DISABLE_SANDBOX=false` for monitored websites.
+
 ---
 
 ### Option B: Local Manual Setup on Linux (Bare-Metal)
