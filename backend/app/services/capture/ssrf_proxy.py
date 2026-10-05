@@ -116,8 +116,17 @@ class SsrfProxy:
                     port,
                     "https",
                 )
-                writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                await writer.drain()
+                if not writer.is_closing():
+                    try:
+                        writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                        await writer.drain()
+                    except (RuntimeError, ConnectionError, OSError):
+                        logger.debug(
+                            "Capture proxy client disconnected before CONNECT completed: %s:%d",
+                            host,
+                            port,
+                        )
+                        return
             else:
                 parsed = urlsplit(target)
                 if parsed.scheme.lower() != "http" or not parsed.hostname:
@@ -172,17 +181,23 @@ class SsrfProxy:
                 self._rejections[destination].append(exc)
             if not writer.is_closing():
                 await _write_error(writer, 502, "Upstream connection failed")
-        except (OSError, ValueError, asyncio.IncompleteReadError, h11.ProtocolError) as exc:
-            logger.warning("Capture proxy connection failed: %s", exc)
+        except (
+            RuntimeError,
+            OSError,
+            ValueError,
+            asyncio.IncompleteReadError,
+            h11.ProtocolError,
+        ) as exc:
+            logger.debug("Capture proxy client disconnected or connection failed: %s", exc)
             if not writer.is_closing():
                 await _write_error(writer, 502, "Upstream connection failed")
         finally:
             if upstream_writer is not None:
                 upstream_writer.close()
-                with suppress(OSError):
+                with suppress(RuntimeError, ConnectionError, OSError):
                     await upstream_writer.wait_closed()
             writer.close()
-            with suppress(OSError):
+            with suppress(RuntimeError, ConnectionError, OSError):
                 await writer.wait_closed()
             self._writers.discard(writer)
 
@@ -376,11 +391,11 @@ async def _tunnel(
                 sent = True
                 upstream_writer.write(chunk)
                 await asyncio.wait_for(upstream_writer.drain(), timeout=idle_timeout)
-        except (ConnectionError, OSError, h11.ProtocolError):
+        except (RuntimeError, ConnectionError, OSError, h11.ProtocolError):
             # OSError covers TimeoutError: an idle client ends this direction.
             pass
         finally:
-            with suppress(OSError):
+            with suppress(RuntimeError, ConnectionError, OSError):
                 upstream_writer.write_eof()
 
     async def to_client() -> None:
@@ -423,7 +438,7 @@ async def _tunnel(
                 received = True
                 client_writer.write(chunk)
                 await asyncio.wait_for(client_writer.drain(), timeout=idle_timeout)
-        except OSError:
+        except (RuntimeError, ConnectionError, OSError):
             # Backpressure or a closed client is not an upstream site failure.
             abnormal_end = True
         finally:
@@ -432,13 +447,15 @@ async def _tunnel(
                 # socket, so the recorded error must also reject successful fetches.
                 downstream_socket = client_writer.get_extra_info("socket")
                 if downstream_socket is not None:
-                    with suppress(OSError):
+                    with suppress(RuntimeError, ConnectionError, OSError):
                         downstream_socket.setsockopt(
                             socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
                         )
-                client_writer.transport.abort()
+                if client_writer.transport is not None:
+                    with suppress(RuntimeError, ConnectionError, OSError):
+                        client_writer.transport.abort()
             else:
-                with suppress(OSError):
+                with suppress(RuntimeError, ConnectionError, OSError):
                     client_writer.write_eof()
 
     # A client that half-closes after sending its request still expects the
@@ -455,13 +472,17 @@ async def _tunnel(
 
 
 async def _write_error(writer: asyncio.StreamWriter, status: int, reason: str) -> None:
+    if writer.is_closing():
+        return
     body = f"{status} {reason}\n".encode()
-    writer.write(
-        f"HTTP/1.1 {status} {reason}\r\n"
-        f"Content-Type: text/plain; charset=utf-8\r\n"
-        f"Content-Length: {len(body)}\r\n"
-        "Connection: close\r\n\r\n".encode()
-        + body
-    )
-    with suppress(ConnectionError, OSError):
+    try:
+        writer.write(
+            f"HTTP/1.1 {status} {reason}\r\n"
+            f"Content-Type: text/plain; charset=utf-8\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n\r\n".encode()
+            + body
+        )
         await writer.drain()
+    except (RuntimeError, ConnectionError, OSError):
+        pass
