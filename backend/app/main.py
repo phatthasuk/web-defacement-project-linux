@@ -1,6 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -91,12 +92,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _is_trusted_origin(origin: str, request: Request, allowed_origins: list[str]) -> bool:
+    if origin in allowed_origins:
+        return True
+
+    # Same-origin check for reverse proxy / direct access
+    try:
+        parsed_origin = urlsplit(origin)
+    except Exception:
+        return False
+
+    if not parsed_origin.hostname:
+        return False
+
+    host_header = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if not host_header:
+        return False
+
+    target_host = host_header.split(":")[0].strip().lower()
+    origin_host = parsed_origin.hostname.strip().lower()
+
+    if target_host and origin_host == target_host:
+        expected_scheme = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
+        if parsed_origin.scheme.lower() == expected_scheme:
+            return True
+
+    return False
+
+
 @app.middleware("http")
 async def csrf_origin_validation(request: Request, call_next):
     # Origin validation for state-changing endpoints
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         origin = request.headers.get("origin")
-        if origin and origin not in origins:
+        if origin and not _is_trusted_origin(origin, request, origins):
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "CSRF verification failed: untrusted origin"}

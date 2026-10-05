@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     ROOT_PATH: str = ""
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "https://localhost:3030,https://127.0.0.1:3030,"
+        "https://10.117.10.68:3030,http://10.117.10.68:3030"
+    )
 
     # Session cookie behaviour is centralised here so login, logout, and tests
     # stay consistent. Production must run with SESSION_COOKIE_SECURE=True

@@ -27,7 +27,7 @@ services:
       SESSION_COOKIE_SAMESITE: strict
       BROWSER_DISABLE_SANDBOX: "${BROWSER_DISABLE_SANDBOX:-false}"
       ROOT_PATH: /api
-      CORS_ORIGINS: "https://${PUBLIC_HOST:-localhost}:${PUBLIC_HTTPS_PORT:-3030}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-https://${PUBLIC_HOST:-10.117.10.68}:${PUBLIC_HTTPS_PORT:-3030},https://localhost:${PUBLIC_HTTPS_PORT:-3030},https://127.0.0.1:${PUBLIC_HTTPS_PORT:-3030}}"
       DATABASE_URL: sqlite:////app/data/app.db
       DATA_DIR: /app/data
       HOME: /tmp
