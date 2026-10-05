@@ -25,7 +25,7 @@ services:
       ENVIRONMENT: production
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_SAMESITE: strict
-      BROWSER_DISABLE_SANDBOX: "false"
+      BROWSER_DISABLE_SANDBOX: "${BROWSER_DISABLE_SANDBOX:-false}"
       ROOT_PATH: /api
       CORS_ORIGINS: "https://${PUBLIC_HOST:-localhost}:${PUBLIC_HTTPS_PORT:-3030}"
       DATABASE_URL: sqlite:////app/data/app.db
@@ -68,8 +68,10 @@ services:
     environment:
       PUBLIC_HTTPS_PORT: "${PUBLIC_HTTPS_PORT:-3030}"
     secrets:
-      - tls_cert
-      - tls_key
+      - source: tls_cert
+        mode: 0444
+      - source: tls_key
+        mode: 0444
     ports:
       - "${PUBLIC_HTTP_PORT:-3080}:8080"
       - "${PUBLIC_HTTPS_PORT:-3030}:8443"
