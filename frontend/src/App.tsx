@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TargetListPage } from './pages/TargetListPage';
 import { TargetDetailPage } from './pages/TargetDetailPage';
 import { CheckDetailPage } from './pages/CheckDetailPage';
 import { LoginPage } from './pages/LoginPage';
+import { TagsPage } from './pages/TagsPage';
 import { useAuth } from './hooks/authContext';
 import { AuthProvider } from './hooks/useAuth';
-import { LogOut } from 'lucide-react';
+import { LogOut, Tags } from 'lucide-react';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,6 +79,21 @@ function NavBar() {
         Web Defacement Monitor
       </div>
       <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/50 p-1">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}
+          >
+            Websites
+          </NavLink>
+          <NavLink
+            to="/tags"
+            className={({ isActive }) => `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}
+          >
+            <Tags className="h-4 w-4" /> Tags
+          </NavLink>
+        </div>
         {logoutError && (
           <span className="text-xs text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2 py-1 rounded">
             {logoutError}
@@ -111,6 +127,7 @@ export function App() {
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/" element={<ProtectedRoute><TargetListPage /></ProtectedRoute>} />
+                <Route path="/tags" element={<ProtectedRoute><TagsPage /></ProtectedRoute>} />
                 <Route path="/targets/:id" element={<ProtectedRoute><TargetDetailPage /></ProtectedRoute>} />
                 <Route path="/checks/:id" element={<ProtectedRoute><CheckDetailPage /></ProtectedRoute>} />
               </Routes>

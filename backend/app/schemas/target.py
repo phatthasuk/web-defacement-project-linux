@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
+from app.schemas.tag import TagRead
+
 ALLOWED_DOMAINS_DESCRIPTION = (
     "Hosts whose scripts, iframes, forms and outbound links are expected on this "
     "target (analytics, tag managers, CDNs). Subdomains of a listed host are "
@@ -17,6 +19,14 @@ class TargetCreate(BaseModel):
     allowed_domains: list[str] | None = Field(
         default=None, max_length=200, description=ALLOWED_DOMAINS_DESCRIPTION
     )
+    tag_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("tag_ids")
+    @classmethod
+    def unique_tag_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Tag IDs must be unique")
+        return value
 
 
 class TargetUpdate(BaseModel):
@@ -28,13 +38,21 @@ class TargetUpdate(BaseModel):
     allowed_domains: list[str] | None = Field(
         default=None, max_length=200, description=ALLOWED_DOMAINS_DESCRIPTION
     )
+    tag_ids: list[str] | None = Field(default=None, max_length=20)
 
-    @field_validator("name", "url", "is_active", mode="before")
+    @field_validator("name", "url", "is_active", "tag_ids", mode="before")
     @classmethod
     def reject_explicit_null(cls, value: object) -> object:
         # Defaults are not validated: omitted fields still support partial PATCH.
         if value is None:
             raise ValueError("Field must not be null")
+        return value
+
+    @field_validator("tag_ids")
+    @classmethod
+    def unique_tag_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("Tag IDs must be unique")
         return value
 
 
@@ -49,6 +67,7 @@ class TargetRead(BaseModel):
     is_active: bool
     last_error: str | None = None
     allowed_domains: list[str] | None = None
+    tags: list[TagRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

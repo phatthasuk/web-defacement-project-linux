@@ -393,6 +393,8 @@ tags and filters. Bulk assignment and tag operations follow in a later increment
 
 See [Member Management Plan](MEMBER_MANAGEMENT_PLAN.md) for the permission matrix,
 page behaviour, account lifecycle, implementation sequence and acceptance criteria.
+See [Tags Management Plan](TAGS_MANAGEMENT_PLAN.md) for the separate Tags page,
+top-right header navigation, badges below website URLs and tag filtering design.
 This planning work does not change the recorded observation-period status.
 
 ---
@@ -483,6 +485,7 @@ caused real confusion. Going forward:
 | :--- | :--- |
 | `plan/PROJECT_PLAN.md` | **Active project roadmap**; links to detailed feature plans |
 | `plan/MEMBER_MANAGEMENT_PLAN.md` | Active feature plan for member management, RBAC, website assignments and tags; priority and timing not yet assigned |
+| `plan/TAGS_MANAGEMENT_PLAN.md` | Detailed plan for Tags management, website tag assignment, header navigation and filters |
 | `plan/archive/` | All previous plans and review documents, kept for history |
 | `refinement/<date>/` | Dated point-in-time records of completed work |
 | `PROJECT_STRUCTURE.md` | Repository layout |

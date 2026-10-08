@@ -26,6 +26,8 @@ import { formatDateTime } from '../utils/date';
 import { TextDiffView } from '../components/TextDiffView';
 import { ArtifactError } from '../components/ArtifactError';
 import { TargetStatus } from '../types/target';
+import { TagBadge } from '../components/TagBadge';
+import { useTagsQuery } from '../hooks/useTags';
 
 export function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +39,7 @@ export function TargetDetailPage() {
   const { data: baselines = [], isLoading: isBaselinesLoading } = useTargetBaselinesQuery(targetId);
   const { data: checks, isLoading: isChecksLoading } = useTargetChecksQuery(targetId);
   const { data: appConfig } = useConfigQuery();
+  const { data: tagData } = useTagsQuery();
   const { data: historicalChecks = [] } = useQuery({
     queryKey: ['historicalChecks', targetId, target?.url_revision],
     queryFn: () => listTargetChecks(targetId, true),
@@ -226,10 +229,10 @@ export function TargetDetailPage() {
     }
   };
 
-  const handleSaveEdit = async (targetId: string, newName: string, newUrl: string) => {
+  const handleSaveEdit = async (targetId: string, newName: string, newUrl: string, tagIds: string[]) => {
     await updateTargetMutation.mutateAsync({
       targetId,
-      payload: { name: newName, url: newUrl },
+      payload: { name: newName, url: newUrl, tag_ids: tagIds },
     });
   };
 
@@ -300,6 +303,11 @@ export function TargetDetailPage() {
               {target.url}
             </a>
           </div>
+          {(target.tags?.length ?? 0) > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {(target.tags ?? []).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
+            </div>
+          )}
           {target.status === 'Awaiting Baseline' && (
             <p className="mt-3 max-w-2xl rounded-lg border border-amber-800/60 bg-amber-950/40 p-3 text-sm text-amber-200">
               URL revision {target.url_revision} is awaiting baseline approval.
@@ -652,6 +660,7 @@ export function TargetDetailPage() {
         onClose={() => setIsEditModalOpen(false)}
         onSave={handleSaveEdit}
         isSaving={updateTargetMutation.isPending}
+        availableTags={tagData?.items ?? []}
       />
 
       <DeleteTargetModal

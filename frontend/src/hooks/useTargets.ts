@@ -15,11 +15,14 @@ export function useTargetsQuery(includeInactive: boolean = false) {
 export function usePaginatedTargetsQuery(
   limit: number = 50,
   offset: number = 0,
-  includeInactive: boolean = false
+  includeInactive: boolean = false,
+  tagIds: string[] = [],
+  tagMatch: 'any' | 'all' = 'any'
 ) {
+  const sortedTagIds = [...tagIds].sort();
   return useQuery({
-    queryKey: [...TARGETS_QUERY_KEY, 'page', { limit, offset, includeInactive }],
-    queryFn: () => getPaginatedTargets(limit, offset, includeInactive),
+    queryKey: [...TARGETS_QUERY_KEY, 'page', { limit, offset, includeInactive, tagIds: sortedTagIds, tagMatch }],
+    queryFn: () => getPaginatedTargets(limit, offset, includeInactive, sortedTagIds, tagMatch),
     refetchInterval: 4000,
   });
 }

@@ -86,6 +86,10 @@ must make that effect clear. Admin access does not count as an Operator assignme
 
 ## Tags and filtering
 
+Detailed Tags UI, API and migration design is in [Tags Management Plan](TAGS_MANAGEMENT_PLAN.md).
+Provide a separate Tags Management page, reachable from the top-right header
+navigation. Show assigned tag badges below each website URL on the Websites list.
+
 - Allow multiple tags per website. Admins manage a shared tag catalogue with
   names and colours; reject duplicate names after trimming and case normalisation.
 - Support multi-tag filtering with **Match any** (default) and **Match all** modes.

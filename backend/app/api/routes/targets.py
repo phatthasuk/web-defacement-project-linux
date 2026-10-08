@@ -1,15 +1,16 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.ssrf_guard import validate_url
 from app.core.status import STATUS_AWAITING_BASELINE, STATUS_CHECKING
-from app.models import Snapshot, Target
+from app.models import Snapshot, Tag, Target
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
 from app.services.concurrency import is_target_in_flight
 
@@ -26,10 +27,12 @@ async def create_target(
     settings: AppSettings,
 ) -> Target:
     validate_url(payload.url, settings)
+    tags = _resolve_tags(db, payload.tag_ids)
     target = Target(
         name=payload.name,
         url=payload.url,
         allowed_domains=payload.allowed_domains,
+        tags=tags,
     )
     db.add(target)
     db.commit()
@@ -43,8 +46,13 @@ async def list_targets(
     include_inactive: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    tag_ids: Annotated[list[str] | None, Query()] = None,
+    tag_match: Annotated[str, Query(pattern="^(any|all)$")] = "any",
 ) -> list[Target]:
-    statement = select(Target).order_by(Target.created_at.desc())
+    statement = _apply_tag_filter(select(Target), tag_ids, tag_match).options(
+        selectinload(Target.tags)
+    )
+    statement = statement.order_by(Target.created_at.desc())
     if not include_inactive:
         statement = statement.where(Target.is_active.is_(True))
     statement = statement.limit(limit).offset(offset)
@@ -57,8 +65,10 @@ async def list_paginated_targets(
     include_inactive: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    tag_ids: Annotated[list[str] | None, Query()] = None,
+    tag_match: Annotated[str, Query(pattern="^(any|all)$")] = "any",
 ) -> PaginatedTargetsRead:
-    base_query = select(Target)
+    base_query = _apply_tag_filter(select(Target), tag_ids, tag_match)
     if not include_inactive:
         base_query = base_query.where(Target.is_active.is_(True))
 
@@ -66,6 +76,7 @@ async def list_paginated_targets(
 
     items_stmt = (
         base_query.order_by(Target.created_at.desc(), Target.id.desc())
+        .options(selectinload(Target.tags))
         .limit(limit)
         .offset(offset)
     )
@@ -81,7 +92,9 @@ async def list_paginated_targets(
 
 @router.get("/{target_id}", response_model=TargetRead)
 async def get_target(target_id: str, db: DbSession) -> Target:
-    target = db.get(Target, target_id)
+    target = db.scalar(
+        select(Target).where(Target.id == target_id).options(selectinload(Target.tags))
+    )
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
     return target
@@ -122,10 +135,33 @@ async def update_target(
         target.is_active = update_data["is_active"]
     if "allowed_domains" in update_data:
         target.allowed_domains = update_data["allowed_domains"]
+    if "tag_ids" in update_data:
+        target.tags = _resolve_tags(db, update_data["tag_ids"])
+        target.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(target)
     return target
+
+
+def _resolve_tags(db: Session, tag_ids: list[str]) -> list[Tag]:
+    if not tag_ids:
+        return []
+    tags = list(db.scalars(select(Tag).where(Tag.id.in_(tag_ids))))
+    if len(tags) != len(tag_ids):
+        found_ids = {tag.id for tag in tags}
+        missing_ids = [tag_id for tag_id in tag_ids if tag_id not in found_ids]
+        raise ValidationError(f"Tag not found: {', '.join(missing_ids)}")
+    by_id = {tag.id: tag for tag in tags}
+    return [by_id[tag_id] for tag_id in tag_ids]
+
+
+def _apply_tag_filter(statement, tag_ids: list[str] | None, tag_match: str):
+    if not tag_ids:
+        return statement
+    if tag_match == "all":
+        return statement.where(and_(*(Target.tags.any(Tag.id == tag_id) for tag_id in tag_ids)))
+    return statement.where(Target.tags.any(Tag.id.in_(tag_ids)))
 
 
 @router.delete("/{target_id}", response_model=TargetRead)

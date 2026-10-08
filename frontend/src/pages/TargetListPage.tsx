@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   usePaginatedTargetsQuery,
   useCreateTargetMutation,
@@ -13,6 +13,9 @@ import { DeleteTargetModal } from '../components/DeleteTargetModal';
 import { Target } from '../types/target';
 import { ApiError } from '../api/client';
 import { formatDateTime } from '../utils/date';
+import { TagBadge } from '../components/TagBadge';
+import { TagMultiSelect } from '../components/TagMultiSelect';
+import { useTagsQuery } from '../hooks/useTags';
 
 export function TargetListPage() {
   const [name, setName] = useState('');
@@ -21,12 +24,20 @@ export function TargetListPage() {
   const [triggerNotice, setTriggerNotice] = useState<Record<string, string | null>>({});
   const [editingTarget, setEditingTarget] = useState<Target | null>(null);
   const [deletingTarget, setDeletingTarget] = useState<Target | null>(null);
+  const [newTargetTagIds, setNewTargetTagIds] = useState<string[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [page, setPage] = useState(1);
   const pageSize = 50;
   const offset = (page - 1) * pageSize;
 
-  const { data: paginatedData, isLoading, isError, error } = usePaginatedTargetsQuery(pageSize, offset);
+  const tagIdsFromUrl = searchParams.getAll('tag_ids');
+  const tagMatchFromUrl = searchParams.get('tag_match') === 'all' ? 'all' : 'any';
+  const activeTagIds = tagIdsFromUrl;
+  const activeTagMatch = tagMatchFromUrl;
+  const { data: paginatedData, isLoading, isError, error } = usePaginatedTargetsQuery(pageSize, offset, false, activeTagIds, activeTagMatch);
+  const { data: tagData } = useTagsQuery();
+  const availableTags = tagData?.items ?? [];
   const targets = paginatedData?.items;
   const total = paginatedData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -46,9 +57,14 @@ export function TargetListPage() {
     }
 
     try {
-      await createTargetMutation.mutateAsync({ name: name.trim(), url: url.trim() });
+      await createTargetMutation.mutateAsync({
+        name: name.trim(),
+        url: url.trim(),
+        ...(newTargetTagIds.length ? { tag_ids: newTargetTagIds } : {}),
+      });
       setName('');
       setUrl('');
+      setNewTargetTagIds([]);
       setPage(1);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -79,11 +95,19 @@ export function TargetListPage() {
     }
   };
 
-  const handleSaveEdit = async (targetId: string, newName: string, newUrl: string) => {
+  const handleSaveEdit = async (targetId: string, newName: string, newUrl: string, tagIds: string[]) => {
     await updateTargetMutation.mutateAsync({
       targetId,
-      payload: { name: newName, url: newUrl },
+      payload: { name: newName, url: newUrl, tag_ids: tagIds },
     });
+  };
+
+  const applyTagFilter = (tagIds: string[], match = activeTagMatch) => {
+    const params = new URLSearchParams();
+    tagIds.forEach((tagId) => params.append('tag_ids', tagId));
+    if (tagIds.length) params.set('tag_match', match);
+    setSearchParams(params);
+    setPage(1);
   };
 
   const handleConfirmDelete = async (targetId: string) => {
@@ -132,6 +156,13 @@ export function TargetListPage() {
                   disabled={createTargetMutation.isPending}
                 />
               </div>
+
+              <TagMultiSelect
+                tags={availableTags}
+                selectedIds={newTargetTagIds}
+                onChange={setNewTargetTagIds}
+                disabled={createTargetMutation.isPending}
+              />
 
               <div>
                 <label htmlFor="url-input" className="block text-sm font-medium text-slate-400 mb-2">
@@ -191,6 +222,29 @@ export function TargetListPage() {
               )}
             </div>
 
+            <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
+                {availableTags.map((tag) => {
+                  const selected = activeTagIds.includes(tag.id);
+                  return (
+                    <button key={tag.id} type="button" onClick={() => applyTagFilter(selected ? activeTagIds.filter((id) => id !== tag.id) : [...activeTagIds, tag.id])} className={`rounded-full transition ${selected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}>
+                      <TagBadge tag={tag} />
+                    </button>
+                  );
+                })}
+              </div>
+              {activeTagIds.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <select aria-label="Tag filter mode" value={activeTagMatch} onChange={(event) => applyTagFilter(activeTagIds, event.target.value as 'any' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 focus:outline-none">
+                    <option value="any">Match any</option>
+                    <option value="all">Match all</option>
+                  </select>
+                  <button type="button" onClick={() => applyTagFilter([])} className="text-xs font-medium text-cyan-400 hover:text-cyan-300">Clear</button>
+                </div>
+              )}
+            </div>
+
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-20 gap-4">
                 <svg className="animate-spin h-8 w-8 text-cyan-500" fill="none" viewBox="0 0 24 24">
@@ -211,9 +265,9 @@ export function TargetListPage() {
                 <svg className="mx-auto h-12 w-12 text-slate-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
-                <h3 className="text-slate-300 font-medium text-lg mb-1">No targets configured</h3>
+                <h3 className="text-slate-300 font-medium text-lg mb-1">{activeTagIds.length ? 'No websites match the selected tags' : 'No targets configured'}</h3>
                 <p className="text-slate-500 text-sm max-w-sm mx-auto">
-                  Add a new target website on the left to start tracking content and visual adjustments.
+                  {activeTagIds.length ? 'Try removing a tag or changing the matching mode.' : 'Add a new target website on the left to start tracking content and visual adjustments.'}
                 </p>
               </div>
             ) : (
@@ -245,6 +299,11 @@ export function TargetListPage() {
                           >
                             {target.url}
                           </a>
+                          {(target.tags?.length ?? 0) > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {(target.tags ?? []).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
+                            </div>
+                          )}
                           {target.status === 'Failed' && target.last_error && (
                             <span className="text-xs text-rose-400 block mt-1 max-w-md truncate" title={target.last_error}>
                               Error: {target.last_error}
@@ -344,6 +403,7 @@ export function TargetListPage() {
         onClose={() => setEditingTarget(null)}
         onSave={handleSaveEdit}
         isSaving={updateTargetMutation.isPending}
+        availableTags={availableTags}
       />
 
       <DeleteTargetModal

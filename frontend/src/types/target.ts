@@ -9,6 +9,8 @@ export type TargetStatus =
   | 'Availability Issue'
   | 'Defaced';
 
+import type { Tag } from './tag';
+
 export interface Target {
   id: string;
   name: string;
@@ -17,6 +19,7 @@ export interface Target {
   status: TargetStatus;
   is_active: boolean;
   last_error: string | null;
+  tags?: Tag[];
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +27,7 @@ export interface Target {
 export interface TargetCreatePayload {
   name: string;
   url: string;
+  tag_ids?: string[];
 }
 
 export interface TargetUpdatePayload {
@@ -31,6 +35,7 @@ export interface TargetUpdatePayload {
   url?: string;
   is_active?: boolean;
   allowed_domains?: string[] | null;
+  tag_ids?: string[];
 }
 
 export interface PaginatedTargets {

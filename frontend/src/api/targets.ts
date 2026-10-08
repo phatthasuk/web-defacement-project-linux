@@ -14,13 +14,17 @@ export async function listTargets(includeInactive: boolean = false): Promise<Tar
 export async function getPaginatedTargets(
   limit: number = 50,
   offset: number = 0,
-  includeInactive: boolean = false
+  includeInactive: boolean = false,
+  tagIds: string[] = [],
+  tagMatch: 'any' | 'all' = 'any'
 ): Promise<PaginatedTargets> {
   const params = new URLSearchParams({
     limit: limit.toString(),
     offset: offset.toString(),
     include_inactive: includeInactive.toString(),
+    tag_match: tagMatch,
   });
+  tagIds.forEach((tagId) => params.append('tag_ids', tagId));
   return apiFetch<PaginatedTargets>(`/targets/page?${params.toString()}`);
 }
 

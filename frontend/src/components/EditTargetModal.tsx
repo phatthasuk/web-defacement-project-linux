@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Target } from '../types/target';
 import { ApiError } from '../api/client';
+import { TagMultiSelect } from './TagMultiSelect';
+import type { Tag } from '../types/tag';
 
 interface EditTargetModalProps {
   isOpen: boolean;
   onClose: () => void;
   target: Target | null;
-  onSave: (targetId: string, name: string, url: string) => Promise<void>;
+  onSave: (targetId: string, name: string, url: string, tagIds: string[]) => Promise<void>;
   isSaving: boolean;
+  availableTags: Tag[];
 }
 
 export function EditTargetModal({
@@ -16,15 +19,18 @@ export function EditTargetModal({
   target,
   onSave,
   isSaving,
+  availableTags,
 }: EditTargetModalProps) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (target) {
       setName(target.name);
       setUrl(target.url);
+      setTagIds(target.tags?.map((tag) => tag.id) ?? []);
       setFormError(null);
     }
   }, [target, isOpen]);
@@ -67,7 +73,7 @@ export function EditTargetModal({
     }
 
     try {
-      await onSave(target.id, trimmedName, trimmedUrl);
+      await onSave(target.id, trimmedName, trimmedUrl, tagIds);
       onClose();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -171,6 +177,8 @@ export function EditTargetModal({
               </p>
             )}
           </div>
+
+          <TagMultiSelect tags={availableTags} selectedIds={tagIds} onChange={setTagIds} disabled={isSaving} />
 
           {formError && (
             <div

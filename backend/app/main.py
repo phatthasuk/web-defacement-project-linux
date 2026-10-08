@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.api.routes import auth, checks, config, review, snapshots, targets
+from app.api.routes import auth, checks, config, review, snapshots, tags, targets
 from app.api.routes.auth import limiter
 from app.core.config import get_settings
 from app.core.errors import (
@@ -25,7 +25,9 @@ from app.models import (  # noqa: F401  (registers tables on Base)
     CheckResult,
     Session,
     Snapshot,
+    Tag,
     Target,
+    TargetTag,
     User,
 )
 from app.services.checks import reconcile_artifacts, recover_stale_checks
@@ -134,6 +136,7 @@ async def csrf_origin_validation(request: Request, call_next):
     return await call_next(request)
 
 app.include_router(targets.router)
+app.include_router(tags.router)
 app.include_router(checks.router)
 app.include_router(snapshots.router)
 app.include_router(review.router)

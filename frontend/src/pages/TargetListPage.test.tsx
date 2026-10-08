@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TargetListPage } from './TargetListPage';
 import * as useTargetsHooks from '../hooks/useTargets';
+import * as useTagsHooks from '../hooks/useTags';
 
 // Mock the hooks
 vi.mock('../hooks/useTargets', () => ({
@@ -12,6 +13,10 @@ vi.mock('../hooks/useTargets', () => ({
   useUpdateTargetMutation: vi.fn(),
   useDeleteTargetMutation: vi.fn(),
   useTriggerCheckMutation: vi.fn(),
+}));
+
+vi.mock('../hooks/useTags', () => ({
+  useTagsQuery: vi.fn(),
 }));
 
 describe('TargetListPage', () => {
@@ -50,6 +55,10 @@ describe('TargetListPage', () => {
       isError: false,
       error: null,
     } as unknown as ReturnType<typeof useTargetsHooks.useTargetsQuery>);
+
+    vi.mocked(useTagsHooks.useTagsQuery).mockReturnValue({
+      data: { items: [], total: 0, limit: 200, offset: 0 },
+    } as unknown as ReturnType<typeof useTagsHooks.useTagsQuery>);
 
     vi.mocked(useTargetsHooks.usePaginatedTargetsQuery).mockReturnValue({
       data: {
@@ -165,6 +174,7 @@ describe('TargetListPage', () => {
         payload: {
           name: 'Google Thailand',
           url: 'https://google.co.th',
+          tag_ids: [],
         },
       });
     });
