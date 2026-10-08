@@ -1,16 +1,24 @@
 import asyncio
 import ipaddress
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 from playwright.async_api import Error as PlaywrightError
 
 from app.core.config import Settings
 from app.services.capture.capture import capture_snapshot
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_page.html"
+
+
+def _png_bytes() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (1, 1), "white").save(output, format="PNG")
+    return output.getvalue()
 
 
 async def test_capture_snapshot(tmp_path: Path):
@@ -38,6 +46,43 @@ async def test_capture_snapshot(tmp_path: Path):
 
     assert "Sample Fixture Page" in text_path.read_text(encoding="utf-8")
     assert "Sample Fixture Page" in html_path.read_text(encoding="utf-8")
+
+
+async def test_capture_snapshot_clips_horizontal_overflow_but_keeps_raw_evidence(tmp_path: Path):
+    page_file = tmp_path / "overflow.html"
+    page_file.write_text(
+        """
+        <!doctype html>
+        <style>
+          html, body { margin: 0; width: 1440px; }
+          main { height: 50px; background: white; }
+          .footer-subscribe { position: relative; height: 50px; background: #123456; }
+          .footer-subscribe::before {
+            content: ''; position: absolute; left: 100%; top: 0;
+            width: 612px; height: 50px; background: #abcdef;
+          }
+        </style>
+        <main>Normal page content</main><footer class="footer-subscribe">Footer</footer>
+        """,
+        encoding="utf-8",
+    )
+
+    with patch("app.services.capture.capture.validate_url"):
+        result = await capture_snapshot(
+            page_file.as_uri(),
+            Settings(PAGE_STABILIZE_ENABLED=False),
+            tmp_path,
+        )
+
+    with (
+        Image.open(result.screenshot_path) as screenshot,
+        Image.open(result.raw_screenshot_path) as raw,
+    ):
+        assert screenshot.width == 1440
+        assert raw.width == 2052
+    assert result.viewport_width == 1440
+    assert result.document_width == 2052
+    assert result.screenshot_format_version == 2
 
 
 async def test_capture_snapshot_blocks_private_subresource(tmp_path: Path):
@@ -128,7 +173,7 @@ async def test_capture_snapshot_routes_all_requests_through_loopback_proxy(tmp_p
     mock_page.goto.return_value = mock_response
     mock_page.content.return_value = "<html></html>"
     mock_page.inner_text.return_value = "text"
-    mock_page.screenshot.return_value = b"screenshot"
+    mock_page.screenshot.return_value = _png_bytes()
     mock_page.title.return_value = "title"
     mock_page.url = "http://example.com/page"
     mock_response.status = 200
@@ -168,7 +213,7 @@ async def test_capture_snapshot_sandbox_configuration(tmp_path: Path):
         mock_page.goto.return_value = mock_response
         mock_page.content.return_value = "<html></html>"
         mock_page.inner_text.return_value = "text"
-        mock_page.screenshot.return_value = b"screenshot"
+        mock_page.screenshot.return_value = _png_bytes()
         mock_page.title.return_value = "title"
         mock_page.url = url
         mock_response.status = 200
@@ -658,7 +703,7 @@ async def test_capture_snapshot_blocks_file_subresource_from_remote_target(tmp_p
     mock_page.goto.return_value = mock_response
     mock_page.content.return_value = "<html></html>"
     mock_page.inner_text.return_value = "text"
-    mock_page.screenshot.return_value = b"screenshot"
+    mock_page.screenshot.return_value = _png_bytes()
     mock_page.title.return_value = "title"
     mock_page.url = "http://example.com/page"
     mock_response.status = 200
@@ -701,7 +746,10 @@ async def test_capture_snapshot_blocks_file_subresource_from_remote_target(tmp_p
 
     # Test data: / blob: / about: subresources -> allowed
     mock_route.reset_mock()
-    mock_request.url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    mock_request.url = (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+        "AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
     await guard_handler(mock_route, mock_request)
     mock_route.continue_.assert_called_once()
     mock_route.abort.assert_not_called()

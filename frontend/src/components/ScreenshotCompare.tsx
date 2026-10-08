@@ -65,6 +65,8 @@ function computeDiffHeatmap(
   if (!ctx) return null;
 
   // Draw current image onto main canvas
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, width, height);
   ctx.drawImage(currentImg, 0, 0);
   const currentData = ctx.getImageData(0, 0, width, height);
 
@@ -75,6 +77,8 @@ function computeDiffHeatmap(
   const tempCtx = tempCanvas.getContext('2d');
   if (!tempCtx) return null;
 
+  tempCtx.fillStyle = 'white';
+  tempCtx.fillRect(0, 0, width, height);
   tempCtx.drawImage(baselineImg, 0, 0);
   const baselineData = tempCtx.getImageData(0, 0, width, height);
 

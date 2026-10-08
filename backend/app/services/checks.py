@@ -88,35 +88,42 @@ def _promote_staging_artifacts(
     snapshot_id: str,
     staging_dir: Path | None,
     data_dir: Path,
-    fallback_paths: tuple[str, str, str],
-) -> tuple[str, str, str]:
+    fallback_paths: tuple[str, str, str, str | None],
+) -> tuple[str, str, str, str | None]:
     """Promote artifacts from staging to permanent storage directories.
 
     If staging_dir exists, moves files to data_dir/{screenshots,text,html}.
     If files were written directly (e.g. test fixtures), existing paths are preserved.
     """
     dest_screenshots = data_dir / "screenshots" / f"{snapshot_id}.png"
+    dest_raw_screenshot = data_dir / "raw_screenshots" / f"{snapshot_id}.png"
     dest_text = data_dir / "text" / f"{snapshot_id}.txt"
     dest_html = data_dir / "html" / f"{snapshot_id}.html"
 
     if staging_dir and staging_dir.is_dir():
         dest_screenshots.parent.mkdir(parents=True, exist_ok=True)
+        dest_raw_screenshot.parent.mkdir(parents=True, exist_ok=True)
         dest_text.parent.mkdir(parents=True, exist_ok=True)
         dest_html.parent.mkdir(parents=True, exist_ok=True)
 
         staging_screenshot = staging_dir / f"{snapshot_id}.png"
+        staging_raw_screenshot = staging_dir / f"{snapshot_id}.raw.png"
         staging_text = staging_dir / f"{snapshot_id}.txt"
         staging_html = staging_dir / f"{snapshot_id}.html"
 
         if staging_screenshot.exists():
             shutil.move(str(staging_screenshot), str(dest_screenshots))
+        raw_screenshot_path: str | None = None
+        if staging_raw_screenshot.exists():
+            shutil.move(str(staging_raw_screenshot), str(dest_raw_screenshot))
+            raw_screenshot_path = str(dest_raw_screenshot)
         if staging_text.exists():
             shutil.move(str(staging_text), str(dest_text))
         if staging_html.exists():
             shutil.move(str(staging_html), str(dest_html))
 
         shutil.rmtree(staging_dir, ignore_errors=True)
-        return str(dest_screenshots), str(dest_text), str(dest_html)
+        return str(dest_screenshots), str(dest_text), str(dest_html), raw_screenshot_path
 
     return fallback_paths
 
@@ -143,7 +150,12 @@ def _discard_snapshot_files(capture: CaptureResult) -> None:
         return
 
     # Fallback if artifacts were written directly outside staging (e.g. test fixtures)
-    for p in (capture.screenshot_path, capture.text_path, capture.html_path):
+    for p in (
+        capture.screenshot_path,
+        capture.raw_screenshot_path,
+        capture.text_path,
+        capture.html_path,
+    ):
         if p:
             try:
                 Path(p).unlink(missing_ok=True)
@@ -181,6 +193,7 @@ async def run_target_check(
     artifacts_promoted = False
     artifacts_committed = False
     perm_screenshot: str | None = None
+    perm_raw_screenshot: str | None = None
     perm_text: str | None = None
     perm_html: str | None = None
 
@@ -215,11 +228,16 @@ async def run_target_check(
         if baseline is None:
             # A new target can establish its first baseline. After a URL edit,
             # keep the capture as a candidate until an operator approves it.
-            perm_screenshot, perm_text, perm_html = _promote_staging_artifacts(
+            perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
                 capture.id,
                 staging_dir,
                 settings.data_dir_path,
-                (capture.screenshot_path, capture.text_path, capture.html_path),
+                (
+                    capture.screenshot_path,
+                    capture.text_path,
+                    capture.html_path,
+                    capture.raw_screenshot_path,
+                ),
             )
             artifacts_promoted = True
             snapshot = Snapshot(
@@ -230,6 +248,10 @@ async def run_target_check(
                 http_status=capture.http_status,
                 title=capture.title,
                 screenshot_path=perm_screenshot,
+                raw_screenshot_path=perm_raw_screenshot,
+                viewport_width=capture.viewport_width,
+                document_width=capture.document_width,
+                screenshot_format_version=capture.screenshot_format_version,
                 text_path=perm_text,
                 html_path=perm_html,
                 is_baseline=target.url_revision == 1,
@@ -283,6 +305,7 @@ async def run_target_check(
             capture.html_path,
             capture.final_url,
             allowed_hosts,
+            settings.VIEWPORT_WIDTH,
         )
         for baseline_id, d in comparisons:
             if not d.structure_available:
@@ -306,11 +329,16 @@ async def run_target_check(
 
         if has_changes:
             # Genuine change: promote staged artifacts to permanent storage
-            perm_screenshot, perm_text, perm_html = _promote_staging_artifacts(
+            perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
                 capture.id,
                 staging_dir,
                 settings.data_dir_path,
-                (capture.screenshot_path, capture.text_path, capture.html_path),
+                (
+                    capture.screenshot_path,
+                    capture.text_path,
+                    capture.html_path,
+                    capture.raw_screenshot_path,
+                ),
             )
             artifacts_promoted = True
             snapshot = Snapshot(
@@ -321,6 +349,10 @@ async def run_target_check(
                 http_status=capture.http_status,
                 title=capture.title,
                 screenshot_path=perm_screenshot,
+                raw_screenshot_path=perm_raw_screenshot,
+                viewport_width=capture.viewport_width,
+                document_width=capture.document_width,
+                screenshot_format_version=capture.screenshot_format_version,
                 text_path=perm_text,
                 html_path=perm_html,
                 is_baseline=False,
@@ -383,7 +415,7 @@ async def run_target_check(
         db.rollback()
         # F5: Discard staging files on diff failure, or clean promoted files if commit failed
         if artifacts_promoted and not artifacts_committed:
-            _cleanup_promoted_files(perm_screenshot, perm_text, perm_html)
+            _cleanup_promoted_files(perm_screenshot, perm_raw_screenshot, perm_text, perm_html)
         elif not artifacts_promoted:
             _discard_snapshot_files(capture)
         target_in_db = db.get(Target, target.id) or target
@@ -572,6 +604,7 @@ def _diff_against_baselines(
     current_html_path: str,
     current_url: str,
     allowed_hosts: tuple[str, ...],
+    viewport_width: int,
 ) -> list[tuple[str, DiffResult]]:
     """Diff one snapshot against several baselines."""
     return [
@@ -587,6 +620,7 @@ def _diff_against_baselines(
                 baseline_url=baseline.final_url,
                 current_url=current_url,
                 allowed_hosts=allowed_hosts,
+                viewport_width=viewport_width,
             ),
         )
         for baseline in baselines
@@ -603,7 +637,8 @@ def reconcile_artifacts(db: Session, settings: Settings) -> dict[str, int]:
 
     Fulfills Finding F5 and Section 9.3:
     - Removes staging directories older than STAGING_CLEANUP_MAX_AGE_SECONDS.
-    - Removes files in screenshots/, text/, html/ that have no matching Snapshot in DB.
+    - Removes files in screenshots/, raw_screenshots/, text/, and html/ that
+      have no matching Snapshot in the database.
     - Ensures every deletion is strictly within settings.data_dir_path.
     """
     cleaned_staging = 0
@@ -628,7 +663,7 @@ def reconcile_artifacts(db: Session, settings: Settings) -> dict[str, int]:
 
     # 2. Clean orphan artifact files in permanent storage
     valid_ids = set(db.scalars(select(Snapshot.id)))
-    for subdir_name in ("screenshots", "text", "html"):
+    for subdir_name in ("screenshots", "raw_screenshots", "text", "html"):
         sub_dir = data_dir / subdir_name
         if not sub_dir.is_dir():
             continue

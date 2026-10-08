@@ -200,6 +200,8 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('button', { name: /Approve as Baseline/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Acknowledge Change/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Confirm Defacement/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Approve as Baseline/i })).toHaveTextContent('Approve as Baseline');
+    expect(screen.getByRole('button', { name: /Approve as Baseline/i })).not.toHaveTextContent('snap-latest');
     expect(screen.getByText('View Full Details →')).toBeInTheDocument();
     expect(screen.getByText('View Full Details →').closest('a')).toHaveAttribute('href', '/checks/check-1');
   });

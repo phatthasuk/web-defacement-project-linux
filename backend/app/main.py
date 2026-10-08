@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
     # Create data directories if they don't exist BEFORE opening the SQLite database
     os.makedirs(settings.data_dir_path, exist_ok=True)
     os.makedirs(settings.data_dir_path / "screenshots", exist_ok=True)
+    os.makedirs(settings.data_dir_path / "raw_screenshots", exist_ok=True)
     os.makedirs(settings.data_dir_path / "text", exist_ok=True)
     os.makedirs(settings.data_dir_path / "html", exist_ok=True)
     os.makedirs(settings.data_dir_path / "staging", exist_ok=True)

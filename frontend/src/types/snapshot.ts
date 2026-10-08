@@ -7,4 +7,7 @@ export interface Snapshot {
   http_status: number | null;
   title: string | null;
   is_baseline: boolean;
+  viewport_width?: number | null;
+  document_width?: number | null;
+  screenshot_format_version?: number | null;
 }

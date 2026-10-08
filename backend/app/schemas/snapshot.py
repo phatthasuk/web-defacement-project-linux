@@ -14,6 +14,9 @@ class SnapshotRead(BaseModel):
     http_status: int | None
     title: str | None
     is_baseline: bool
+    viewport_width: int | None
+    document_width: int | None
+    screenshot_format_version: int | None
 
     @field_serializer("captured_at")
     def _serialize_captured_at(self, dt: datetime) -> str:

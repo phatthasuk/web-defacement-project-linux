@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Callable
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -181,6 +182,54 @@ async def test_checks_and_snapshots_read_paths(
 
     assert (await client.get(f"/checks/{uuid4()}")).status_code == 404
     assert (await client.get(f"/snapshots/{uuid4()}")).status_code == 404
+
+
+async def test_screenshot_routes_crop_legacy_artifacts_and_retain_raw_evidence(
+    client: httpx.AsyncClient,
+    api_session_factory,
+    api_work_dir: Path,
+):
+    target_id = await create_target(client)
+    snapshot_id = "legacy-overflow"
+    screenshot_path = api_work_dir / "screenshots" / f"{snapshot_id}.png"
+    raw_path = api_work_dir / "raw_screenshots" / f"{snapshot_id}.png"
+    text_path = api_work_dir / "text" / f"{snapshot_id}.txt"
+    html_path = api_work_dir / "html" / f"{snapshot_id}.html"
+    for path in (screenshot_path, raw_path, text_path, html_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    overflow_image = Image.new("RGB", (2052, 10), "white")
+    overflow_image.putpixel((1800, 0), (0, 0, 0))
+    overflow_image.save(screenshot_path)
+    overflow_image.save(raw_path)
+    text_path.write_text("snapshot", encoding="utf-8")
+    html_path.write_text("<html></html>", encoding="utf-8")
+
+    with api_session_factory() as db:
+        db.add(
+            Snapshot(
+                id=snapshot_id,
+                target_id=target_id,
+                final_url="https://93.184.216.34",
+                http_status=200,
+                title="Legacy overflow",
+                screenshot_path=str(screenshot_path),
+                raw_screenshot_path=str(raw_path),
+                text_path=str(text_path),
+                html_path=str(html_path),
+                is_baseline=True,
+            )
+        )
+        db.commit()
+
+    normalised = await client.get(f"/snapshots/{snapshot_id}/screenshot")
+    raw = await client.get(f"/snapshots/{snapshot_id}/screenshot/raw")
+
+    assert normalised.status_code == 200
+    assert raw.status_code == 200
+    with Image.open(BytesIO(normalised.content)) as image:
+        assert image.width == 1440
+    with Image.open(BytesIO(raw.content)) as image:
+        assert image.width == 2052
 
 
 async def test_snapshot_artifact_rejects_path_traversal(

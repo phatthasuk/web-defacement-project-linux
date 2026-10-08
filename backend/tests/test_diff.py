@@ -48,6 +48,19 @@ def test_compare_image_files_counts_single_channel_changes(tmp_path: Path):
     assert score == 0.01
 
 
+def test_compare_image_files_ignores_horizontal_overflow_outside_viewport(tmp_path: Path):
+    work_dir = make_work_dir(tmp_path)
+    baseline = work_dir / "baseline.png"
+    current = work_dir / "current.png"
+    Image.new("RGB", (2052, 20), "white").save(baseline)
+    image = Image.new("RGB", (2052, 20), "white")
+    image.putpixel((1800, 0), (0, 0, 0))
+    image.save(current)
+
+    assert compare_image_files(baseline, current) > 0.0
+    assert compare_image_files(baseline, current, viewport_width=1440) == 0.0
+
+
 def test_compare_snapshot_artifacts_summarizes_no_change(tmp_path: Path):
     work_dir = make_work_dir(tmp_path)
     baseline_text = work_dir / "baseline.txt"

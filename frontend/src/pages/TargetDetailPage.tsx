@@ -281,8 +281,8 @@ export function TargetDetailPage() {
         </div>
       )}
 
-      <header className="mb-10 flex flex-col md:flex-row md:items-start md:justify-between gap-6">
-        <div>
+      <header className="mb-10 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-3xl font-extrabold text-slate-100">{target.name}</h1>
             <TargetStatusBadge
@@ -360,17 +360,17 @@ export function TargetDetailPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:shrink-0">
           {canApproveBaseline && (
             <button
               onClick={handleApproveBaseline}
               disabled={isChecking || approveBaselineMutation.isPending}
               title={isChecking ? 'Cannot triage while check is in progress' : undefined}
-              className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold text-sm rounded-lg px-4 py-2.5 transition-all shadow-md shadow-emerald-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-4 text-sm font-semibold text-white shadow-md shadow-emerald-950/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {approveBaselineMutation.isPending
                 ? 'Approving...'
-                : `Approve as Baseline (${currentSnapshot?.id})`}
+                : 'Approve as Baseline'}
             </button>
           )}
           {canAcknowledge && (
@@ -378,7 +378,7 @@ export function TargetDetailPage() {
               onClick={handleAcknowledge}
               disabled={isChecking || acknowledgeCheckMutation.isPending}
               title={isChecking ? 'Cannot triage while check is in progress' : undefined}
-              className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-semibold text-sm rounded-lg px-4 py-2.5 transition-all shadow-md shadow-indigo-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-950/20 transition-all hover:from-indigo-400 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {acknowledgeCheckMutation.isPending ? 'Acknowledging...' : 'Acknowledge Change'}
             </button>
@@ -388,7 +388,7 @@ export function TargetDetailPage() {
               onClick={handleConfirmDefaced}
               disabled={isChecking || confirmDefacedMutation.isPending}
               title={isChecking ? 'Cannot triage while check is in progress' : undefined}
-              className="bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white font-semibold text-sm rounded-lg px-4 py-2.5 transition-all shadow-md shadow-rose-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-rose-600 to-red-700 px-4 text-sm font-semibold text-white shadow-md shadow-rose-950/30 transition-all hover:from-rose-500 hover:to-red-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {confirmDefacedMutation.isPending ? 'Confirming...' : 'Confirm Defacement'}
             </button>

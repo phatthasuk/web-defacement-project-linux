@@ -34,11 +34,13 @@ def compare_snapshot_artifacts(
     baseline_url: str = "",
     current_url: str = "",
     allowed_hosts: Collection[str] = (),
+    viewport_width: int | None = None,
 ) -> DiffResult:
     text_score = compare_text_files(Path(baseline_text_path), Path(current_text_path))
     visual_score = compare_image_files(
         Path(baseline_screenshot_path),
         Path(current_screenshot_path),
+        viewport_width=viewport_width,
     )
 
     structure = compare_html_files(
@@ -125,11 +127,19 @@ def compare_text_files(baseline_path: Path, current_path: Path) -> float:
     return round(1.0 - ratio, 6)
 
 
-def compare_image_files(baseline_path: Path, current_path: Path) -> float:
+def compare_image_files(
+    baseline_path: Path,
+    current_path: Path,
+    viewport_width: int | None = None,
+) -> float:
     with Image.open(baseline_path) as baseline_image:
         baseline = baseline_image.convert("RGB")
     with Image.open(current_path) as current_image:
         current = current_image.convert("RGB")
+
+    if viewport_width is not None:
+        baseline = baseline.crop((0, 0, min(baseline.width, viewport_width), baseline.height))
+        current = current.crop((0, 0, min(current.width, viewport_width), current.height))
 
     canvas_size = (
         max(baseline.width, current.width),

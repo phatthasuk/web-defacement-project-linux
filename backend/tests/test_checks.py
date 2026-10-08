@@ -1017,6 +1017,7 @@ def test_reconcile_artifacts_purges_expired_staging_and_orphans(tmp_path: Path):
         target_id=target.id,
         final_url="https://example.com",
         screenshot_path=str(work_dir / "screenshots" / "valid-snapshot.png"),
+        raw_screenshot_path=str(work_dir / "raw_screenshots" / "valid-snapshot.png"),
         text_path=str(work_dir / "text" / "valid-snapshot.txt"),
         html_path=str(work_dir / "html" / "valid-snapshot.html"),
         is_baseline=True,
@@ -1029,9 +1030,15 @@ def test_reconcile_artifacts_purges_expired_staging_and_orphans(tmp_path: Path):
     valid_file.parent.mkdir(parents=True, exist_ok=True)
     valid_file.write_text("valid")
 
+    valid_raw_file = work_dir / "raw_screenshots" / "valid-snapshot.png"
+    valid_raw_file.parent.mkdir(parents=True, exist_ok=True)
+    valid_raw_file.write_text("valid raw")
+
     # Orphan file in screenshots
     orphan_file = work_dir / "screenshots" / "orphan-snapshot.png"
     orphan_file.write_text("orphan")
+    orphan_raw_file = work_dir / "raw_screenshots" / "orphan-snapshot.png"
+    orphan_raw_file.write_text("orphan raw")
 
     # Expired staging dir
     expired_staging = work_dir / "staging" / "old-abandoned"
@@ -1046,9 +1053,11 @@ def test_reconcile_artifacts_purges_expired_staging_and_orphans(tmp_path: Path):
     stats = reconcile_artifacts(db, settings)
 
     assert stats["cleaned_staging"] == 1
-    assert stats["cleaned_orphans"] == 1
+    assert stats["cleaned_orphans"] == 2
     assert valid_file.is_file()
+    assert valid_raw_file.is_file()
     assert not orphan_file.exists()
+    assert not orphan_raw_file.exists()
     assert not expired_staging.exists()
 
 

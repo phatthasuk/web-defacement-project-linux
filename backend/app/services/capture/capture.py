@@ -5,9 +5,11 @@ import shutil
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
+from PIL import Image
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Request, Route, WebSocketRoute, async_playwright
 
@@ -47,6 +49,31 @@ class CaptureResult:
     overlays: OverlayDismissal = field(default_factory=OverlayDismissal)
     readiness: dict[str, int | bool] = field(default_factory=dict)
     staging_dir: str = ""
+    # The raw artifact retains all document overflow for forensic review. The
+    # regular screenshot is clipped to the configured viewport before it is
+    # compared or shown in the application.
+    raw_screenshot_path: str | None = None
+    viewport_width: int | None = None
+    document_width: int | None = None
+    screenshot_format_version: int | None = None
+
+
+def _crop_screenshot_to_viewport(
+    screenshot_bytes: bytes,
+    viewport_width: int,
+) -> tuple[bytes, int, int]:
+    """Return a PNG cropped to the viewport, plus raw image dimensions.
+
+    Full-page Chromium screenshots include horizontal document overflow. That is
+    useful evidence, but it must not expand the visual-diff canvas beyond the
+    fixed viewport used to render every capture.
+    """
+    with Image.open(BytesIO(screenshot_bytes)) as image:
+        raw_width, raw_height = image.size
+        cropped = image.crop((0, 0, min(raw_width, viewport_width), raw_height))
+        output = BytesIO()
+        cropped.save(output, format="PNG")
+    return output.getvalue(), raw_width, raw_height
 
 
 def _navigation_redirect_document(target_url: str) -> str:
@@ -404,9 +431,13 @@ async def _capture_snapshot_impl(
                 # above, so re-pin with nothing left to run before the shutter.
                 await pin_for_capture(page)
 
-            screenshot_bytes = await page.screenshot(full_page=True)
-            if len(screenshot_bytes) > max_bytes:
+            raw_screenshot_bytes = await page.screenshot(full_page=True)
+            if len(raw_screenshot_bytes) > max_bytes:
                 raise CaptureError("Captured screenshot exceeds MAX_ARTIFACT_SIZE_MB")
+            screenshot_bytes, raw_width, _ = _crop_screenshot_to_viewport(
+                raw_screenshot_bytes,
+                settings.VIEWPORT_WIDTH,
+            )
 
             title = await page.title()
             final_url = page.url
@@ -416,12 +447,14 @@ async def _capture_snapshot_impl(
 
             staging_dir = out_dir / "staging" / snapshot_id
             screenshot_path = staging_dir / f"{snapshot_id}.png"
+            raw_screenshot_path = staging_dir / f"{snapshot_id}.raw.png"
             text_path = staging_dir / f"{snapshot_id}.txt"
             html_path = staging_dir / f"{snapshot_id}.html"
 
             staging_dir.mkdir(parents=True, exist_ok=True)
 
             screenshot_path.write_bytes(screenshot_bytes)
+            raw_screenshot_path.write_bytes(raw_screenshot_bytes)
             text_path.write_text(text, encoding="utf-8")
             html_path.write_text(html, encoding="utf-8")
             capture_succeeded = True
@@ -445,10 +478,14 @@ async def _capture_snapshot_impl(
         http_status=http_status,
         title=title,
         screenshot_path=str(screenshot_path),
+        raw_screenshot_path=str(raw_screenshot_path),
         text_path=str(text_path),
         html_path=str(html_path),
         redirect_count=redirect_count,
         overlays=overlays,
         readiness=readiness,
         staging_dir=str(staging_dir),
+        viewport_width=settings.VIEWPORT_WIDTH,
+        document_width=raw_width,
+        screenshot_format_version=2,
     )
