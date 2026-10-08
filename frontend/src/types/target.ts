@@ -19,6 +19,7 @@ export interface Target {
   status: TargetStatus;
   is_active: boolean;
   last_error: string | null;
+  latest_structure_change_score?: number | null;
   tags?: Tag[];
   created_at: string;
   updated_at: string;

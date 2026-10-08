@@ -320,6 +320,16 @@ export function TargetListPage() {
                             status={target.status}
                             title={target.status === 'Failed' ? target.last_error || undefined : undefined}
                           />
+                          {target.status === 'Changed' && (
+                            <span className="mt-1 block text-xs text-slate-500">
+                              Structural Score:{' '}
+                              <span className="font-mono font-semibold text-amber-400">
+                                {target.latest_structure_change_score == null
+                                  ? '—'
+                                  : `${(target.latest_structure_change_score * 100).toFixed(1)}%`}
+                              </span>
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-400 font-mono whitespace-nowrap">
                           {formatLastActivity(target.updated_at)}

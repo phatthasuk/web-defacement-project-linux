@@ -287,6 +287,9 @@ async def test_review_flow_end_to_end(
     target_response = await client.get(f"/targets/{target_id}")
     assert target_response.json()["status"] == STATUS_CHANGED
 
+    paginated_target = (await client.get("/targets/page")).json()["items"][0]
+    assert paginated_target["latest_structure_change_score"] == 0.0
+
     checks_response = await client.get(f"/targets/{target_id}/checks")
     checks = checks_response.json()
     assert len(checks) == 1
@@ -335,6 +338,12 @@ async def test_url_edit_requires_new_baseline_and_preserves_history(
     assert patched.status_code == 200
     assert patched.json()["url_revision"] == 2
     assert patched.json()["status"] == STATUS_AWAITING_BASELINE
+    current_target = next(
+        item
+        for item in (await client.get("/targets/page")).json()["items"]
+        if item["id"] == target_id
+    )
+    assert current_target["latest_structure_change_score"] is None
     assert (await client.get(f"/targets/{target_id}/baseline")).json() is None
     assert (await client.get(f"/targets/{target_id}/checks")).json() == []
     assert (await client.get(f"/targets/{target_id}/snapshots")).json() == []

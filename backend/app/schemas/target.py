@@ -66,6 +66,7 @@ class TargetRead(BaseModel):
     status: str
     is_active: bool
     last_error: str | None = None
+    latest_structure_change_score: float | None = None
     allowed_domains: list[str] | None = None
     tags: list[TagRead] = Field(default_factory=list)
     created_at: datetime

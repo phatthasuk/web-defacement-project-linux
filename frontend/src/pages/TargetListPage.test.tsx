@@ -107,6 +107,44 @@ describe('TargetListPage', () => {
     expect(screen.getByText('https://example.com')).toBeInTheDocument();
   });
 
+  it('shows the structural score for changed targets, including zero', () => {
+    const changedTargets = [
+      {
+        ...mockTargets[0],
+        id: 'target-changed',
+        name: 'Changed Site',
+        status: 'Changed' as const,
+        latest_structure_change_score: 0.125,
+      },
+      {
+        ...mockTargets[0],
+        id: 'target-changed-zero',
+        name: 'Changed Zero',
+        status: 'Changed' as const,
+        latest_structure_change_score: 0,
+      },
+      {
+        ...mockTargets[0],
+        id: 'target-changed-unknown',
+        name: 'Changed Unknown',
+        status: 'Changed' as const,
+        latest_structure_change_score: null,
+      },
+    ];
+    vi.mocked(useTargetsHooks.usePaginatedTargetsQuery).mockReturnValue({
+      data: { items: changedTargets, total: changedTargets.length, limit: 50, offset: 0 },
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useTargetsHooks.usePaginatedTargetsQuery>);
+
+    render(<BrowserRouter><TargetListPage /></BrowserRouter>);
+
+    expect(screen.getByText('12.5%')).toBeInTheDocument();
+    expect(screen.getByText('0.0%')).toBeInTheDocument();
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
   it('calls createTarget when submitting form', async () => {
     render(
       <BrowserRouter>

@@ -10,7 +10,7 @@ from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.ssrf_guard import validate_url
 from app.core.status import STATUS_AWAITING_BASELINE, STATUS_CHECKING
-from app.models import Snapshot, Tag, Target
+from app.models import CheckResult, Snapshot, Tag, Target
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
 from app.services.concurrency import is_target_in_flight
 
@@ -74,16 +74,37 @@ async def list_paginated_targets(
 
     total = db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
 
+    latest_structure_score = (
+        select(CheckResult.structure_change_score)
+        .join(Snapshot, Snapshot.id == CheckResult.current_snapshot_id)
+        .where(
+            CheckResult.target_id == Target.id,
+            Snapshot.url_revision == Target.url_revision,
+        )
+        .order_by(CheckResult.created_at.desc(), CheckResult.id.desc())
+        .limit(1)
+        .correlate(Target)
+        .scalar_subquery()
+    )
     items_stmt = (
-        base_query.order_by(Target.created_at.desc(), Target.id.desc())
+        base_query.with_only_columns(
+            Target,
+            latest_structure_score.label("latest_structure_change_score"),
+        )
+        .order_by(Target.created_at.desc(), Target.id.desc())
         .options(selectinload(Target.tags))
         .limit(limit)
         .offset(offset)
     )
-    targets = list(db.scalars(items_stmt))
+    target_rows = db.execute(items_stmt).all()
 
     return PaginatedTargetsRead(
-        items=[TargetRead.model_validate(t) for t in targets],
+        items=[
+            TargetRead.model_validate(target).model_copy(
+                update={"latest_structure_change_score": score}
+            )
+            for target, score in target_rows
+        ],
         total=total,
         limit=limit,
         offset=offset,
