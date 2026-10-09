@@ -35,7 +35,20 @@ export function TargetListPage() {
   const tagMatchFromUrl = searchParams.get('tag_match') === 'all' ? 'all' : 'any';
   const activeTagIds = tagIdsFromUrl;
   const activeTagMatch = tagMatchFromUrl;
-  const { data: paginatedData, isLoading, isError, error } = usePaginatedTargetsQuery(pageSize, offset, false, activeTagIds, activeTagMatch);
+  const activeStatus = searchParams.get('status') ?? '';
+  const sortValue = searchParams.get('sort_by');
+  const sortBy = sortValue === 'status' || sortValue === 'last_activity' ? sortValue : undefined;
+  const sortOrder = searchParams.get('sort_order') === 'asc' ? 'asc' : 'desc';
+  const { data: paginatedData, isLoading, isError, error } = usePaginatedTargetsQuery(
+    pageSize,
+    offset,
+    false,
+    activeTagIds,
+    activeTagMatch,
+    activeStatus || undefined,
+    sortBy,
+    sortOrder,
+  );
   const { data: tagData } = useTagsQuery();
   const availableTags = tagData?.items ?? [];
   const targets = paginatedData?.items;
@@ -103,11 +116,42 @@ export function TargetListPage() {
   };
 
   const applyTagFilter = (tagIds: string[], match = activeTagMatch) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(searchParams);
+    params.delete('tag_ids');
+    params.delete('tag_match');
     tagIds.forEach((tagId) => params.append('tag_ids', tagId));
     if (tagIds.length) params.set('tag_match', match);
+    else params.delete('tag_match');
     setSearchParams(params);
     setPage(1);
+  };
+
+  const applyStatusFilter = (status: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (status) params.set('status', status);
+    else params.delete('status');
+    setSearchParams(params);
+    setPage(1);
+  };
+
+  const toggleSort = (column: 'status' | 'last_activity') => {
+    const nextOrder = sortBy === column && sortOrder === 'desc' ? 'asc' : 'desc';
+    const params = new URLSearchParams(searchParams);
+    params.set('sort_by', column);
+    params.set('sort_order', nextOrder);
+    setSearchParams(params);
+    setPage(1);
+  };
+
+  const sortButton = (column: 'status' | 'last_activity', label: string) => {
+    const selected = sortBy === column;
+    const direction = selected ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none';
+    return (
+      <button type="button" onClick={() => toggleSort(column)} aria-label={`Sort by ${label}${selected ? `, ${direction}` : ''}`} title={column === 'status' ? 'Changed targets are ordered by structural score' : 'Order by last activity time'} className="inline-flex items-center gap-1.5 hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 rounded">
+        {label}
+        <span aria-hidden="true" className={selected ? 'text-cyan-400' : 'text-slate-600'}>{selected ? (sortOrder === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    );
   };
 
   const handleConfirmDelete = async (targetId: string) => {
@@ -243,6 +287,21 @@ export function TargetListPage() {
                   <button type="button" onClick={() => applyTagFilter([])} className="text-xs font-medium text-cyan-400 hover:text-cyan-300">Clear</button>
                 </div>
               )}
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <span>Status</span>
+                <select aria-label="Filter by status" value={activeStatus} onChange={(event) => applyStatusFilter(event.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
+                  <option value="">All statuses</option>
+                  <option value="Changed">Changed</option>
+                  <option value="Defaced">Defaced</option>
+                  <option value="Failed">Failed</option>
+                  <option value="Availability Issue">Availability Issue</option>
+                  <option value="Acknowledged">Acknowledged</option>
+                  <option value="Awaiting Baseline">Awaiting Baseline</option>
+                  <option value="Checking">Checking</option>
+                  <option value="OK">OK</option>
+                  <option value="Never Checked">Never Checked</option>
+                </select>
+              </label>
             </div>
 
             {isLoading ? (
@@ -265,9 +324,9 @@ export function TargetListPage() {
                 <svg className="mx-auto h-12 w-12 text-slate-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
-                <h3 className="text-slate-300 font-medium text-lg mb-1">{activeTagIds.length ? 'No websites match the selected tags' : 'No targets configured'}</h3>
+                <h3 className="text-slate-300 font-medium text-lg mb-1">{activeTagIds.length || activeStatus ? 'No targets match the selected filters' : 'No targets configured'}</h3>
                 <p className="text-slate-500 text-sm max-w-sm mx-auto">
-                  {activeTagIds.length ? 'Try removing a tag or changing the matching mode.' : 'Add a new target website on the left to start tracking content and visual adjustments.'}
+                  {activeTagIds.length || activeStatus ? 'Try changing or clearing the selected filters.' : 'Add a new target website on the left to start tracking content and visual adjustments.'}
                 </p>
               </div>
             ) : (
@@ -276,8 +335,8 @@ export function TargetListPage() {
                   <thead>
                     <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="px-6 py-4">Target / URL</th>
-                      <th className="px-6 py-4 whitespace-nowrap">Status</th>
-                      <th className="px-6 py-4 whitespace-nowrap min-w-[190px]">Last Activity</th>
+                      <th aria-sort={sortBy === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-4 whitespace-nowrap">{sortButton('status', 'Status')}</th>
+                      <th aria-sort={sortBy === 'last_activity' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-4 whitespace-nowrap min-w-[190px]">{sortButton('last_activity', 'Last Activity')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/50">

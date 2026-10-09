@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_db, get_settings
@@ -67,10 +67,28 @@ async def list_paginated_targets(
     offset: Annotated[int, Query(ge=0)] = 0,
     tag_ids: Annotated[list[str] | None, Query()] = None,
     tag_match: Annotated[str, Query(pattern="^(any|all)$")] = "any",
+    status_filter: Annotated[
+        Literal[
+            "Never Checked",
+            "Checking",
+            "Awaiting Baseline",
+            "OK",
+            "Changed",
+            "Failed",
+            "Acknowledged",
+            "Availability Issue",
+            "Defaced",
+        ] | None,
+        Query(alias="status"),
+    ] = None,
+    sort_by: Annotated[Literal["status", "last_activity"] | None, Query()] = None,
+    sort_order: Annotated[Literal["asc", "desc"], Query()] = "desc",
 ) -> PaginatedTargetsRead:
     base_query = _apply_tag_filter(select(Target), tag_ids, tag_match)
     if not include_inactive:
         base_query = base_query.where(Target.is_active.is_(True))
+    if status_filter is not None:
+        base_query = base_query.where(Target.status == status_filter)
 
     total = db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
 
@@ -86,16 +104,31 @@ async def list_paginated_targets(
         .correlate(Target)
         .scalar_subquery()
     )
-    items_stmt = (
-        base_query.with_only_columns(
-            Target,
-            latest_structure_score.label("latest_structure_change_score"),
-        )
-        .order_by(Target.created_at.desc(), Target.id.desc())
-        .options(selectinload(Target.tags))
-        .limit(limit)
-        .offset(offset)
+    items_stmt = base_query.with_only_columns(
+        Target,
+        latest_structure_score.label("latest_structure_change_score"),
     )
+    if sort_by == "status":
+        score_order = (
+            latest_structure_score.asc()
+            if sort_order == "asc"
+            else latest_structure_score.desc()
+        )
+        items_stmt = items_stmt.order_by(
+            case((Target.status == "Changed", 0), else_=1),
+            case((latest_structure_score.is_(None), 1), else_=0),
+            score_order,
+            Target.created_at.desc(),
+            Target.id.desc(),
+        )
+    elif sort_by == "last_activity":
+        activity_order = (
+            Target.updated_at.asc() if sort_order == "asc" else Target.updated_at.desc()
+        )
+        items_stmt = items_stmt.order_by(activity_order, Target.id.desc())
+    else:
+        items_stmt = items_stmt.order_by(Target.created_at.desc(), Target.id.desc())
+    items_stmt = items_stmt.options(selectinload(Target.tags)).limit(limit).offset(offset)
     target_rows = db.execute(items_stmt).all()
 
     return PaginatedTargetsRead(
