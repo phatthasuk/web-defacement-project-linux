@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.models import Tag, Target, TargetTag
 from app.schemas import PaginatedTagsRead, TagCreate, TagRead, TagUpdate
 from app.schemas.tag import normalize_tag_name
@@ -20,11 +20,13 @@ def as_tag_read(tag: Tag, target_count: int = 0) -> TagRead:
 
 
 def active_target_count(db: Session, tag_id: str) -> int:
+    tag_ids = [tag_id]
+    tag_ids.extend(db.scalars(select(Tag.id).where(Tag.parent_id == tag_id)))
     return int(
         db.scalar(
-            select(func.count(TargetTag.target_id))
+            select(func.count(func.distinct(TargetTag.target_id)))
             .join(Target, Target.id == TargetTag.target_id)
-            .where(TargetTag.tag_id == tag_id, Target.is_active.is_(True))
+            .where(TargetTag.tag_id.in_(tag_ids), Target.is_active.is_(True))
         )
         or 0
     )
@@ -39,7 +41,13 @@ async def list_tags(
 ) -> PaginatedTagsRead:
     statement = select(Tag)
     if search and search.strip():
-        statement = statement.where(Tag.normalized_name.contains(normalize_tag_name(search)))
+        normalized_search = normalize_tag_name(search)
+        matching_parents = select(Tag.id).where(Tag.normalized_name.contains(normalized_search))
+        statement = statement.where(
+            Tag.normalized_name.contains(normalized_search)
+            | Tag.id.in_(select(Tag.parent_id).where(Tag.normalized_name.contains(normalized_search)))
+            | Tag.parent_id.in_(matching_parents)
+        )
     total = int(db.scalar(select(func.count()).select_from(statement.subquery())) or 0)
     tags = list(
         db.scalars(statement.order_by(Tag.name.asc(), Tag.id.asc()).limit(limit).offset(offset))
@@ -54,10 +62,12 @@ async def list_tags(
 
 @router.post("", response_model=TagRead, status_code=status.HTTP_201_CREATED)
 async def create_tag(payload: TagCreate, db: DbSession) -> TagRead:
+    _validate_parent(db, payload.parent_id)
     tag = Tag(
         name=payload.name,
         normalized_name=normalize_tag_name(payload.name),
         color_key=payload.color_key,
+        parent_id=payload.parent_id,
     )
     db.add(tag)
     try:
@@ -79,6 +89,12 @@ async def update_tag(tag_id: str, payload: TagUpdate, db: DbSession) -> TagRead:
         tag.normalized_name = normalize_tag_name(payload.name)
     if payload.color_key is not None:
         tag.color_key = payload.color_key
+    if "parent_id" in payload.model_fields_set:
+        if payload.parent_id != tag.parent_id and tag.children:
+            raise ConflictError("A tag with sub-tags cannot be moved")
+        if payload.parent_id != tag.parent_id:
+            _validate_parent(db, payload.parent_id, current_tag_id=tag_id)
+        tag.parent_id = payload.parent_id
     try:
         db.commit()
     except IntegrityError as exc:
@@ -93,6 +109,22 @@ async def delete_tag(tag_id: str, db: DbSession) -> Response:
     tag = db.get(Tag, tag_id)
     if tag is None:
         raise NotFoundError(f"Tag not found: {tag_id}")
+    if tag.children:
+        raise ConflictError("Delete or move this tag's sub-tags before deleting it")
     db.delete(tag)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _validate_parent(db: Session, parent_id: str | None, current_tag_id: str | None = None) -> None:
+    if parent_id is None:
+        return
+    if parent_id == current_tag_id:
+        raise ValidationError("A tag cannot be its own parent")
+    parent = db.get(Tag, parent_id)
+    if parent is None:
+        raise NotFoundError(f"Parent tag not found: {parent_id}")
+    if parent.parent_id is not None:
+        raise ValidationError("Sub-tags cannot have their own sub-tags")
+    if current_tag_id and db.scalar(select(Tag.id).where(Tag.parent_id == current_tag_id).limit(1)):
+        raise ConflictError("A tag with sub-tags cannot be moved")

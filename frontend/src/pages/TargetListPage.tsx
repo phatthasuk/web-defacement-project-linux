@@ -25,6 +25,7 @@ export function TargetListPage() {
   const [editingTarget, setEditingTarget] = useState<Target | null>(null);
   const [deletingTarget, setDeletingTarget] = useState<Target | null>(null);
   const [newTargetTagIds, setNewTargetTagIds] = useState<string[]>([]);
+  const [expandedTagIds, setExpandedTagIds] = useState<string[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [page, setPage] = useState(1);
@@ -269,13 +270,25 @@ export function TargetListPage() {
             <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
-                {availableTags.map((tag) => {
+                {availableTags.filter((tag) => !tag.parent_id).map((tag) => {
                   const selected = activeTagIds.includes(tag.id);
-                  return (
-                    <button key={tag.id} type="button" onClick={() => applyTagFilter(selected ? activeTagIds.filter((id) => id !== tag.id) : [...activeTagIds, tag.id])} className={`rounded-full transition ${selected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}>
+                  const children = availableTags.filter((child) => child.parent_id === tag.id);
+                  const expanded = expandedTagIds.includes(tag.id);
+                  return <div key={tag.id} className="flex flex-wrap items-center gap-2">
+                    <button type="button" onClick={() => applyTagFilter(selected ? activeTagIds.filter((id) => id !== tag.id) : [...activeTagIds, tag.id])} className={`rounded-full transition ${selected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}>
                       <TagBadge tag={tag} />
                     </button>
-                  );
+                    {children.length > 0 && <button type="button" aria-label={`${expanded ? 'Hide' : 'Show'} ${tag.name} sub-tags`} aria-expanded={expanded}
+                      onClick={() => setExpandedTagIds(expanded ? expandedTagIds.filter((id) => id !== tag.id) : [...expandedTagIds, tag.id])}
+                      className="text-xs text-slate-500 hover:text-cyan-300">{expanded ? '−' : '+'}</button>}
+                    {expanded && children.map((child) => {
+                      const childSelected = activeTagIds.includes(child.id);
+                      return <button key={child.id} type="button" onClick={() => applyTagFilter(childSelected ? activeTagIds.filter((id) => id !== child.id) : [...activeTagIds, child.id])}
+                        className={`rounded-full transition ${childSelected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}>
+                        <TagBadge tag={child} />
+                      </button>;
+                    })}
+                  </div>;
                 })}
               </div>
               {activeTagIds.length > 0 && (

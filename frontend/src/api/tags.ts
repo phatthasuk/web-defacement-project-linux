@@ -5,7 +5,13 @@ import type { PaginatedTargets } from '../types/target';
 export async function listTags(search = '', limit = 200, offset = 0): Promise<PaginatedTags> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (search.trim()) params.set('search', search.trim());
-  return apiFetch<PaginatedTags>(`/tags?${params.toString()}`);
+  const firstPage = await apiFetch<PaginatedTags>(`/tags?${params.toString()}`);
+  const items = [...firstPage.items];
+  for (let nextOffset = offset + firstPage.items.length; nextOffset < offset + firstPage.total; nextOffset += limit) {
+    params.set('offset', String(nextOffset));
+    items.push(...(await apiFetch<PaginatedTags>(`/tags?${params.toString()}`)).items);
+  }
+  return { ...firstPage, items };
 }
 
 export async function createTag(payload: TagPayload): Promise<Tag> {

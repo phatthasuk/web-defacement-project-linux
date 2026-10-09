@@ -10,13 +10,14 @@ const colorClasses: Record<Tag['color_key'], string> = {
   slate: 'bg-slate-800 border-slate-600 text-slate-300',
 };
 
-export function TagBadge({ tag }: { tag: Pick<Tag, 'name' | 'color_key'> }) {
+export function TagBadge({ tag }: { tag: Pick<Tag, 'name' | 'color_key'> & Partial<Pick<Tag, 'parent_name'>> }) {
+  const label = tag.parent_name ? `${tag.parent_name} / ${tag.name}` : tag.name;
   return (
     <span
-      title={tag.name}
+      title={label}
       className={`inline-flex max-w-40 items-center rounded-full border px-2 py-0.5 text-xs font-medium ${colorClasses[tag.color_key]}`}
     >
-      <span className="truncate">{tag.name}</span>
+      <span className="truncate">{label}</span>
     </span>
   );
 }

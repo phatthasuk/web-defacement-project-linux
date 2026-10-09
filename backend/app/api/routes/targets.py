@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_db, get_settings
@@ -208,8 +208,13 @@ async def remove_target_tag(target_id: str, tag_id: str, db: DbSession) -> Respo
     if tag is None:
         raise NotFoundError(f"Tag not found: {tag_id}")
 
-    if tag in target.tags:
-        target.tags.remove(tag)
+    assigned = [tag] if tag in target.tags else []
+    if tag.parent_id is None:
+        child_ids = set(db.scalars(select(Tag.id).where(Tag.parent_id == tag.id)))
+        assigned.extend(item for item in target.tags if item.id in child_ids)
+    if assigned:
+        for item in assigned:
+            target.tags.remove(item)
         target.updated_at = datetime.now(UTC)
         db.commit()
 
@@ -231,9 +236,14 @@ def _resolve_tags(db: Session, tag_ids: list[str]) -> list[Tag]:
 def _apply_tag_filter(statement, tag_ids: list[str] | None, tag_match: str):
     if not tag_ids:
         return statement
+    conditions = []
+    for tag_id in tag_ids:
+        tag_match_condition = Target.tags.any(Tag.id == tag_id)
+        tag_match_condition = tag_match_condition | Target.tags.any(Tag.parent_id == tag_id)
+        conditions.append(tag_match_condition)
     if tag_match == "all":
-        return statement.where(and_(*(Target.tags.any(Tag.id == tag_id) for tag_id in tag_ids)))
-    return statement.where(Target.tags.any(Tag.id.in_(tag_ids)))
+        return statement.where(and_(*conditions))
+    return statement.where(or_(*conditions))
 
 
 @router.delete("/{target_id}", response_model=TargetRead)

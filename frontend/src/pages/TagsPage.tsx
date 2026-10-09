@@ -10,6 +10,7 @@ const colors: TagColor[] = ['cyan', 'blue', 'violet', 'emerald', 'amber', 'rose'
 export function TagsPage() {
   const [name, setName] = useState('');
   const [colorKey, setColorKey] = useState<TagColor>('cyan');
+  const [parentId, setParentId] = useState('');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Tag | null>(null);
   const [viewingTag, setViewingTag] = useState<Tag | null>(null);
@@ -27,6 +28,7 @@ export function TagsPage() {
   const resetForm = () => {
     setName('');
     setColorKey('cyan');
+    setParentId('');
     setEditing(null);
     setError(null);
   };
@@ -41,9 +43,9 @@ export function TagsPage() {
     setError(null);
     try {
       if (editing) {
-        await updateMutation.mutateAsync({ tagId: editing.id, payload: { name: trimmedName, color_key: colorKey } });
+        await updateMutation.mutateAsync({ tagId: editing.id, payload: { name: trimmedName, color_key: colorKey, parent_id: parentId || null } });
       } else {
-        await createMutation.mutateAsync({ name: trimmedName, color_key: colorKey });
+        await createMutation.mutateAsync({ name: trimmedName, color_key: colorKey, ...(parentId ? { parent_id: parentId } : {}) });
       }
       resetForm();
     } catch (requestError) {
@@ -55,6 +57,7 @@ export function TagsPage() {
     setEditing(tag);
     setName(tag.name);
     setColorKey(tag.color_key);
+    setParentId(tag.parent_id ?? '');
     setError(null);
   };
 
@@ -70,6 +73,8 @@ export function TagsPage() {
 
   const preview = { name: name.trim() || 'Tag preview', color_key: colorKey };
   const saving = createMutation.isPending || updateMutation.isPending;
+  const allTags = data?.items ?? [];
+  const rootTags = allTags.filter((tag) => !tag.parent_id);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -86,6 +91,15 @@ export function TagsPage() {
               <label htmlFor="tag-name" className="mb-2 block text-sm font-medium text-slate-300">Tag name</label>
               <input id="tag-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={50} disabled={saving}
                 placeholder="e.g. Production" className="w-full rounded-lg border border-slate-800 bg-slate-950/80 px-4 py-2.5 text-slate-200 placeholder-slate-600 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50" />
+            </div>
+            <div>
+              <label htmlFor="tag-parent" className="mb-2 block text-sm font-medium text-slate-300">Parent tag</label>
+              <select id="tag-parent" value={parentId} onChange={(event) => setParentId(event.target.value)} disabled={saving}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950/80 px-4 py-2.5 text-slate-200 focus:border-cyan-500 focus:outline-none">
+                <option value="">Main tag (no parent)</option>
+                {rootTags.filter((tag) => tag.id !== editing?.id).map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Sub-tags can only be one level deep.</p>
             </div>
             <fieldset disabled={saving}>
               <legend className="mb-2 text-sm font-medium text-slate-300">Color</legend>
@@ -117,7 +131,17 @@ export function TagsPage() {
             <input aria-label="Search tags" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tags" className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-500 focus:outline-none" />
           </div>
           {isLoading ? <p className="p-8 text-sm text-slate-500">Loading tags…</p> : isError ? <p className="p-8 text-sm text-rose-300">{loadError instanceof ApiError ? loadError.detail : 'Unable to load tags.'}</p> : data?.items.length === 0 ? <p className="p-8 text-sm text-slate-500">No tags match this search.</p> :
-            <ul className="divide-y divide-slate-800/60">{data?.items.map((tag) => <li key={tag.id} className="flex items-center gap-4 px-6 py-4"><TagBadge tag={tag} /><button type="button" onClick={(event) => { returnFocusRef.current = event.currentTarget; setViewingTag(tag); }} aria-label={`View ${tag.target_count} websites with ${tag.name} tag`} className="min-w-0 flex-1 text-left text-sm text-slate-400 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">{tag.target_count} active website{tag.target_count === 1 ? '' : 's'}</button><button type="button" onClick={() => startEdit(tag)} className="text-sm font-medium text-cyan-400 hover:text-cyan-300">Edit</button><button type="button" onClick={() => remove(tag)} disabled={deleteMutation.isPending} className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50">Delete</button></li>)}</ul>}
+            <ul className="divide-y divide-slate-800/60">{rootTags.map((tag) => {
+              const children = allTags.filter((child) => child.parent_id === tag.id);
+              const row = (item: Tag, nested = false) => <li key={item.id} className={`flex items-center gap-4 px-6 py-4 ${nested ? 'pl-12' : ''}`}>
+                <TagBadge tag={item} />
+                <button type="button" onClick={(event) => { returnFocusRef.current = event.currentTarget; setViewingTag(item); }} aria-label={`View ${item.target_count} websites with ${item.name} tag`} className="min-w-0 flex-1 text-left text-sm text-slate-400 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">{item.target_count} active website{item.target_count === 1 ? '' : 's'}</button>
+                {!nested && <button type="button" onClick={() => { resetForm(); setParentId(item.id); }} className="text-sm font-medium text-emerald-400 hover:text-emerald-300">Add Sub Tag</button>}
+                <button type="button" onClick={() => startEdit(item)} className="text-sm font-medium text-cyan-400 hover:text-cyan-300">Edit</button>
+                <button type="button" onClick={() => remove(item)} disabled={deleteMutation.isPending || (!nested && children.length > 0)} title={!nested && children.length > 0 ? 'Delete sub-tags first' : undefined} className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50">Delete</button>
+              </li>;
+              return <li key={tag.id}><ul>{row(tag)}{children.map((child) => row(child, true))}</ul></li>;
+            })}</ul>}
         </section>
       </div>
       {viewingTag && <TagWebsitesModal key={viewingTag.id} tag={viewingTag} onClose={() => setViewingTag(null)} />}

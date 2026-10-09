@@ -17,6 +17,7 @@ class TagCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=50)
     color_key: TagColor = "cyan"
+    parent_id: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -32,6 +33,7 @@ class TagUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=50)
     color_key: TagColor | None = None
+    parent_id: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -50,6 +52,8 @@ class TagRead(BaseModel):
     id: str
     name: str
     color_key: TagColor
+    parent_id: str | None = None
+    parent_name: str | None = None
     target_count: int = 0
     created_at: datetime
     updated_at: datetime
