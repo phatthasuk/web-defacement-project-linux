@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   usePaginatedTargetsQuery,
@@ -15,6 +15,7 @@ import { ApiError } from '../api/client';
 import { formatDateTime } from '../utils/date';
 import { TagBadge } from '../components/TagBadge';
 import { TagMultiSelect } from '../components/TagMultiSelect';
+import { TagFilterModal } from '../components/TagFilterModal';
 import { useTagsQuery } from '../hooks/useTags';
 
 export function TargetListPage() {
@@ -25,7 +26,8 @@ export function TargetListPage() {
   const [editingTarget, setEditingTarget] = useState<Target | null>(null);
   const [deletingTarget, setDeletingTarget] = useState<Target | null>(null);
   const [newTargetTagIds, setNewTargetTagIds] = useState<string[]>([]);
-  const [expandedTagIds, setExpandedTagIds] = useState<string[]>([]);
+  const [filteringTagParentId, setFilteringTagParentId] = useState<string | null>(null);
+  const tagFilterTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [page, setPage] = useState(1);
@@ -52,6 +54,10 @@ export function TargetListPage() {
   );
   const { data: tagData } = useTagsQuery();
   const availableTags = tagData?.items ?? [];
+  const filteringTagParent = availableTags.find((tag) => tag.id === filteringTagParentId && !tag.parent_id) ?? null;
+  const filteringTagChildren = filteringTagParent
+    ? availableTags.filter((tag) => tag.parent_id === filteringTagParent.id)
+    : [];
   const targets = paginatedData?.items;
   const total = paginatedData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -125,6 +131,22 @@ export function TargetListPage() {
     else params.delete('tag_match');
     setSearchParams(params);
     setPage(1);
+  };
+
+  const closeTagFilter = () => {
+    setFilteringTagParentId(null);
+    requestAnimationFrame(() => tagFilterTriggerRef.current?.focus());
+  };
+
+  const applyTagGroupFilter = (groupIds: string[]) => {
+    if (!filteringTagParent) return;
+    const currentGroupIds = new Set([filteringTagParent.id, ...filteringTagChildren.map((tag) => tag.id)]);
+    const nextTagIds = [
+      ...activeTagIds.filter((tagId) => !currentGroupIds.has(tagId)),
+      ...groupIds.filter((tagId) => currentGroupIds.has(tagId)),
+    ];
+    applyTagFilter(nextTagIds);
+    closeTagFilter();
   };
 
   const applyStatusFilter = (status: string) => {
@@ -271,24 +293,25 @@ export function TargetListPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
                 {availableTags.filter((tag) => !tag.parent_id).map((tag) => {
-                  const selected = activeTagIds.includes(tag.id);
                   const children = availableTags.filter((child) => child.parent_id === tag.id);
-                  const expanded = expandedTagIds.includes(tag.id);
-                  return <div key={tag.id} className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={() => applyTagFilter(selected ? activeTagIds.filter((id) => id !== tag.id) : [...activeTagIds, tag.id])} className={`rounded-full transition ${selected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}>
+                  const selectedChildCount = children.filter((child) => activeTagIds.includes(child.id)).length;
+                  const selected = activeTagIds.includes(tag.id) || selectedChildCount > 0;
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      aria-label={`${tag.name}${selectedChildCount ? `, ${selectedChildCount} sub-tags selected` : ''}. Open tag filter`}
+                      aria-haspopup="dialog"
+                      onClick={(event) => {
+                        tagFilterTriggerRef.current = event.currentTarget;
+                        setFilteringTagParentId(tag.id);
+                      }}
+                      className={`flex items-center gap-1.5 rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${selected ? 'opacity-100 ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}
+                    >
                       <TagBadge tag={tag} />
+                      {selectedChildCount > 0 && <span className="pr-1 text-[10px] text-slate-300">+{selectedChildCount}</span>}
                     </button>
-                    {children.length > 0 && <button type="button" aria-label={`${expanded ? 'Hide' : 'Show'} ${tag.name} sub-tags`} aria-expanded={expanded}
-                      onClick={() => setExpandedTagIds(expanded ? expandedTagIds.filter((id) => id !== tag.id) : [...expandedTagIds, tag.id])}
-                      className="text-xs text-slate-500 hover:text-cyan-300">{expanded ? '−' : '+'}</button>}
-                    {expanded && children.map((child) => {
-                      const childSelected = activeTagIds.includes(child.id);
-                      return <button key={child.id} type="button" onClick={() => applyTagFilter(childSelected ? activeTagIds.filter((id) => id !== child.id) : [...activeTagIds, child.id])}
-                        className={`rounded-full transition ${childSelected ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}>
-                        <TagBadge tag={child} />
-                      </button>;
-                    })}
-                  </div>;
+                  );
                 })}
               </div>
               {activeTagIds.length > 0 && (
@@ -492,6 +515,16 @@ export function TargetListPage() {
         onConfirm={handleConfirmDelete}
         isDeleting={deleteTargetMutation.isPending}
       />
+
+      {filteringTagParent && (
+        <TagFilterModal
+          parent={filteringTagParent}
+          children={filteringTagChildren}
+          selectedIds={activeTagIds}
+          onApply={applyTagGroupFilter}
+          onClose={closeTagFilter}
+        />
+      )}
     </div>
   );
 }
