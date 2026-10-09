@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api/client';
 import { TagBadge } from '../components/TagBadge';
+import { TagWebsitesModal } from '../components/TagWebsitesModal';
 import { useCreateTagMutation, useDeleteTagMutation, useTagsQuery, useUpdateTagMutation } from '../hooks/useTags';
 import type { Tag, TagColor } from '../types/tag';
 
@@ -11,11 +12,17 @@ export function TagsPage() {
   const [colorKey, setColorKey] = useState<TagColor>('cyan');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Tag | null>(null);
+  const [viewingTag, setViewingTag] = useState<Tag | null>(null);
+  const returnFocusRef = useRef<HTMLButtonElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { data, isLoading, isError, error: loadError } = useTagsQuery(search);
   const createMutation = useCreateTagMutation();
   const updateMutation = useUpdateTagMutation();
   const deleteMutation = useDeleteTagMutation();
+
+  useEffect(() => {
+    if (!viewingTag) returnFocusRef.current?.focus();
+  }, [viewingTag]);
 
   const resetForm = () => {
     setName('');
@@ -110,9 +117,10 @@ export function TagsPage() {
             <input aria-label="Search tags" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tags" className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-500 focus:outline-none" />
           </div>
           {isLoading ? <p className="p-8 text-sm text-slate-500">Loading tags…</p> : isError ? <p className="p-8 text-sm text-rose-300">{loadError instanceof ApiError ? loadError.detail : 'Unable to load tags.'}</p> : data?.items.length === 0 ? <p className="p-8 text-sm text-slate-500">No tags match this search.</p> :
-            <ul className="divide-y divide-slate-800/60">{data?.items.map((tag) => <li key={tag.id} className="flex items-center gap-4 px-6 py-4"><TagBadge tag={tag} /><span className="min-w-0 flex-1 text-sm text-slate-400">{tag.target_count} active website{tag.target_count === 1 ? '' : 's'}</span><button type="button" onClick={() => startEdit(tag)} className="text-sm font-medium text-cyan-400 hover:text-cyan-300">Edit</button><button type="button" onClick={() => remove(tag)} disabled={deleteMutation.isPending} className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50">Delete</button></li>)}</ul>}
+            <ul className="divide-y divide-slate-800/60">{data?.items.map((tag) => <li key={tag.id} className="flex items-center gap-4 px-6 py-4"><TagBadge tag={tag} /><button type="button" onClick={(event) => { returnFocusRef.current = event.currentTarget; setViewingTag(tag); }} aria-label={`View ${tag.target_count} websites with ${tag.name} tag`} className="min-w-0 flex-1 text-left text-sm text-slate-400 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">{tag.target_count} active website{tag.target_count === 1 ? '' : 's'}</button><button type="button" onClick={() => startEdit(tag)} className="text-sm font-medium text-cyan-400 hover:text-cyan-300">Edit</button><button type="button" onClick={() => remove(tag)} disabled={deleteMutation.isPending} className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50">Delete</button></li>)}</ul>}
         </section>
       </div>
+      {viewingTag && <TagWebsitesModal key={viewingTag.id} tag={viewingTag} onClose={() => setViewingTag(null)} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -163,6 +163,24 @@ async def update_target(
     db.commit()
     db.refresh(target)
     return target
+
+
+@router.delete("/{target_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_target_tag(target_id: str, tag_id: str, db: DbSession) -> Response:
+    target = db.get(Target, target_id)
+    if target is None:
+        raise NotFoundError(f"Target not found: {target_id}")
+
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise NotFoundError(f"Tag not found: {tag_id}")
+
+    if tag in target.tags:
+        target.tags.remove(tag)
+        target.updated_at = datetime.now(UTC)
+        db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _resolve_tags(db: Session, tag_ids: list[str]) -> list[Tag]:

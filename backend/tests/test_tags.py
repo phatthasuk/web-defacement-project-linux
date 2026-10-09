@@ -70,3 +70,26 @@ async def test_target_tag_ids_are_validated_atomically(client: httpx.AsyncClient
     response = await client.patch(f"/targets/{target['id']}", json={"tag_ids": [str(uuid4())]})
     assert response.status_code == 400
     assert (await client.get(f"/targets/{target['id']}")).json()["tags"] == []
+
+
+async def test_remove_target_tag_endpoint(client: httpx.AsyncClient):
+    tag = await create_tag(client, "Removable")
+    target = await create_target(client, "tagged-site", [tag["id"]])
+    assert len(target["tags"]) == 1
+
+    # Remove tag from target
+    delete_res = await client.delete(f"/targets/{target['id']}/tags/{tag['id']}")
+    assert delete_res.status_code == 204
+
+    # Verify tag is removed from target
+    get_res = await client.get(f"/targets/{target['id']}")
+    assert get_res.status_code == 200
+    assert get_res.json()["tags"] == []
+
+    # Non-existent target / tag returns 404
+    missing_target = await client.delete(f"/targets/{uuid4()}/tags/{tag['id']}")
+    assert missing_target.status_code == 404
+
+    missing_tag = await client.delete(f"/targets/{target['id']}/tags/{uuid4()}")
+    assert missing_tag.status_code == 404
+

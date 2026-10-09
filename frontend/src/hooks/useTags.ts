@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createTag, deleteTag, listTags, updateTag } from '../api/tags';
+import { createTag, deleteTag, listTagTargets, listTags, removeTagFromTarget, updateTag } from '../api/tags';
 import type { TagPayload } from '../types/tag';
 
 export const TAGS_QUERY_KEY = ['tags'] as const;
@@ -8,6 +8,14 @@ export function useTagsQuery(search = '') {
   return useQuery({
     queryKey: [...TAGS_QUERY_KEY, { search }],
     queryFn: () => listTags(search),
+  });
+}
+
+export function useTagTargetsQuery(tagId: string, limit = 20, offset = 0) {
+  return useQuery({
+    queryKey: [...TAGS_QUERY_KEY, tagId, 'targets', { limit, offset }],
+    queryFn: () => listTagTargets(tagId, limit, offset),
+    enabled: !!tagId,
   });
 }
 
@@ -35,4 +43,12 @@ export function useUpdateTagMutation() {
 export function useDeleteTagMutation() {
   const invalidate = useInvalidateTags();
   return useMutation({ mutationFn: deleteTag, onSuccess: invalidate });
+}
+
+export function useRemoveTagFromTargetMutation() {
+  const invalidate = useInvalidateTags();
+  return useMutation({
+    mutationFn: ({ targetId, tagId }: { targetId: string; tagId: string }) => removeTagFromTarget(targetId, tagId),
+    onSuccess: invalidate,
+  });
 }
