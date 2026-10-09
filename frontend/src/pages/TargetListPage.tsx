@@ -278,7 +278,6 @@ export function TargetListPage() {
                       <th className="px-6 py-4">Target / URL</th>
                       <th className="px-6 py-4 whitespace-nowrap">Status</th>
                       <th className="px-6 py-4 whitespace-nowrap min-w-[190px]">Last Activity</th>
-                      <th className="px-6 py-4 text-right whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/50">
@@ -304,38 +303,7 @@ export function TargetListPage() {
                               {(target.tags ?? []).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
                             </div>
                           )}
-                          {target.status === 'Failed' && target.last_error && (
-                            <span className="text-xs text-rose-400 block mt-1 max-w-md truncate" title={target.last_error}>
-                              Error: {target.last_error}
-                            </span>
-                          )}
-                          {triggerNotice[target.id] && (
-                            <span className="text-xs text-amber-400 block mt-1 max-w-md truncate" title={triggerNotice[target.id] || undefined}>
-                              Notice: {triggerNotice[target.id]}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <TargetStatusBadge
-                            status={target.status}
-                            title={target.status === 'Failed' ? target.last_error || undefined : undefined}
-                          />
-                          {target.status === 'Changed' && (
-                            <span className="mt-1 block text-xs text-slate-500">
-                              Structural Score:{' '}
-                              <span className="font-mono font-semibold text-amber-400">
-                                {target.latest_structure_change_score == null
-                                  ? '—'
-                                  : `${(target.latest_structure_change_score * 100).toFixed(1)}%`}
-                              </span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-400 font-mono whitespace-nowrap">
-                          {formatLastActivity(target.updated_at)}
-                        </td>
-                        <td className="px-6 py-4 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
                             <button
                               data-testid={`run-check-${target.id}`}
                               onClick={() => handleRunCheck(target.id)}
@@ -367,6 +335,35 @@ export function TargetListPage() {
                               Delete
                             </button>
                           </div>
+                          {target.status === 'Failed' && target.last_error && (
+                            <span className="text-xs text-rose-400 block mt-1 max-w-md truncate" title={target.last_error}>
+                              Error: {target.last_error}
+                            </span>
+                          )}
+                          {triggerNotice[target.id] && (
+                            <span className="text-xs text-amber-400 block mt-1 max-w-md truncate" title={triggerNotice[target.id] || undefined}>
+                              Notice: {triggerNotice[target.id]}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <TargetStatusBadge
+                            status={target.status}
+                            title={target.status === 'Failed' ? target.last_error || undefined : undefined}
+                          />
+                          {target.status === 'Changed' && (
+                            <span className="mt-1 block text-xs text-slate-500">
+                              Structural Score:{' '}
+                              <span className="font-mono font-semibold text-amber-400">
+                                {target.latest_structure_change_score == null
+                                  ? '—'
+                                  : `${(target.latest_structure_change_score * 100).toFixed(1)}%`}
+                              </span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-400 font-mono whitespace-nowrap">
+                          {formatLastActivity(target.updated_at)}
                         </td>
                       </tr>
                     ))}
