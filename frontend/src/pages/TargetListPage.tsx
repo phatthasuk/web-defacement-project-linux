@@ -298,7 +298,7 @@ export function TargetListPage() {
             </div>
 
             <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4">
-              <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
+              <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full max-w-sm rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
