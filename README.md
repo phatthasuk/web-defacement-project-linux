@@ -136,7 +136,7 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    For an existing database, back up `backend/data/app.db` and inspect its users
    first. Before this command, add an explicit `MEMBER_ROLE_MAPPING` JSON object
    to `backend/.env`, mapping verified usernames to `admin` or `operator`, for
-   example `MEMBER_ROLE_MAPPING={"existing-admin":"admin"}`. At least one
+   example `MEMBER_ROLE_MAPPING='{"existing-admin":"admin"}'`. At least one
    mapped Admin must be active; unmapped accounts become Operators without
    website assignments. The migration revokes old sessions and stops before
    changing the schema if the mapping is missing or does not identify an active
