@@ -75,7 +75,7 @@ export function ScreenshotPreviewModal({ target, onClose }: ScreenshotPreviewMod
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 px-5 py-4">
           <div className="min-w-0">
             <h2 id={titleId} className="truncate text-lg font-semibold text-slate-100">
-              Screenshot Comparison · {target.name}
+              {target.name}
             </h2>
             <a href={target.url} target="_blank" rel="noopener noreferrer" className="block truncate text-xs text-slate-500 hover:text-cyan-400">
               {target.url}

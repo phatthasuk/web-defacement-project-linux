@@ -388,24 +388,6 @@ export function TargetListPage() {
                           >
                             {target.name}
                           </Link>
-                          <button
-                            type="button"
-                            data-testid={`preview-target-${target.id}`}
-                            aria-label={`Preview screenshot comparison for ${target.name}`}
-                            aria-haspopup="dialog"
-                            onClick={(event) => {
-                              previewTriggerRef.current = event.currentTarget;
-                              setPreviewTarget(target);
-                            }}
-                            title="Preview screenshot comparison"
-                            className="ml-2 inline-flex items-center justify-center rounded-md p-1 text-slate-500 transition hover:bg-slate-800 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2.25 12s3.5-6.5 9.75-6.5 9.75 6.5 9.75 6.5-3.5 6.5-9.75 6.5S2.25 12 2.25 12z" />
-                              <circle cx="12" cy="12" r="2.75" strokeWidth={1.8} />
-                            </svg>
-                            <span className="px-0.5 text-xs font-semibold">Preview</span>
-                          </button>
                           <a
                             href={target.url}
                             target="_blank"
@@ -427,6 +409,24 @@ export function TargetListPage() {
                               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-slate-600 hover:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                               {target.status === 'Checking' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id) ? 'Checking...' : 'Run Check'}
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`preview-target-${target.id}`}
+                              aria-label={`Preview screenshot comparison for ${target.name}`}
+                              aria-haspopup="dialog"
+                              onClick={(event) => {
+                                previewTriggerRef.current = event.currentTarget;
+                                setPreviewTarget(target);
+                              }}
+                              title="Preview screenshot comparison"
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2.25 12s3.5-6.5 9.75-6.5 9.75 6.5 9.75 6.5-3.5 6.5-9.75 6.5S2.25 12 2.25 12z" />
+                                <circle cx="12" cy="12" r="2.75" strokeWidth={1.8} />
+                              </svg>
+                              Preview
                             </button>
                             <button
                               data-testid={`edit-target-${target.id}`}
