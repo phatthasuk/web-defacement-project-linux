@@ -4,7 +4,10 @@ FROM node:20-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# Vitest's Vite peer range currently resolves to a nested Vite 8, whose optional
+# esbuild peer is not recorded by the repository's lockfile. Keep the Docker
+# install deterministic while using the exact locked dependency tree.
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 RUN npm run build
