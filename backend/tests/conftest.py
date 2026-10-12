@@ -120,7 +120,7 @@ def auth_credentials(api_session_factory: Callable[[], Session]) -> dict[str, st
             username="tester",
             hashed_password=get_password_hash(password),
             is_active=True,
-            role="authenticated-user",
+            role="admin",
         )
         db.add(user)
         db.commit()

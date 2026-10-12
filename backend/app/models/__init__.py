@@ -5,5 +5,6 @@ from .tag import Tag
 from .target import Target
 from .target_tag import TargetTag
 from .user import User
+from .member import MemberAuditEvent, UserTargetAssignment
 
-__all__ = ["CheckResult", "Snapshot", "Target", "Tag", "TargetTag", "User", "Session"]
+__all__ = ["CheckResult", "Snapshot", "Target", "Tag", "TargetTag", "User", "Session", "UserTargetAssignment", "MemberAuditEvent"]

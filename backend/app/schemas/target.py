@@ -69,6 +69,7 @@ class TargetRead(BaseModel):
     latest_structure_change_score: float | None = None
     allowed_domains: list[str] | None = None
     tags: list[TagRead] = Field(default_factory=list)
+    assignees: list[dict] | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -20,12 +20,13 @@ export function usePaginatedTargetsQuery(
   tagMatch: 'any' | 'all' = 'any',
   status?: string,
   sortBy?: 'status' | 'last_activity',
-  sortOrder: 'asc' | 'desc' = 'desc'
+  sortOrder: 'asc' | 'desc' = 'desc',
+  search = ''
 ) {
   const sortedTagIds = [...tagIds].sort();
   return useQuery({
-    queryKey: [...TARGETS_QUERY_KEY, 'page', { limit, offset, includeInactive, tagIds: sortedTagIds, tagMatch, status, sortBy, sortOrder }],
-    queryFn: () => getPaginatedTargets(limit, offset, includeInactive, sortedTagIds, tagMatch, status, sortBy, sortOrder),
+    queryKey: [...TARGETS_QUERY_KEY, 'page', { limit, offset, includeInactive, tagIds: sortedTagIds, tagMatch, status, sortBy, sortOrder, search }],
+    queryFn: () => getPaginatedTargets(limit, offset, includeInactive, sortedTagIds, tagMatch, status, sortBy, sortOrder, search),
     refetchInterval: 4000,
   });
 }

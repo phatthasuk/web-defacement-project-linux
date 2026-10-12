@@ -18,6 +18,7 @@ import { TagMultiSelect } from '../components/TagMultiSelect';
 import { TagFilterModal } from '../components/TagFilterModal';
 import { useTagsQuery } from '../hooks/useTags';
 import { ScreenshotPreviewModal } from '../components/ScreenshotPreviewModal';
+import { useAuth } from '../hooks/authContext';
 
 export function TargetListPage() {
   const [name, setName] = useState('');
@@ -32,6 +33,9 @@ export function TargetListPage() {
   const [filteringTagParentId, setFilteringTagParentId] = useState<string | null>(null);
   const tagFilterTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState('');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [page, setPage] = useState(1);
   const pageSize = 50;
@@ -54,6 +58,7 @@ export function TargetListPage() {
     activeStatus || undefined,
     sortBy,
     sortOrder,
+    searchQuery,
   );
   const { data: tagData } = useTagsQuery();
   const availableTags = tagData?.items ?? [];
@@ -208,7 +213,7 @@ export function TargetListPage() {
 
       <div className="flex flex-col lg:flex-row items-start gap-8">
         {/* Left column: Add Target Form */}
-        <div className="w-full lg:w-80 xl:w-96 shrink-0">
+        {isAdmin && <div className="w-full lg:w-80 xl:w-96 shrink-0">
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
             <h2 className="text-xl font-semibold text-slate-200 mb-6">Add New Monitor</h2>
             <form onSubmit={handleAddTarget} className="space-y-5">
@@ -278,7 +283,7 @@ export function TargetListPage() {
               </button>
             </form>
           </div>
-        </div>
+        </div>}
 
         {/* Right column: Target List */}
         <div className="flex-1 w-full min-w-0">
@@ -293,6 +298,7 @@ export function TargetListPage() {
             </div>
 
             <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full max-w-sm rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
                 {availableTags.filter((tag) => !tag.parent_id).map((tag) => {
@@ -363,9 +369,9 @@ export function TargetListPage() {
                 <svg className="mx-auto h-12 w-12 text-slate-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
-                <h3 className="text-slate-300 font-medium text-lg mb-1">{activeTagIds.length || activeStatus ? 'No targets match the selected filters' : 'No targets configured'}</h3>
+                <h3 className="text-slate-300 font-medium text-lg mb-1">{activeTagIds.length || activeStatus || searchQuery ? 'No targets match the selected filters' : isAdmin ? 'No targets configured' : 'No websites assigned'}</h3>
                 <p className="text-slate-500 text-sm max-w-sm mx-auto">
-                  {activeTagIds.length || activeStatus ? 'Try changing or clearing the selected filters.' : 'Add a new target website on the left to start tracking content and visual adjustments.'}
+                  {activeTagIds.length || activeStatus || searchQuery ? 'Try changing or clearing the selected filters.' : isAdmin ? 'Add a new target website on the left to start tracking content and visual adjustments.' : 'An Admin must assign websites to your account before they appear here.'}
                 </p>
               </div>
             ) : (
@@ -401,6 +407,7 @@ export function TargetListPage() {
                               {(target.tags ?? []).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
                             </div>
                           )}
+                          {isAdmin && (target.assignees?.length ?? 0) > 0 && <p className="mt-2 text-xs text-slate-500">Assigned: {target.assignees?.map(a => `${a.display_name}${a.is_active ? '' : ' (suspended)'}`).join(', ')}</p>}
                           <div className="mt-2 flex flex-wrap items-center gap-2">
                             <button
                               data-testid={`run-check-${target.id}`}
@@ -428,7 +435,7 @@ export function TargetListPage() {
                               </svg>
                               Preview
                             </button>
-                            <button
+                            {isAdmin && <button
                               data-testid={`edit-target-${target.id}`}
                               onClick={() => setEditingTarget(target)}
                               className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5"
@@ -438,8 +445,8 @@ export function TargetListPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                               </svg>
                               Edit
-                            </button>
-                            <button
+                            </button>}
+                            {isAdmin && <button
                               data-testid={`delete-target-${target.id}`}
                               onClick={() => setDeletingTarget(target)}
                               className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-rose-950/40 hover:border-rose-700/60 hover:text-rose-400 transition-all flex items-center gap-1.5"
@@ -449,7 +456,7 @@ export function TargetListPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
                               Delete
-                            </button>
+                            </button>}
                           </div>
                           {target.status === 'Failed' && target.last_error && (
                             <span className="text-xs text-rose-400 block mt-1 max-w-md truncate" title={target.last_error}>

@@ -19,7 +19,10 @@ const authenticatedUser = {
   id: 1,
   username: 'operator',
   is_active: true,
-  role: 'authenticated-user',
+  role: 'admin',
+  display_name: 'Operator',
+  registration_status: 'approved',
+  must_change_password: false,
   csrf_token: 'csrf-token',
 };
 

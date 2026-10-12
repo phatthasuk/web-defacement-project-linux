@@ -19,7 +19,8 @@ export async function getPaginatedTargets(
   tagMatch: 'any' | 'all' = 'any',
   status?: string,
   sortBy?: 'status' | 'last_activity',
-  sortOrder: 'asc' | 'desc' = 'desc'
+  sortOrder: 'asc' | 'desc' = 'desc',
+  search = ''
 ): Promise<PaginatedTargets> {
   const params = new URLSearchParams({
     limit: limit.toString(),
@@ -30,6 +31,7 @@ export async function getPaginatedTargets(
   if (status) params.set('status', status);
   if (sortBy) params.set('sort_by', sortBy);
   if (sortBy) params.set('sort_order', sortOrder);
+  if (search.trim()) params.set('search', search.trim());
   tagIds.forEach((tagId) => params.append('tag_ids', tagId));
   return apiFetch<PaginatedTargets>(`/targets/page?${params.toString()}`);
 }

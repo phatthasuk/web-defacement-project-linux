@@ -106,7 +106,7 @@ async def test_failures_share_one_generic_response(
                 username="disabled",
                 hashed_password=get_password_hash("disabled-pass-value"),
                 is_active=False,
-                role="authenticated-user",
+                role="operator",
             )
         )
         db.commit()

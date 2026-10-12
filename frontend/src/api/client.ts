@@ -63,6 +63,9 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403 || response.status === 404) {
+      window.dispatchEvent(new CustomEvent('api:access-denied', { detail: { status: response.status, path } }));
+    }
     let detail = 'An unknown error occurred';
     if (data && typeof data === 'object' && 'detail' in data) {
       const rawDetail = (data as Record<string, unknown>).detail;

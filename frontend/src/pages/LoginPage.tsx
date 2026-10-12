@@ -8,7 +8,10 @@ interface AuthResponse {
   id: number;
   username: string;
   is_active: boolean;
-  role: string;
+  role: 'admin' | 'operator';
+  display_name: string;
+  registration_status: 'pending' | 'approved' | 'rejected';
+  must_change_password: boolean;
   csrf_token: string;
 }
 
@@ -36,7 +39,7 @@ export function LoginPage() {
       });
 
       applyAuth(auth);
-      navigate(from, { replace: true });
+      navigate(auth.must_change_password ? '/change-password' : from, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.detail);
@@ -98,6 +101,9 @@ export function LoginPage() {
             {isLoading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+        <p className="text-center text-sm text-slate-400 mt-6">
+          Need an account? <a className="text-cyan-400 hover:text-cyan-300" href="/register">Register</a>
+        </p>
       </div>
     </div>
   );

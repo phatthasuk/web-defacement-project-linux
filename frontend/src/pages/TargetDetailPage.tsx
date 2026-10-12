@@ -29,10 +29,13 @@ import { TargetStatus } from '../types/target';
 import { TagBadge } from '../components/TagBadge';
 import { useTagsQuery } from '../hooks/useTags';
 import { getScreenshotComparisonIds } from '../utils/screenshotComparison';
+import { useAuth } from '../hooks/authContext';
 
 export function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const targetId = id || '';
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const { data: target, isLoading: isTargetLoading, isError: isTargetError } = useTargetQuery(targetId);
   const { data: snapshots, isLoading: isSnapshotsLoading } = useTargetSnapshotsQuery(targetId);
@@ -329,7 +332,7 @@ export function TargetDetailPage() {
               {isChecking || triggerCheckMutation.isPending ? 'Checking...' : 'Check Now'}
             </button>
 
-            <button
+            {isAdmin && <button
               data-testid="detail-edit-target-btn"
               onClick={() => setIsEditModalOpen(true)}
               className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5"
@@ -339,9 +342,9 @@ export function TargetDetailPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
               </svg>
               Edit
-            </button>
+            </button>}
 
-            <button
+            {isAdmin && <button
               data-testid="detail-delete-target-btn"
               onClick={() => setIsDeleteModalOpen(true)}
               className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-rose-950/40 hover:border-rose-700/60 hover:text-rose-400 transition-all flex items-center gap-1.5"
@@ -351,7 +354,7 @@ export function TargetDetailPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
               Delete
-            </button>
+            </button>}
           </div>
 
           {target.status === 'Failed' && target.last_error && (

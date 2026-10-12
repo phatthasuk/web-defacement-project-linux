@@ -21,6 +21,7 @@ export interface Target {
   last_error: string | null;
   latest_structure_change_score?: number | null;
   tags?: Tag[];
+  assignees?: { id:number; username:string; display_name:string; is_active:boolean }[] | null;
   created_at: string;
   updated_at: string;
 }

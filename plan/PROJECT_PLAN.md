@@ -1,14 +1,15 @@
 # Website Defacement Monitoring System — Project Plan
 
-**Status date:** 2026-09-18 (member management, website assignments and tags planned; implementation not started)
+**Documentation updated:** 2026-10-12 (roadmap scope clarified; operational status not reverified)
 **Last recorded operational update:** 2026-09-07 (Stage 2 restarted; previous run cancelled; not reverified by this planning update)
 **Supersedes:** every document in [`plan/archive/`](archive/). Those are kept for history only; where they disagree with this file, **this file wins**.
 
 This is the authoritative project roadmap for what the system is, what is built, what was
 deliberately rejected, and what happens next. It carries forward the material from
 the archived plans that is still useful, and drops or corrects the rest.
-Linked feature plans own their detailed requirements; this roadmap owns overall
-priorities, stage status and cross-feature constraints.
+This roadmap owns core monitoring priorities, stage status and cross-feature
+constraints. Standalone add-on plans own their scope, delivery sequence and
+acceptance criteria independently of the numbered stages.
 
 ---
 
@@ -30,7 +31,7 @@ was missing from the archived plans.
 
 | Constraint | Value | Consequence |
 | :--- | :--- | :--- |
-| **Operators** | Initially one person; planned support for multiple Operators with assigned websites (see [Member Management Plan](MEMBER_MANAGEMENT_PLAN.md)) | Keep alert volume manageable while enforcing access to assigned websites only. |
+| **Operators** | Initially one person | Keep alert volume manageable for manual review and notification. |
 | **Check frequency** | **Hourly** | ~24 checks per target per day |
 | **Targets** | **6+, expected to grow.** BCH group: bangkokchainhospital, kasemrad.co.th, kasemradari, kasemradinter, kasemradvientiane, theworldmedicalhospital, sustainability.bangkokchainhospital | 10 targets hourly = **240 checks/day** |
 | **Deployment** | Single machine, localhost for now | Single uvicorn worker; scale-out infrastructure is not needed yet |
@@ -371,32 +372,6 @@ model and rules-engine severity scoring · MFA and OIDC migration · object
 storage with lifecycle policies · Prometheus metrics · auto-rebaseline (see
 archive).
 
-### Planned Features
-
-These features are planned separately from the numbered stages. Their placement
-here does not require completion of Stage 6; implementation priority and timing
-remain to be scheduled.
-
-#### Member management, website assignments and tags
-
-**Planning decision: 2026-09-18. Status: planned, not implemented.**
-Implementation priority and timing have not been assigned.
-
-Provide fixed Admin and Operator roles with access limited to assigned websites
-for Operators. Combine member administration and website assignments in one
-Admin-only Member Management page with Members and Website Assignments tabs.
-Add website tags and filters independently of access permissions, enforce scope
-at the backend, and audit administrative changes.
-
-Initial delivery covers individual assignments, member lifecycle, access controls,
-tags and filters. Bulk assignment and tag operations follow in a later increment.
-
-See [Member Management Plan](MEMBER_MANAGEMENT_PLAN.md) for the permission matrix,
-page behaviour, account lifecycle, implementation sequence and acceptance criteria.
-See [Tags Management Plan](TAGS_MANAGEMENT_PLAN.md) for the separate Tags page,
-top-right header navigation, badges below website URLs and tag filtering design.
-This planning work does not change the recorded observation-period status.
-
 ---
 
 ## 9. Reference material carried forward
@@ -473,8 +448,8 @@ caused real confusion. Going forward:
 
 - **Findings** keep their `codereviewbygptsol` numbers, `F1`-`F8`, listed in section 7.
 - **Stage work** is referenced by its Stage number from section 8, e.g. "Stage 1.2".
-- **Separately planned features** use their feature names and linked detail plans
-  under Planned Features in section 8; they do not receive Stage numbers.
+- **Standalone add-ons** use their feature names and their own plan documents;
+  they do not receive Stage numbers or belong to the numbered roadmap in section 8.
 - Do not introduce competing numbering schemes.
 
 ---
@@ -483,9 +458,8 @@ caused real confusion. Going forward:
 
 | Location | Contents |
 | :--- | :--- |
-| `plan/PROJECT_PLAN.md` | **Active project roadmap**; links to detailed feature plans |
-| `plan/MEMBER_MANAGEMENT_PLAN.md` | Active feature plan for member management, RBAC, website assignments and tags; priority and timing not yet assigned |
-| `plan/TAGS_MANAGEMENT_PLAN.md` | Detailed plan for Tags management, website tag assignment, header navigation and filters |
+| `plan/PROJECT_PLAN.md` | **Active core monitoring roadmap** |
+| `plan/archive/TAGS_MANAGEMENT_PLAN.md` | (Completed) Detailed plan for Tags management, website tag assignment, header navigation and filters |
 | `plan/archive/` | All previous plans and review documents, kept for history |
 | `refinement/<date>/` | Dated point-in-time records of completed work |
 | `PROJECT_STRUCTURE.md` | Repository layout |

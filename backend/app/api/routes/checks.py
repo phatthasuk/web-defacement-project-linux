@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.authorization import require_target_access
 from app.api.deps import (
     get_capture_func,
     get_current_user,
@@ -14,7 +15,7 @@ from app.api.deps import (
 from app.core.config import Settings
 from app.core.errors import NotFoundError, ValidationError
 from app.core.status import STATUS_CHECKING
-from app.models import CheckResult, Snapshot, Target
+from app.models import CheckResult, Snapshot, User
 from app.schemas import CheckResultRead, CheckTriggerResponse
 from app.services.checks import CaptureFunc
 from app.services.concurrency import (
@@ -40,10 +41,9 @@ async def trigger_target_check(
     settings: AppSettings,
     capture_func: InjectedCaptureFunc,
     session_factory: InjectedSessionFactory,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> CheckTriggerResponse:
-    target = db.get(Target, target_id)
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
+    target = require_target_access(db, user, target_id)
     if not target.is_active:
         raise ValidationError("Target is inactive")
     if target.status == STATUS_CHECKING or not try_acquire_in_flight(target_id):
@@ -65,10 +65,13 @@ async def trigger_target_check(
 
 
 @router.get("/checks/{check_id}", response_model=CheckResultRead)
-async def get_check_result(check_id: str, db: DbSession) -> CheckResult:
+async def get_check_result(
+    check_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> CheckResult:
     check_result = db.get(CheckResult, check_id)
     if check_result is None:
         raise NotFoundError(f"CheckResult not found: {check_id}")
+    require_target_access(db, user, check_result.target_id)
     return check_result
 
 
@@ -76,13 +79,12 @@ async def get_check_result(check_id: str, db: DbSession) -> CheckResult:
 async def list_target_check_results(
     target_id: str,
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     include_history: bool = False,
 ) -> list[CheckResult]:
-    target = db.get(Target, target_id)
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
+    target = require_target_access(db, user, target_id)
 
     statement = select(CheckResult).where(CheckResult.target_id == target_id)
     if not include_history:

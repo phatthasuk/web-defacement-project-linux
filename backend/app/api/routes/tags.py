@@ -5,9 +5,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.authorization import require_admin
 from app.api.deps import get_current_user, get_db
 from app.core.errors import ConflictError, NotFoundError, ValidationError
-from app.models import Tag, Target, TargetTag
+from app.core.time import utcnow
+from app.models import MemberAuditEvent, Tag, Target, TargetTag, User, UserTargetAssignment
 from app.schemas import PaginatedTagsRead, TagCreate, TagRead, TagUpdate
 from app.schemas.tag import normalize_tag_name
 
@@ -19,33 +21,49 @@ def as_tag_read(tag: Tag, target_count: int = 0) -> TagRead:
     return TagRead.model_validate(tag).model_copy(update={"target_count": target_count})
 
 
-def active_target_count(db: Session, tag_id: str) -> int:
+def active_target_count(db: Session, tag_id: str, user: User) -> int:
     tag_ids = [tag_id]
     tag_ids.extend(db.scalars(select(Tag.id).where(Tag.parent_id == tag_id)))
-    return int(
-        db.scalar(
-            select(func.count(func.distinct(TargetTag.target_id)))
-            .join(Target, Target.id == TargetTag.target_id)
-            .where(TargetTag.tag_id.in_(tag_ids), Target.is_active.is_(True))
-        )
-        or 0
+    statement = (
+        select(func.count(func.distinct(TargetTag.target_id)))
+        .join(Target, Target.id == TargetTag.target_id)
+        .where(TargetTag.tag_id.in_(tag_ids), Target.is_active.is_(True))
     )
+    if user.role == "operator":
+        statement = statement.join(
+            UserTargetAssignment, UserTargetAssignment.target_id == Target.id
+        ).where(UserTargetAssignment.user_id == user.id)
+    return int(db.scalar(statement) or 0)
 
 
 @router.get("", response_model=PaginatedTagsRead)
 async def list_tags(
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
     search: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PaginatedTagsRead:
     statement = select(Tag)
+    if user.role == "operator":
+        scoped_tag_ids = (
+            select(TargetTag.tag_id)
+            .join(UserTargetAssignment, UserTargetAssignment.target_id == TargetTag.target_id)
+            .where(UserTargetAssignment.user_id == user.id)
+        )
+        statement = statement.where(
+            Tag.id.in_(scoped_tag_ids)
+            | Tag.id.in_(select(Tag.parent_id).where(Tag.id.in_(scoped_tag_ids)))
+        )
     if search and search.strip():
         normalized_search = normalize_tag_name(search)
         matching_parents = select(Tag.id).where(Tag.normalized_name.contains(normalized_search))
+        matching_children = select(Tag.parent_id).where(
+            Tag.normalized_name.contains(normalized_search)
+        )
         statement = statement.where(
             Tag.normalized_name.contains(normalized_search)
-            | Tag.id.in_(select(Tag.parent_id).where(Tag.normalized_name.contains(normalized_search)))
+            | Tag.id.in_(matching_children)
             | Tag.parent_id.in_(matching_parents)
         )
     total = int(db.scalar(select(func.count()).select_from(statement.subquery())) or 0)
@@ -53,7 +71,7 @@ async def list_tags(
         db.scalars(statement.order_by(Tag.name.asc(), Tag.id.asc()).limit(limit).offset(offset))
     )
     return PaginatedTagsRead(
-        items=[as_tag_read(tag, active_target_count(db, tag.id)) for tag in tags],
+        items=[as_tag_read(tag, active_target_count(db, tag.id, user)) for tag in tags],
         total=total,
         limit=limit,
         offset=offset,
@@ -61,7 +79,10 @@ async def list_tags(
 
 
 @router.post("", response_model=TagRead, status_code=status.HTTP_201_CREATED)
-async def create_tag(payload: TagCreate, db: DbSession) -> TagRead:
+async def create_tag(
+    payload: TagCreate, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> TagRead:
+    require_admin(user)
     _validate_parent(db, payload.parent_id)
     tag = Tag(
         name=payload.name,
@@ -71,6 +92,15 @@ async def create_tag(payload: TagCreate, db: DbSession) -> TagRead:
     )
     db.add(tag)
     try:
+        db.flush()
+        db.add(
+            MemberAuditEvent(
+                actor_id=user.id,
+                action="tag.created",
+                after={"tag_id": tag.id, "name": tag.name, "parent_id": tag.parent_id},
+                occurred_at=utcnow(),
+            )
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -80,10 +110,14 @@ async def create_tag(payload: TagCreate, db: DbSession) -> TagRead:
 
 
 @router.patch("/{tag_id}", response_model=TagRead)
-async def update_tag(tag_id: str, payload: TagUpdate, db: DbSession) -> TagRead:
+async def update_tag(
+    tag_id: str, payload: TagUpdate, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> TagRead:
+    require_admin(user)
     tag = db.get(Tag, tag_id)
     if tag is None:
         raise NotFoundError(f"Tag not found: {tag_id}")
+    before = {"name": tag.name, "color_key": tag.color_key, "parent_id": tag.parent_id}
     if payload.name is not None:
         tag.name = payload.name
         tag.normalized_name = normalize_tag_name(payload.name)
@@ -96,21 +130,44 @@ async def update_tag(tag_id: str, payload: TagUpdate, db: DbSession) -> TagRead:
             _validate_parent(db, payload.parent_id, current_tag_id=tag_id)
         tag.parent_id = payload.parent_id
     try:
+        db.add(
+            MemberAuditEvent(
+                actor_id=user.id,
+                action="tag.updated",
+                after={
+                    "tag_id": tag.id,
+                    "name": tag.name,
+                    "color_key": tag.color_key,
+                    "parent_id": tag.parent_id,
+                },
+                before=before,
+                occurred_at=utcnow(),
+            )
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise ConflictError("A tag with this name already exists") from exc
     db.refresh(tag)
-    return as_tag_read(tag, active_target_count(db, tag.id))
+    return as_tag_read(tag, active_target_count(db, tag.id, user))
 
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_tag(tag_id: str, db: DbSession) -> Response:
+async def delete_tag(
+    tag_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> Response:
+    require_admin(user)
     tag = db.get(Tag, tag_id)
     if tag is None:
         raise NotFoundError(f"Tag not found: {tag_id}")
     if tag.children:
         raise ConflictError("Delete or move this tag's sub-tags before deleting it")
+    before = {"tag_id": tag.id, "name": tag.name, "parent_id": tag.parent_id}
+    db.add(
+        MemberAuditEvent(
+            actor_id=user.id, action="tag.deleted", before=before, occurred_at=utcnow()
+        )
+    )
     db.delete(tag)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

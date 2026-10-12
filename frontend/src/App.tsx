@@ -6,9 +6,13 @@ import { TargetDetailPage } from './pages/TargetDetailPage';
 import { CheckDetailPage } from './pages/CheckDetailPage';
 import { LoginPage } from './pages/LoginPage';
 import { TagsPage } from './pages/TagsPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { ChangePasswordPage } from './pages/ChangePasswordPage';
+import { MembersPage } from './pages/MembersPage';
 import { useAuth } from './hooks/authContext';
 import { AuthProvider } from './hooks/useAuth';
 import { LogOut, Tags } from 'lucide-react';
+import { Users } from 'lucide-react';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,7 +23,7 @@ const queryClient = new QueryClient({
   },
 });
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, adminOnly = false, allowPasswordChange = false }: { children: React.ReactNode; adminOnly?: boolean; allowPasswordChange?: boolean }) {
   const { user, isLoading, authError, retry } = useAuth();
   const location = useLocation();
 
@@ -50,6 +54,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
+
+  if (user.must_change_password && !allowPasswordChange) return <Navigate to="/change-password" replace />;
+  if (adminOnly && user.role !== 'admin') return <Navigate to="/" replace />;
 
   return <>{children}</>;
 }
@@ -87,12 +94,15 @@ function NavBar() {
           >
             Websites
           </NavLink>
-          <NavLink
+          {user.role === 'admin' && <NavLink
             to="/tags"
             className={({ isActive }) => `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}
           >
             <Tags className="h-4 w-4" /> Tags
-          </NavLink>
+          </NavLink>}
+          {user.role === 'admin' && <NavLink to="/members" className={({ isActive }) => `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}>
+            <Users className="h-4 w-4" /> Members
+          </NavLink>}
         </div>
         {logoutError && (
           <span className="text-xs text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2 py-1 rounded">
@@ -100,7 +110,7 @@ function NavBar() {
           </span>
         )}
         <span className="text-sm text-slate-400">
-          Welcome, <span className="text-slate-200 font-medium">{user.username}</span>
+          Welcome, <span className="text-slate-200 font-medium">{user.display_name || user.username}</span>
         </span>
         <button
           onClick={handleLogout}
@@ -126,8 +136,11 @@ export function App() {
             <main className="flex-1">
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/register" element={<RegisterPage />} />
+                <Route path="/change-password" element={<ProtectedRoute allowPasswordChange><ChangePasswordPage /></ProtectedRoute>} />
                 <Route path="/" element={<ProtectedRoute><TargetListPage /></ProtectedRoute>} />
-                <Route path="/tags" element={<ProtectedRoute><TagsPage /></ProtectedRoute>} />
+                <Route path="/tags" element={<ProtectedRoute adminOnly><TagsPage /></ProtectedRoute>} />
+                <Route path="/members" element={<ProtectedRoute adminOnly><MembersPage /></ProtectedRoute>} />
                 <Route path="/targets/:id" element={<ProtectedRoute><TargetDetailPage /></ProtectedRoute>} />
                 <Route path="/checks/:id" element={<ProtectedRoute><CheckDetailPage /></ProtectedRoute>} />
               </Routes>

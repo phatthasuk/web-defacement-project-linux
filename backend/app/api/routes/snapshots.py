@@ -7,10 +7,11 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from sqlalchemy.orm import Session
 
+from app.api.authorization import require_target_access
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.core.errors import NotFoundError
-from app.models import Snapshot
+from app.models import Snapshot, User
 from app.schemas import SnapshotRead
 
 router = APIRouter(
@@ -46,10 +47,13 @@ def _normalised_screenshot_response(screenshot_path: Path, viewport_width: int) 
 
 
 @router.get("/{snapshot_id}", response_model=SnapshotRead)
-async def get_snapshot(snapshot_id: str, db: DbSession) -> Snapshot:
+async def get_snapshot(
+    snapshot_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> Snapshot:
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None:
         raise NotFoundError(f"Snapshot not found: {snapshot_id}")
+    require_target_access(db, user, snapshot.target_id)
     return snapshot
 
 
@@ -58,10 +62,12 @@ async def get_snapshot_screenshot(
     snapshot_id: str,
     db: DbSession,
     settings: AppSettings,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None:
         raise NotFoundError(f"Snapshot not found: {snapshot_id}")
+    require_target_access(db, user, snapshot.target_id)
 
     screenshot_path = _resolve_contained_artifact(snapshot.screenshot_path, settings.data_dir_path)
     return _normalised_screenshot_response(screenshot_path, settings.VIEWPORT_WIDTH)
@@ -72,10 +78,12 @@ async def get_raw_snapshot_screenshot(
     snapshot_id: str,
     db: DbSession,
     settings: AppSettings,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> FileResponse:
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None:
         raise NotFoundError(f"Snapshot not found: {snapshot_id}")
+    require_target_access(db, user, snapshot.target_id)
 
     # Pre-normalisation snapshots only have screenshot_path; it is their raw evidence.
     raw_path = snapshot.raw_screenshot_path or snapshot.screenshot_path
@@ -88,10 +96,12 @@ async def get_snapshot_text(
     snapshot_id: str,
     db: DbSession,
     settings: AppSettings,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None:
         raise NotFoundError(f"Snapshot not found: {snapshot_id}")
+    require_target_access(db, user, snapshot.target_id)
 
     text_path = _resolve_contained_artifact(snapshot.text_path, settings.data_dir_path)
     return Response(text_path.read_text(encoding="utf-8"), media_type="text/plain; charset=utf-8")

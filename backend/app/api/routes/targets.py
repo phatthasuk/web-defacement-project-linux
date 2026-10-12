@@ -5,12 +5,22 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.authorization import accessible_targets, require_admin, require_target_access
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.ssrf_guard import validate_url
 from app.core.status import STATUS_AWAITING_BASELINE, STATUS_CHECKING
-from app.models import CheckResult, Snapshot, Tag, Target
+from app.core.time import utcnow
+from app.models import (
+    CheckResult,
+    MemberAuditEvent,
+    Snapshot,
+    Tag,
+    Target,
+    User,
+    UserTargetAssignment,
+)
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
 from app.services.concurrency import is_target_in_flight
 
@@ -25,7 +35,9 @@ async def create_target(
     payload: TargetCreate,
     db: DbSession,
     settings: AppSettings,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> Target:
+    require_admin(user)
     validate_url(payload.url, settings)
     tags = _resolve_tags(db, payload.tag_ids)
     target = Target(
@@ -35,6 +47,16 @@ async def create_target(
         tags=tags,
     )
     db.add(target)
+    db.flush()
+    db.add(
+        MemberAuditEvent(
+            actor_id=user.id,
+            target_id=target.id,
+            action="website.created",
+            occurred_at=utcnow(),
+            after={"name": target.name, "url": target.url, "tag_ids": payload.tag_ids},
+        )
+    )
     db.commit()
     db.refresh(target)
     return target
@@ -43,25 +65,27 @@ async def create_target(
 @router.get("", response_model=list[TargetRead])
 async def list_targets(
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
     include_inactive: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     tag_ids: Annotated[list[str] | None, Query()] = None,
     tag_match: Annotated[str, Query(pattern="^(any|all)$")] = "any",
-) -> list[Target]:
-    statement = _apply_tag_filter(select(Target), tag_ids, tag_match).options(
-        selectinload(Target.tags)
-    )
+) -> list[TargetRead]:
+    statement = _apply_tag_filter(
+        accessible_targets(select(Target), user), tag_ids, tag_match
+    ).options(selectinload(Target.tags))
     statement = statement.order_by(Target.created_at.desc())
     if not include_inactive:
         statement = statement.where(Target.is_active.is_(True))
     statement = statement.limit(limit).offset(offset)
-    return list(db.scalars(statement))
+    return [_target_read(db, user, target) for target in db.scalars(statement)]
 
 
 @router.get("/page", response_model=PaginatedTargetsRead)
 async def list_paginated_targets(
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
     include_inactive: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -78,13 +102,18 @@ async def list_paginated_targets(
             "Acknowledged",
             "Availability Issue",
             "Defaced",
-        ] | None,
+        ]
+        | None,
         Query(alias="status"),
     ] = None,
     sort_by: Annotated[Literal["status", "last_activity"] | None, Query()] = None,
     sort_order: Annotated[Literal["asc", "desc"], Query()] = "desc",
+    search: str | None = None,
 ) -> PaginatedTargetsRead:
-    base_query = _apply_tag_filter(select(Target), tag_ids, tag_match)
+    base_query = _apply_tag_filter(accessible_targets(select(Target), user), tag_ids, tag_match)
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        base_query = base_query.where(or_(Target.name.ilike(term), Target.url.ilike(term)))
     if not include_inactive:
         base_query = base_query.where(Target.is_active.is_(True))
     if status_filter is not None:
@@ -110,9 +139,7 @@ async def list_paginated_targets(
     )
     if sort_by == "status":
         score_order = (
-            latest_structure_score.asc()
-            if sort_order == "asc"
-            else latest_structure_score.desc()
+            latest_structure_score.asc() if sort_order == "asc" else latest_structure_score.desc()
         )
         items_stmt = items_stmt.order_by(
             case((Target.status == "Changed", 0), else_=1),
@@ -133,7 +160,7 @@ async def list_paginated_targets(
 
     return PaginatedTargetsRead(
         items=[
-            TargetRead.model_validate(target).model_copy(
+            _target_read(db, user, target).model_copy(
                 update={"latest_structure_change_score": score}
             )
             for target, score in target_rows
@@ -145,13 +172,11 @@ async def list_paginated_targets(
 
 
 @router.get("/{target_id}", response_model=TargetRead)
-async def get_target(target_id: str, db: DbSession) -> Target:
-    target = db.scalar(
-        select(Target).where(Target.id == target_id).options(selectinload(Target.tags))
-    )
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
-    return target
+async def get_target(
+    target_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> TargetRead:
+    target = require_target_access(db, user, target_id)
+    return _target_read(db, user, target)
 
 
 @router.patch("/{target_id}", response_model=TargetRead)
@@ -160,12 +185,17 @@ async def update_target(
     payload: TargetUpdate,
     db: DbSession,
     settings: AppSettings,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> Target:
+    require_admin(user)
     target = db.get(Target, target_id)
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
 
     update_data = payload.model_dump(exclude_unset=True)
+    before = {key: getattr(target, key) for key in update_data if key != "tag_ids"}
+    if "tag_ids" in update_data:
+        before["tag_ids"] = [tag.id for tag in target.tags]
     if "name" in update_data:
         target.name = update_data["name"]
     if "url" in update_data:
@@ -177,9 +207,10 @@ async def update_target(
                     "URL cannot be modified until the check finishes."
                 )
             validate_url(new_url, settings)
-            has_history = db.scalar(
-                select(Snapshot.id).where(Snapshot.target_id == target_id).limit(1)
-            ) is not None
+            has_history = (
+                db.scalar(select(Snapshot.id).where(Snapshot.target_id == target_id).limit(1))
+                is not None
+            )
             target.url = new_url
             if has_history:
                 target.url_revision += 1
@@ -193,13 +224,29 @@ async def update_target(
         target.tags = _resolve_tags(db, update_data["tag_ids"])
         target.updated_at = datetime.now(UTC)
 
+    db.add(
+        MemberAuditEvent(
+            actor_id=user.id,
+            target_id=target.id,
+            action="website.updated",
+            occurred_at=utcnow(),
+            before=before,
+            after={
+                key: (value if key != "tag_ids" else update_data["tag_ids"])
+                for key, value in update_data.items()
+            },
+        )
+    )
     db.commit()
     db.refresh(target)
     return target
 
 
 @router.delete("/{target_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_target_tag(target_id: str, tag_id: str, db: DbSession) -> Response:
+async def remove_target_tag(
+    target_id: str, tag_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> Response:
+    require_admin(user)
     target = db.get(Target, target_id)
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
@@ -216,6 +263,16 @@ async def remove_target_tag(target_id: str, tag_id: str, db: DbSession) -> Respo
         for item in assigned:
             target.tags.remove(item)
         target.updated_at = datetime.now(UTC)
+        db.add(
+            MemberAuditEvent(
+                actor_id=user.id,
+                target_id=target.id,
+                action="website.tags_updated",
+                occurred_at=utcnow(),
+                before={"tag_id": tag_id},
+                after={"removed_tag_ids": [item.id for item in assigned]},
+            )
+        )
         db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -233,6 +290,31 @@ def _resolve_tags(db: Session, tag_ids: list[str]) -> list[Tag]:
     return [by_id[tag_id] for tag_id in tag_ids]
 
 
+def _target_read(db: Session, user: User, target: Target) -> TargetRead:
+    result = TargetRead.model_validate(target)
+    if user.role == "admin":
+        assignees = db.execute(
+            select(User.id, User.username, User.display_name, User.is_active)
+            .join(UserTargetAssignment, UserTargetAssignment.user_id == User.id)
+            .where(UserTargetAssignment.target_id == target.id, User.role == "operator")
+            .order_by(User.display_name, User.username)
+        )
+        result = result.model_copy(
+            update={
+                "assignees": [
+                    {
+                        "id": row.id,
+                        "username": row.username,
+                        "display_name": row.display_name,
+                        "is_active": row.is_active,
+                    }
+                    for row in assignees
+                ]
+            }
+        )
+    return result
+
+
 def _apply_tag_filter(statement, tag_ids: list[str] | None, tag_match: str):
     if not tag_ids:
         return statement
@@ -247,12 +329,25 @@ def _apply_tag_filter(statement, tag_ids: list[str] | None, tag_match: str):
 
 
 @router.delete("/{target_id}", response_model=TargetRead)
-async def delete_target(target_id: str, db: DbSession) -> Target:
+async def delete_target(
+    target_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
+) -> Target:
+    require_admin(user)
     target = db.get(Target, target_id)
     if target is None:
         raise NotFoundError(f"Target not found: {target_id}")
 
     target.is_active = False
+    db.add(
+        MemberAuditEvent(
+            actor_id=user.id,
+            target_id=target.id,
+            action="website.disabled",
+            occurred_at=utcnow(),
+            before={"is_active": True},
+            after={"is_active": False},
+        )
+    )
     db.commit()
     db.refresh(target)
     return target
@@ -262,13 +357,12 @@ async def delete_target(target_id: str, db: DbSession) -> Target:
 async def list_target_snapshots(
     target_id: str,
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     include_history: bool = False,
 ) -> list[Snapshot]:
-    target = db.get(Target, target_id)
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
+    target = require_target_access(db, user, target_id)
 
     statement = select(Snapshot).where(Snapshot.target_id == target_id)
     if not include_history:
@@ -286,10 +380,9 @@ async def list_target_snapshots(
 async def get_target_baseline_snapshot(
     target_id: str,
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> Snapshot | None:
-    target = db.get(Target, target_id)
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
+    target = require_target_access(db, user, target_id)
 
     return db.scalar(
         select(Snapshot)
@@ -306,10 +399,9 @@ async def get_target_baseline_snapshot(
 async def list_target_baselines(
     target_id: str,
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> list[Snapshot]:
-    target = db.get(Target, target_id)
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
+    target = require_target_access(db, user, target_id)
 
     return list(
         db.scalars(
@@ -329,10 +421,9 @@ async def demote_target_baseline(
     target_id: str,
     snapshot_id: str,
     db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> Snapshot:
-    target = db.get(Target, target_id)
-    if target is None:
-        raise NotFoundError(f"Target not found: {target_id}")
+    target = require_target_access(db, user, target_id)
 
     if target.status == STATUS_CHECKING or is_target_in_flight(target_id):
         raise ConflictError("Cannot demote baseline while check is in progress")
@@ -379,4 +470,3 @@ async def demote_target_baseline(
     db.commit()
     db.refresh(snapshot)
     return snapshot
-

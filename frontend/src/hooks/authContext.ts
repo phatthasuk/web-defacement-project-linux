@@ -4,7 +4,10 @@ export interface User {
   id: number;
   username: string;
   is_active: boolean;
-  role: string;
+  role: 'admin' | 'operator';
+  display_name: string;
+  registration_status: 'pending' | 'approved' | 'rejected';
+  must_change_password: boolean;
 }
 
 export interface AuthResponse extends User {

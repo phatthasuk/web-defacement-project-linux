@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import select
 
-from app.api.routes import auth, checks, config, review, snapshots, tags, targets
+from app.api.routes import auth, checks, config, members, review, snapshots, tags, targets
 from app.api.routes.auth import limiter
 from app.core.config import get_settings
 from app.core.errors import (
@@ -20,27 +21,30 @@ from app.core.errors import (
     ValidationError,
 )
 from app.core.status import InvalidStatusTransitionError
-from app.db.session import Base, SessionLocal, engine
+from app.db.session import SessionLocal
 from app.models import (  # noqa: F401  (registers tables on Base)
     CheckResult,
+    MemberAuditEvent,
     Session,
     Snapshot,
     Tag,
     Target,
     TargetTag,
     User,
+    UserTargetAssignment,
 )
 from app.services.checks import reconcile_artifacts, recover_stale_checks
 from app.services.scheduler import CheckScheduler
 
 settings = get_settings()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Fail closed if production and secure cookies are disabled
     if settings.ENVIRONMENT == "production" and not settings.SESSION_COOKIE_SECURE:
         raise RuntimeError("Production environment must run with SESSION_COOKIE_SECURE=True")
-    
+
     # Create data directories if they don't exist BEFORE opening the SQLite database
     os.makedirs(settings.data_dir_path, exist_ok=True)
     os.makedirs(settings.data_dir_path / "screenshots", exist_ok=True)
@@ -56,8 +60,22 @@ async def lifespan(app: FastAPI):
             if db_dir:
                 os.makedirs(db_dir, exist_ok=True)
 
-    # Create database tables (now mostly handled by alembic, but keeping for compatibility)
-    Base.metadata.create_all(bind=engine)
+    # Production schema changes are applied by the deployment migration step.
+    with SessionLocal() as db:
+        bootstrap_admin = db.scalar(
+            select(User.id)
+            .where(
+                User.role == "admin",
+                User.registration_status == "approved",
+                User.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        if bootstrap_admin is None:
+            raise RuntimeError(
+                "No active Admin account exists. Run scripts/create_user.py with "
+                "--role admin before startup."
+            )
 
     # Release targets stuck in "Checking" by a previous process, and clean up
     # orphaned staging/artifact files.
@@ -74,6 +92,7 @@ async def lifespan(app: FastAPI):
 
     if scheduler is not None:
         await scheduler.stop()
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -94,6 +113,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 def _is_trusted_origin(origin: str, request: Request, allowed_origins: list[str]) -> bool:
     if origin in allowed_origins:
@@ -128,12 +148,15 @@ async def csrf_origin_validation(request: Request, call_next):
     # Origin validation for state-changing endpoints
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         origin = request.headers.get("origin")
-        if origin and not _is_trusted_origin(origin, request, origins):
+        if (request.url.path.endswith("/auth/register") and not origin) or (
+            origin and not _is_trusted_origin(origin, request, origins)
+        ):
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "CSRF verification failed: untrusted origin"}
+                content={"detail": "CSRF verification failed: untrusted origin"},
             )
     return await call_next(request)
+
 
 app.include_router(targets.router)
 app.include_router(tags.router)
@@ -142,6 +165,7 @@ app.include_router(snapshots.router)
 app.include_router(review.router)
 app.include_router(config.router)
 app.include_router(auth.router, prefix="/auth")
+app.include_router(members.router)
 
 
 @app.exception_handler(NotFoundError)

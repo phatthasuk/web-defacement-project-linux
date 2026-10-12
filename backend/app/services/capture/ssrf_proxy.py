@@ -345,6 +345,7 @@ class _HttpExchange:
                     if isinstance(event, h11.ConnectionClosed):
                         self._closed.add(source)
                         break
+                    assert isinstance(event, h11.Event)
                     if isinstance(event, h11.Request):
                         self.pending_response = True
                     elif source is self.responses and isinstance(event, h11.EndOfMessage):

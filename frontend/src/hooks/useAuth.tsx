@@ -12,9 +12,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const applyAuth = useCallback(({ csrf_token, ...currentUser }: AuthResponse) => {
     setCsrfToken(csrf_token);
-    setUser(currentUser);
+    setUser((previous) => {
+      if (previous && previous.id !== currentUser.id) queryClient.clear();
+      return currentUser;
+    });
     setAuthError(false);
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +45,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [applyAuth, reloadKey]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      setReloadKey((key) => key + 1);
+      void queryClient.invalidateQueries();
+    };
+    const onAccessDenied = (event: Event) => {
+      const status = (event as CustomEvent<{ status: number }>).detail?.status;
+      if (status === 401) {
+        setUser(null);
+        setCsrfToken(null);
+        queryClient.clear();
+      } else {
+        queryClient.clear();
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('api:access-denied', onAccessDenied);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('api:access-denied', onAccessDenied);
+    };
+  }, [queryClient]);
 
   const logout = useCallback(async () => {
     try {

@@ -128,30 +128,44 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    export PUBLIC_HOST="10.117.10.68"
    ```
 
-2. **Start the containers in detached daemon mode:**
+2. **Prepare the database before serving the application:**
+   ```bash
+   docker compose run --rm --build backend alembic upgrade head
+   ```
+
+   For an existing database, back up `backend/data/app.db` and inspect its users
+   first. Before this command, add an explicit `MEMBER_ROLE_MAPPING` JSON object
+   to `backend/.env`, mapping verified usernames to `admin` or `operator`, for
+   example `MEMBER_ROLE_MAPPING={"existing-admin":"admin"}`. At least one
+   mapped Admin must be active; unmapped accounts become Operators without
+   website assignments. The migration revokes old sessions and stops before
+   changing the schema if the mapping is missing or does not identify an active
+   Admin. Remove the mapping after a successful migration.
+
+3. **Create the first Admin account before starting the application:**
+   ```bash
+   docker compose run --rm backend python scripts/create_user.py admin --role admin --display-name "System Admin"
+   ```
+   Enter and confirm a password of at least 12 characters at the prompts.
+   Replace the username and display name with your preferred values; no default
+   account is created. Ordinary setup accounts default to the Operator role.
+
+4. **Start the containers in detached daemon mode:**
    ```bash
    docker compose up -d --build
    ```
 
-   The backend runs pending Alembic migrations before it starts. For upgrades,
-   back up `backend/data/app.db` first. URL edits now create a new URL revision:
-   the next successful capture waits for operator baseline approval, while older
-   snapshots and checks remain available through the history endpoints.
+   The backend checks for any pending Alembic migrations before it starts.
+   URL edits create a new URL revision: the next successful capture waits for
+   operator baseline approval, while older snapshots and checks remain
+   available through the history endpoints.
 
-3. **Create the first operator account after the backend is healthy:**
-   ```bash
-   docker compose exec backend python scripts/create_user.py admin
-   ```
-   Enter and confirm a password of at least 12 characters at the prompts.
-   The account is saved in the same persistent database used by the backend.
-   Replace `admin` with your preferred username; no default account is created.
-
-4. **Access the application:**
+5. **Access the application:**
    - **Operator Dashboard:** `https://localhost:3030` (or `https://<server-ip>:3030`)
    - **Swagger Docs through the authenticated TLS endpoint:** `https://localhost:3030/api/docs`
    - Port `3080` redirects HTTP requests to HTTPS. The backend is not published directly.
 
-5. **Useful container management commands:**
+6. **Useful container management commands:**
    ```bash
    # Follow live logs
    docker compose logs -f
@@ -221,7 +235,7 @@ cp .env.example .env
 alembic upgrade head
 
 # Bootstrap the initial admin user (interactive prompt)
-python3 scripts/create_user.py admin
+python3 scripts/create_user.py admin --role admin --display-name "System Admin"
 
 # Start the development server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

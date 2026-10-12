@@ -8,15 +8,17 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session as DbSession
 
-from app.api.deps import get_current_session, get_current_user, get_db, hash_token
+from app.api.deps import get_authenticated_user, get_current_session, get_db, hash_token
 from app.core.config import Settings, get_settings
 from app.core.security import get_password_hash, verify_password
 from app.core.time import utcnow
+from app.models.member import MemberAuditEvent
 from app.models.session import Session
 from app.models.user import User
-from app.schemas.auth import AuthResponse, LoginRequest
+from app.schemas.auth import AuthResponse, LoginRequest, PasswordChangeRequest, RegistrationRequest
 
 logger = logging.getLogger("app.auth")
+
 
 def get_client_ip(request: Request) -> str:
     """Return the peer IP after the ASGI server has applied its proxy policy.
@@ -41,6 +43,7 @@ settings = get_settings()
 _DUMMY_HASH = get_password_hash("dummy-password-for-constant-time-login")
 
 GENERIC_LOGIN_ERROR = "Invalid username or password"
+PASSWORD_MIN_LENGTH = 12
 
 
 def _set_session_cookie(response: Response, raw_token: str, settings: Settings) -> None:
@@ -125,11 +128,16 @@ async def login(
 
     # Correct password but disabled account: do not count as a brute-force attempt
     # and do not reveal that the account exists but is inactive.
-    if not user.is_active:
+    if (
+        not user.is_active
+        or user.registration_status != "approved"
+        or user.role not in {"admin", "operator"}
+    ):
         logger.warning("login_failed reason=inactive user_id=%s", user.id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=GENERIC_LOGIN_ERROR)
 
     _reset_failed_attempts(user)
+    user.last_login_at = now
 
     # A fresh random token on every login rotates the session identifier and
     # prevents session fixation.
@@ -156,6 +164,9 @@ async def login(
         username=user.username,
         is_active=user.is_active,
         role=user.role,
+        display_name=user.display_name,
+        registration_status=user.registration_status,
+        must_change_password=user.must_change_password,
         csrf_token=csrf_token,
     )
 
@@ -193,7 +204,7 @@ async def logout(
 
 @router.get("/me", response_model=AuthResponse)
 async def get_me(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_authenticated_user)],
     current_session: Annotated[Session, Depends(get_current_session)],
 ) -> AuthResponse:
     return AuthResponse(
@@ -201,5 +212,88 @@ async def get_me(
         username=current_user.username,
         is_active=current_user.is_active,
         role=current_user.role,
+        display_name=current_user.display_name,
+        registration_status=current_user.registration_status,
+        must_change_password=current_user.must_change_password,
         csrf_token=current_session.csrf_token,
     )
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/minute")
+async def register(
+    request: Request,
+    payload: RegistrationRequest,
+    db: DatabaseSession,
+) -> dict[str, str]:
+    if payload.password != payload.password_confirmation:
+        raise HTTPException(status_code=422, detail="Passwords do not match")
+    user = User(
+        username=payload.username.strip(),
+        display_name=payload.display_name.strip(),
+        hashed_password=get_password_hash(payload.password),
+        role="operator",
+        registration_status="pending",
+        is_active=False,
+        must_change_password=False,
+        created_at=utcnow(),
+        updated_at=utcnow(),
+    )
+    db.add(user)
+    try:
+        db.flush()
+        db.add(
+            MemberAuditEvent(
+                actor_id=None,
+                member_id=user.id,
+                action="member.registration_submitted",
+                source="self_registration",
+                occurred_at=utcnow(),
+                after={"registration_status": "pending", "role": "operator"},
+            )
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        # Keep duplicate registration responses generic and never expose a row.
+        from sqlalchemy.exc import IntegrityError
+
+        if isinstance(exc, IntegrityError):
+            raise HTTPException(status_code=409, detail="Username is already registered") from exc
+        raise
+    return {"status": "pending", "message": "Registration submitted. Awaiting Admin approval."}
+
+
+@router.post("/change-password")
+async def change_password(
+    payload: PasswordChangeRequest,
+    response: Response,
+    db: DatabaseSession,
+    settings: AppSettings,
+    user: Annotated[User, Depends(get_authenticated_user)],
+    current_session: Annotated[Session, Depends(get_current_session)],
+) -> dict[str, str]:
+    if not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if verify_password(payload.new_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Choose a different password")
+    now = utcnow()
+    user.hashed_password = get_password_hash(payload.new_password)
+    user.password_changed_at = now
+    user.must_change_password = False
+    db.query(Session).filter(Session.user_id == user.id, Session.revoked_at.is_(None)).update(
+        {Session.revoked_at: now, Session.revocation_reason: "password_changed"},
+        synchronize_session=False,
+    )
+    db.add(
+        MemberAuditEvent(
+            actor_id=user.id,
+            member_id=user.id,
+            action="member.password_changed",
+            occurred_at=now,
+            after={"must_change_password": False},
+        )
+    )
+    db.commit()
+    _delete_session_cookie(response, settings)
+    return {"status": "password_changed"}

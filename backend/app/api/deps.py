@@ -95,15 +95,28 @@ def get_current_session(
     return session
 
 
-def get_current_user(
+def get_authenticated_user(
     db: Annotated[DBSession, Depends(get_db)],
     session: Annotated[Session, Depends(get_current_session)],
 ) -> User:
     user = db.query(User).filter(User.id == session.user_id).first()
-    if not user or not user.is_active:
+    if not user or not user.is_active or user.registration_status != "approved":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
+        )
+    if user.role not in {"admin", "operator"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid account role")
+    return user
+
+
+def get_current_user(user: Annotated[User, Depends(get_authenticated_user)]) -> User:
+    """Require an approved session and completion of any forced password change."""
+    if user.role not in {"admin", "operator"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid account role")
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Password change required"
         )
     return user
 
@@ -112,6 +125,7 @@ __all__ = [
     "Settings",
     "get_capture_func",
     "get_current_session",
+    "get_authenticated_user",
     "get_current_user",
     "get_db",
     "get_session_factory",
