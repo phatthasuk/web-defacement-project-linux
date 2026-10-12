@@ -297,56 +297,58 @@ export function TargetListPage() {
               )}
             </div>
 
-            <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full max-w-sm rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
-                {availableTags.filter((tag) => !tag.parent_id).map((tag) => {
-                  const children = availableTags.filter((child) => child.parent_id === tag.id);
-                  const selectedChildCount = children.filter((child) => activeTagIds.includes(child.id)).length;
-                  const selected = activeTagIds.includes(tag.id) || selectedChildCount > 0;
-                  return (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      aria-label={`${tag.name}${selectedChildCount ? `, ${selectedChildCount} sub-tags selected` : ''}. Open tag filter`}
-                      aria-haspopup="dialog"
-                      onClick={(event) => {
-                        tagFilterTriggerRef.current = event.currentTarget;
-                        setFilteringTagParentId(tag.id);
-                      }}
-                      className={`flex items-center gap-1.5 rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${selected ? 'opacity-100 ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}
-                    >
-                      <TagBadge tag={tag} />
-                      {selectedChildCount > 0 && <span className="pr-1 text-[10px] text-slate-300">+{selectedChildCount}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              {activeTagIds.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <select aria-label="Tag filter mode" value={activeTagMatch} onChange={(event) => applyTagFilter(activeTagIds, event.target.value as 'any' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 focus:outline-none">
-                    <option value="any">Match any</option>
-                    <option value="all">Match all</option>
-                  </select>
-                  <button type="button" onClick={() => applyTagFilter([])} className="text-xs font-medium text-cyan-400 hover:text-cyan-300">Clear</button>
+            <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4">
+              <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>
+                  {availableTags.filter((tag) => !tag.parent_id).map((tag) => {
+                    const children = availableTags.filter((child) => child.parent_id === tag.id);
+                    const selectedChildCount = children.filter((child) => activeTagIds.includes(child.id)).length;
+                    const selected = activeTagIds.includes(tag.id) || selectedChildCount > 0;
+                    return (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        aria-label={`${tag.name}${selectedChildCount ? `, ${selectedChildCount} sub-tags selected` : ''}. Open tag filter`}
+                        aria-haspopup="dialog"
+                        onClick={(event) => {
+                          tagFilterTriggerRef.current = event.currentTarget;
+                          setFilteringTagParentId(tag.id);
+                        }}
+                        className={`flex items-center gap-1.5 rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${selected ? 'opacity-100 ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900' : 'opacity-60 hover:opacity-100'}`}
+                      >
+                        <TagBadge tag={tag} />
+                        {selectedChildCount > 0 && <span className="pr-1 text-[10px] text-slate-300">+{selectedChildCount}</span>}
+                      </button>
+                    );
+                  })}
+                  {activeTagIds.length > 0 && (
+                    <>
+                      <select aria-label="Tag filter mode" value={activeTagMatch} onChange={(event) => applyTagFilter(activeTagIds, event.target.value as 'any' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 focus:outline-none">
+                        <option value="any">Match any</option>
+                        <option value="all">Match all</option>
+                      </select>
+                      <button type="button" onClick={() => applyTagFilter([])} className="text-xs font-medium text-cyan-400 hover:text-cyan-300">Clear</button>
+                    </>
+                  )}
                 </div>
-              )}
-              <label className="flex items-center gap-2 text-xs text-slate-400">
-                <span>Status</span>
-                <select aria-label="Filter by status" value={activeStatus} onChange={(event) => applyStatusFilter(event.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
-                  <option value="">All statuses</option>
-                  <option value="Changed">Changed</option>
-                  <option value="Defaced">Defaced</option>
-                  <option value="Failed">Failed</option>
-                  <option value="Availability Issue">Availability Issue</option>
-                  <option value="Acknowledged">Acknowledged</option>
-                  <option value="Awaiting Baseline">Awaiting Baseline</option>
-                  <option value="Checking">Checking</option>
-                  <option value="OK">OK</option>
-                  <option value="Never Checked">Never Checked</option>
-                </select>
-              </label>
+                <label className="flex shrink-0 items-center gap-2 pt-1 text-xs text-slate-400">
+                  <span>Status</span>
+                  <select aria-label="Filter by status" value={activeStatus} onChange={(event) => applyStatusFilter(event.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
+                    <option value="">All statuses</option>
+                    <option value="Changed">Changed</option>
+                    <option value="Defaced">Defaced</option>
+                    <option value="Failed">Failed</option>
+                    <option value="Availability Issue">Availability Issue</option>
+                    <option value="Acknowledged">Acknowledged</option>
+                    <option value="Awaiting Baseline">Awaiting Baseline</option>
+                    <option value="Checking">Checking</option>
+                    <option value="OK">OK</option>
+                    <option value="Never Checked">Never Checked</option>
+                  </select>
+                </label>
+              </div>
             </div>
 
             {isLoading ? (
