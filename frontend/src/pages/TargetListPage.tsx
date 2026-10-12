@@ -17,6 +17,7 @@ import { TagBadge } from '../components/TagBadge';
 import { TagMultiSelect } from '../components/TagMultiSelect';
 import { TagFilterModal } from '../components/TagFilterModal';
 import { useTagsQuery } from '../hooks/useTags';
+import { ScreenshotPreviewModal } from '../components/ScreenshotPreviewModal';
 
 export function TargetListPage() {
   const [name, setName] = useState('');
@@ -25,6 +26,8 @@ export function TargetListPage() {
   const [triggerNotice, setTriggerNotice] = useState<Record<string, string | null>>({});
   const [editingTarget, setEditingTarget] = useState<Target | null>(null);
   const [deletingTarget, setDeletingTarget] = useState<Target | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<Target | null>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [newTargetTagIds, setNewTargetTagIds] = useState<string[]>([]);
   const [filteringTagParentId, setFilteringTagParentId] = useState<string | null>(null);
   const tagFilterTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -385,6 +388,24 @@ export function TargetListPage() {
                           >
                             {target.name}
                           </Link>
+                          <button
+                            type="button"
+                            data-testid={`preview-target-${target.id}`}
+                            aria-label={`Preview screenshot comparison for ${target.name}`}
+                            aria-haspopup="dialog"
+                            onClick={(event) => {
+                              previewTriggerRef.current = event.currentTarget;
+                              setPreviewTarget(target);
+                            }}
+                            title="Preview screenshot comparison"
+                            className="ml-2 inline-flex items-center justify-center rounded-md p-1 text-slate-500 transition hover:bg-slate-800 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2.25 12s3.5-6.5 9.75-6.5 9.75 6.5 9.75 6.5-3.5 6.5-9.75 6.5S2.25 12 2.25 12z" />
+                              <circle cx="12" cy="12" r="2.75" strokeWidth={1.8} />
+                            </svg>
+                            <span className="px-0.5 text-xs font-semibold">Preview</span>
+                          </button>
                           <a
                             href={target.url}
                             target="_blank"
@@ -515,6 +536,16 @@ export function TargetListPage() {
         onConfirm={handleConfirmDelete}
         isDeleting={deleteTargetMutation.isPending}
       />
+
+      {previewTarget && (
+        <ScreenshotPreviewModal
+          target={previewTarget}
+          onClose={() => {
+            setPreviewTarget(null);
+            requestAnimationFrame(() => previewTriggerRef.current?.focus());
+          }}
+        />
+      )}
 
       {filteringTagParent && (
         <TagFilterModal

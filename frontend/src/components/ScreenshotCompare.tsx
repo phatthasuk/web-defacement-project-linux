@@ -4,6 +4,7 @@ import { BASE_URL } from '../api/client';
 interface ScreenshotCompareProps {
   baselineSnapshotId?: string | null;
   currentSnapshotId?: string | null;
+  onZoomChange?: (isOpen: boolean) => void;
 }
 
 interface ScreenshotPanelProps {
@@ -190,6 +191,7 @@ function ScreenshotPanel({
 export function ScreenshotCompare({
   baselineSnapshotId,
   currentSnapshotId,
+  onZoomChange,
 }: ScreenshotCompareProps) {
   const [viewMode, setViewMode] = useState<'3-panel' | 'side-by-side'>('3-panel');
   const [diffUrl, setDiffUrl] = useState<string | null>(null);
@@ -201,6 +203,10 @@ export function ScreenshotCompare({
     !!currentSnapshotId &&
     baselineSnapshotId === currentSnapshotId;
 
+  useEffect(() => {
+    onZoomChange?.(Boolean(zoomedImage));
+  }, [zoomedImage, onZoomChange]);
+
   // Handle ESC key to close zoom modal
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -211,14 +217,17 @@ export function ScreenshotCompare({
   useEffect(() => {
     if (zoomedImage) {
       window.addEventListener('keydown', handleKeyDown);
+      const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        document.body.style.overflow = previousOverflow;
+      };
     } else {
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
     }
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
     };
   }, [zoomedImage, handleKeyDown]);
 

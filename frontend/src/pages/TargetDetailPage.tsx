@@ -28,6 +28,7 @@ import { ArtifactError } from '../components/ArtifactError';
 import { TargetStatus } from '../types/target';
 import { TagBadge } from '../components/TagBadge';
 import { useTagsQuery } from '../hooks/useTags';
+import { getScreenshotComparisonIds } from '../utils/screenshotComparison';
 
 export function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -87,13 +88,12 @@ export function TargetDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
   }, [currentSignature, targetId, queryClient]);
 
-  // A new URL has no comparison yet; display its captured candidate for approval.
+  const { baselineSnapshotId: compareBaselineId, currentSnapshotId: compareCurrentId } =
+    getScreenshotComparisonIds(target, snapshots, baselineSnapshot, checks);
   const latestSnapshot = snapshots?.[0] || null;
   const pendingCandidate = target && target.url_revision > 1 && !baselineSnapshot && !latestCheckItem
     ? latestSnapshot
     : null;
-  const compareBaselineId = latestCheckItem?.baseline_snapshot_id || baselineSnapshot?.id;
-  const compareCurrentId = latestCheckItem?.current_snapshot_id || pendingCandidate?.id || baselineSnapshot?.id;
 
   const cachedBaseline = [...baselines, ...(snapshots || [])].find(
     (snapshot) => snapshot.id === compareBaselineId
