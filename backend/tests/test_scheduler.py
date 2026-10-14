@@ -141,6 +141,34 @@ async def test_scheduler_holds_new_url_candidate_after_failed_retry(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_scheduler_holds_first_revision_candidate_until_review(tmp_path: Path):
+    session_factory, _ = make_test_db(tmp_path)
+    with session_factory() as db:
+        target = Target(name="First Candidate", url="https://example.com", is_active=True)
+        db.add(target)
+        db.flush()
+        db.add(Snapshot(
+            target_id=target.id,
+            url_revision=1,
+            final_url=target.url,
+            http_status=200,
+            screenshot_path="first.png",
+            text_path="first.txt",
+            html_path="first.html",
+            is_baseline=False,
+        ))
+        db.commit()
+        target_id = target.id
+
+    scheduler = CheckScheduler(Settings(DATA_DIR=str(tmp_path)), session_factory=session_factory)
+    scheduler._next_due_times[target_id] = time.time() - 1
+    await scheduler._tick()
+    assert scheduler.active_tasks_count == 0
+    assert scheduler._next_due_times[target_id] > time.time()
+    await scheduler.stop()
+
+
+@pytest.mark.asyncio
 async def test_scheduler_purges_inactive_targets(tmp_path: Path):
     session_factory, _ = make_test_db(tmp_path)
     with session_factory() as db:

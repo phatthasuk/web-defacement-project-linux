@@ -273,6 +273,34 @@ async def test_untrusted_origin_is_rejected(
     assert response.status_code == 403
 
 
+def test_same_origin_comparison_includes_effective_port_and_ipv6() -> None:
+    from starlette.requests import Request
+
+    from app.main import _is_trusted_origin
+
+    def request(host: str, scheme: str = "https") -> Request:
+        return Request({
+            "type": "http", "method": "POST", "path": "/targets",
+            "scheme": scheme, "server": ("monitor.example", 3030 if scheme == "https" else 80),
+            "headers": [(b"host", host.encode("ascii"))],
+            "client": ("172.30.0.2", 12345),
+        })
+
+    assert not _is_trusted_origin(
+        "https://monitor.example:9999", request("monitor.example:3030"), []
+    )
+    assert _is_trusted_origin("https://monitor.example", request("monitor.example:443"), [])
+    assert _is_trusted_origin("https://monitor.example:3030", request("monitor.example:3030"), [])
+    assert _is_trusted_origin(
+        "https://[2001:db8::1]:3030", request("[2001:db8::1]:3030"), []
+    )
+    assert _is_trusted_origin(
+        "https://monitor.example:9999",
+        request("monitor.example:3030"),
+        ["https://monitor.example:9999"],
+    )
+
+
 # --- Authorization boundary -------------------------------------------------
 
 

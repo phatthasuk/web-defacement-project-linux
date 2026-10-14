@@ -9,7 +9,7 @@ An automated, deterministic website integrity and unauthorized change detection 
 - **Deterministic Multi-Detector Engine:**
   - **Visual / Pixel Diffing:** High-speed channel difference analysis using Pillow C-extensions. Normalizes dynamic height changes and computes visual change scores (`visual_change_score`).
   - **Text Diffing:** Granular text difference analysis powered by `difflib.SequenceMatcher`, with an adaptive scaling strategy switching to line-level diffing on large documents (>100 KB).
-  - **Structural & Script Injection Detection:** Inspects DOM structures, detects hidden iframes, rogue external scripts, form action repointing, and malicious meta refresh tags, with domain allowlisting support.
+  - **Structural & Script Injection Detection:** Inspects DOM structures, detects hidden iframes, rogue external scripts, event handlers, `javascript:` URLs, form action repointing, and malicious meta refresh tags, with domain allowlisting support.
 - **Fail-Safe Headless Browser Rendering:**
   - Full client-side JavaScript execution via Playwright Chromium.
   - Overlays remain in captured evidence. Automatic consent/close clicks are disabled, including when the legacy `DISMISS_OVERLAYS` setting is true, because page handlers can erase injected content. Existing baselines captured after dismissal may need operator review when banners reappear.
@@ -17,6 +17,7 @@ An automated, deterministic website integrity and unauthorized change detection 
 - **Multi-Baseline Management & Smart Selection:**
   - Supports multiple valid baselines per target (e.g. seasonal promotions, localized variations).
   - Dynamic matching selects the closest matching baseline to minimize false positives while honoring strict retention caps (`max_baselines_per_target`).
+  - Every first capture, as well as captures after a URL change, remains a candidate until an authorized operator approves it. Manual recaptures create a newer candidate while keeping earlier captures in history; scheduled checks pause until approval.
 - **Security-First Architecture:**
   - **SSRF Guard:** Pre-flight DNS resolution and IP validation blocking private CIDR ranges (RFC 1918), loopback, link-local, and IPv6 mapped addresses, with DNS rebinding protection.
   - **Local Authentication:** Cookie-based session authentication (`HttpOnly`, `SameSite=Lax`), Argon2id password hashing, and progressive brute-force rate-limiting and account lockout.
@@ -158,7 +159,9 @@ The easiest and most isolated way to run the entire stack on a Linux server.
    The backend checks for any pending Alembic migrations before it starts.
    URL edits create a new URL revision: the next successful capture waits for
    operator baseline approval, while older snapshots and checks remain
-   available through the history endpoints.
+   available through the history endpoints. A new target follows the same
+   approval step before its first comparison; use **Check Now** to refresh a
+   pending candidate, which keeps earlier captures in history.
 
 5. **Access the application:**
    - **Operator Dashboard:** `https://localhost:3030` (or `https://<server-ip>:3030`)
@@ -267,14 +270,28 @@ Visit `http://localhost:5173` (or `http://<server-ip>:5173`) to access the dashb
 From the project root:
 
 ```bash
-# Run pytest test suite (123 tests)
-pytest backend/tests -v
+cd backend
+source .venv/bin/activate
+```
 
-# Run linter
-ruff check backend
+In Windows PowerShell, activate the environment with:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+```
+
+With the backend environment active:
+
+```bash
+
+# Run the backend suite using a short temporary path (helps on Windows)
+python -m pytest --basetemp=.pytest-tmp tests -v
+
+# Run lint checks over application, tests, scripts, and migrations
+ruff check app tests scripts alembic
 
 # Run strict static type checking
-cd backend
 mypy app
 ```
 
@@ -285,7 +302,7 @@ From the `frontend` directory:
 ```bash
 cd frontend
 
-# Run unit and component test suites (61 tests)
+# Run unit and component test suites
 npm run test
 
 # Run linter

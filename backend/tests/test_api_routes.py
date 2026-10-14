@@ -18,7 +18,7 @@ from app.core.status import (
     STATUS_OK,
 )
 from app.main import app
-from app.models import Snapshot, Target
+from app.models import Snapshot, Target, User, UserTargetAssignment
 from app.services.capture.capture import CaptureResult
 
 
@@ -89,7 +89,7 @@ async def test_check_trigger_runs_background_check(
     assert response.status_code == 202
     assert response.json() == {"target_id": target_id, "accepted": True}
     target_response = await client.get(f"/targets/{target_id}")
-    assert target_response.json()["status"] == STATUS_OK
+    assert target_response.json()["status"] == STATUS_AWAITING_BASELINE
     assert api_capture_calls == ["https://93.184.216.34"]
 
 
@@ -282,6 +282,12 @@ async def test_review_flow_end_to_end(
     app.dependency_overrides[get_capture_func] = lambda: queued_capture
 
     await client.post(f"/targets/{target_id}/check")
+    first_candidate = (await client.get(f"/targets/{target_id}/snapshots")).json()[0]
+    approved_first = await client.post(
+        f"/targets/{target_id}/baseline/approve",
+        json={"snapshot_id": first_candidate["id"]},
+    )
+    assert approved_first.status_code == 200
     await client.post(f"/targets/{target_id}/check")
 
     target_response = await client.get(f"/targets/{target_id}")
@@ -329,6 +335,12 @@ async def test_url_edit_requires_new_baseline_and_preserves_history(
 
     app.dependency_overrides[get_capture_func] = lambda: queued_capture
     await client.post(f"/targets/{target_id}/check")
+    first_candidate = (await client.get(f"/targets/{target_id}/snapshots")).json()[0]
+    approved_first = await client.post(
+        f"/targets/{target_id}/baseline/approve",
+        json={"snapshot_id": first_candidate["id"]},
+    )
+    assert approved_first.status_code == 200
     await client.post(f"/targets/{target_id}/check")
     old_check = (await client.get(f"/targets/{target_id}/checks")).json()[0]
 
@@ -408,6 +420,12 @@ async def test_confirm_defaced_route_updates_status(
     app.dependency_overrides[get_capture_func] = lambda: queued_capture
 
     await client.post(f"/targets/{target_id}/check")
+    first_candidate = (await client.get(f"/targets/{target_id}/snapshots")).json()[0]
+    approved_first = await client.post(
+        f"/targets/{target_id}/baseline/approve",
+        json={"snapshot_id": first_candidate["id"]},
+    )
+    assert approved_first.status_code == 200
     await client.post(f"/targets/{target_id}/check")
 
     checks = (await client.get(f"/targets/{target_id}/checks")).json()
@@ -1034,6 +1052,7 @@ async def test_target_patch_rejects_null_required_fields_and_allows_omission(
     response = await client.patch(f"/targets/{target_id}", json={})
     assert response.status_code == 200
     assert response.json() == before
+    assert response.json()["assignees"] == before["assignees"] == []
     response = await client.patch(
         f"/targets/{target_id}", json={"is_active": False, "allowed_domains": None}
     )
@@ -1041,3 +1060,37 @@ async def test_target_patch_rejects_null_required_fields_and_allows_omission(
     assert response.json()["is_active"] is False
     assert response.json()["allowed_domains"] is None
     assert response.json()["name"] == before["name"]
+
+
+async def test_target_patch_response_preserves_assignees(
+    client: httpx.AsyncClient,
+    api_session_factory,
+):
+    target_id = await create_target(client)
+    with api_session_factory() as db:
+        operator = User(
+            username="assigned-operator",
+            hashed_password="not-used-in-this-test",
+            role="operator",
+            display_name="Assigned Operator",
+            registration_status="approved",
+            is_active=True,
+        )
+        db.add(operator)
+        db.flush()
+        operator_id = operator.id
+        db.add(UserTargetAssignment(user_id=operator.id, target_id=target_id))
+        db.commit()
+
+    before = (await client.get(f"/targets/{target_id}")).json()
+    response = await client.patch(f"/targets/{target_id}", json={})
+    assert response.status_code == 200
+    assert response.json() == before
+    assert response.json()["assignees"] == [
+        {
+            "id": operator_id,
+            "username": "assigned-operator",
+            "display_name": "Assigned Operator",
+            "is_active": True,
+        }
+    ]

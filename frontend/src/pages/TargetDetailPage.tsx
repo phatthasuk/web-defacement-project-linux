@@ -94,7 +94,7 @@ export function TargetDetailPage() {
   const { baselineSnapshotId: compareBaselineId, currentSnapshotId: compareCurrentId } =
     getScreenshotComparisonIds(target, snapshots, baselineSnapshot, checks);
   const latestSnapshot = snapshots?.[0] || null;
-  const pendingCandidate = target && target.url_revision > 1 && !baselineSnapshot && !latestCheckItem
+  const pendingCandidate = target && !baselineSnapshot && !latestCheckItem
     ? latestSnapshot
     : null;
 
@@ -313,8 +313,12 @@ export function TargetDetailPage() {
           )}
           {target.status === 'Awaiting Baseline' && (
             <p className="mt-3 max-w-2xl rounded-lg border border-amber-800/60 bg-amber-950/40 p-3 text-sm text-amber-200">
-              URL revision {target.url_revision} is awaiting baseline approval.
-              {pendingCandidate ? ' Review the latest capture, then approve it to resume comparisons.' : ' Run a check to capture the new URL.'}
+              {target.url_revision > 1
+                ? `URL revision ${target.url_revision} is awaiting baseline approval.`
+                : 'The initial capture is awaiting baseline approval.'}
+              {pendingCandidate
+                ? ' Review the latest capture, then approve it to resume comparisons. Check Now creates a fresher candidate; earlier captures remain in history.'
+                : ' Run a check to capture the URL.'}
             </p>
           )}
 
@@ -564,7 +568,7 @@ export function TargetDetailPage() {
             ) : pendingCandidate ? (
               <div className="text-slate-400 text-sm leading-relaxed">
                 <p className="font-semibold text-amber-300 mb-1">Baseline Review Required</p>
-                <p className="text-xs text-slate-500">The new URL has been captured. Approve the snapshot above before comparisons resume.</p>
+                <p className="text-xs text-slate-500">This capture awaits approval. Approve the snapshot above before comparisons resume.</p>
               </div>
             ) : isInitialBaseline ? (
               <div className="text-slate-400 text-sm leading-relaxed">
@@ -603,7 +607,7 @@ export function TargetDetailPage() {
       <div>
         {isInitialBaseline ? (
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-6 text-center text-slate-500 font-mono text-sm">
-            {pendingCandidate ? 'New URL candidate awaiting approval. No differences to calculate.' : 'This is the initial snapshot. No differences to calculate.'}
+            {pendingCandidate ? 'Baseline candidate awaiting approval. No differences to calculate.' : 'This is the initial snapshot. No differences to calculate.'}
           </div>
         ) : isTextLoading ? (
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-12 text-center text-slate-500 flex items-center justify-center gap-3">

@@ -125,22 +125,53 @@ def _is_trusted_origin(origin: str, request: Request, allowed_origins: list[str]
     except Exception:
         return False
 
-    if not parsed_origin.hostname:
+    if (
+        parsed_origin.scheme.lower() not in {"http", "https"}
+        or not parsed_origin.hostname
+        or parsed_origin.username is not None
+        or parsed_origin.password is not None
+        or parsed_origin.path not in {"", "/"}
+        or parsed_origin.query
+        or parsed_origin.fragment
+    ):
         return False
 
-    host_header = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    # Nginx overwrites Host with the external authority. Uvicorn only applies
+    # forwarded scheme headers from the explicitly trusted proxy address.
+    host_header = request.headers.get("host")
     if not host_header:
         return False
 
-    target_host = host_header.split(":")[0].strip().lower()
-    origin_host = parsed_origin.hostname.strip().lower()
+    try:
+        parsed_host = urlsplit(f"//{host_header}")
+        target_host = (parsed_host.hostname or "").rstrip(".").lower()
+        origin_host = parsed_origin.hostname.rstrip(".").lower()
+        target_port = (
+            parsed_host.port
+            if parsed_host.port is not None
+            else (443 if request.url.scheme == "https" else 80)
+        )
+        origin_port = (
+            parsed_origin.port
+            if parsed_origin.port is not None
+            else (443 if parsed_origin.scheme.lower() == "https" else 80)
+        )
+    except ValueError:
+        return False
 
-    if target_host and origin_host == target_host:
-        expected_scheme = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
-        if parsed_origin.scheme.lower() == expected_scheme:
-            return True
+    if (
+        not target_host
+        or parsed_host.username is not None
+        or parsed_host.password is not None
+        or parsed_host.path
+        or parsed_host.query
+        or parsed_host.fragment
+        or target_host != origin_host
+        or parsed_origin.scheme.lower() != request.url.scheme.lower()
+    ):
+        return False
+    return target_port == origin_port
 
-    return False
 
 
 @app.middleware("http")

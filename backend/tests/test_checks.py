@@ -15,6 +15,7 @@ from app.core.config import Settings
 from app.core.errors import DnsResolutionError, SsrfBlockedError, UpstreamConnectionError
 from app.core.status import (
     STATUS_AVAILABILITY_ISSUE,
+    STATUS_AWAITING_BASELINE,
     STATUS_CHANGED,
     STATUS_CHECKING,
     STATUS_FAILED,
@@ -33,7 +34,7 @@ from app.services.checks import (
     select_best_baseline,
 )
 from app.services.diff.diff import DiffResult
-from app.services.review import acknowledge_check_result
+from app.services.review import acknowledge_check_result, approve_baseline
 
 
 def make_session() -> Session:
@@ -43,7 +44,7 @@ def make_session() -> Session:
     return session_local()
 
 
-async def test_run_target_check_marks_first_snapshot_as_baseline(tmp_path: Path):
+async def test_run_target_check_keeps_first_snapshot_pending_approval(tmp_path: Path):
     work_dir = make_work_dir("checks-baseline", tmp_path)
     db = make_session()
     target = Target(name="Example", url="https://example.com")
@@ -63,9 +64,36 @@ async def test_run_target_check_marks_first_snapshot_as_baseline(tmp_path: Path)
 
     assert result.check_result is None
     assert result.snapshot is not None
-    assert result.snapshot.is_baseline is True
-    assert result.status == STATUS_OK
-    assert target.status == STATUS_OK
+    assert result.snapshot.is_baseline is False
+    assert result.status == "Awaiting Baseline"
+    assert target.status == "Awaiting Baseline"
+
+
+async def test_manual_recapture_keeps_unapproved_first_candidate_in_history(tmp_path: Path):
+    work_dir = make_work_dir("checks-manual-candidate", tmp_path)
+    db = make_session()
+    target = Target(name="Example", url="https://example.com")
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    captures = [
+        write_capture(work_dir, "first-candidate", "First", "white"),
+        write_capture(work_dir, "fresh-candidate", "Fresh", "black"),
+    ]
+
+    async def fake_capture(url: str, settings: Settings, out_dir: Path) -> CaptureResult:
+        return captures.pop(0)
+
+    settings = Settings(DATA_DIR=str(work_dir))
+    first = await run_target_check(db, target, settings, capture_func=fake_capture)
+    second = await run_target_check(db, target, settings, capture_func=fake_capture)
+
+    candidates = list(db.scalars(select(Snapshot).where(Snapshot.target_id == target.id)))
+    assert first.snapshot is not None and first.snapshot.id == "first-candidate"
+    assert second.snapshot is not None and second.snapshot.id == "fresh-candidate"
+    assert {snapshot.id for snapshot in candidates} == {"first-candidate", "fresh-candidate"}
+    assert all(not snapshot.is_baseline for snapshot in candidates)
+    assert second.status == "Awaiting Baseline"
 
 
 async def test_run_target_check_stores_check_result_against_baseline(tmp_path: Path):
@@ -86,6 +114,9 @@ async def test_run_target_check_stores_check_result_against_baseline(tmp_path: P
 
     settings = Settings(DATA_DIR=str(work_dir))
     await run_target_check(db, target, settings, capture_func=fake_capture)
+    first_snapshot = db.scalar(select(Snapshot).where(Snapshot.target_id == target.id))
+    assert first_snapshot is not None
+    approve_baseline(db, target.id, first_snapshot.id, settings)
     result = await run_target_check(db, target, settings, capture_func=fake_capture)
 
     persisted_checks = list(db.scalars(select(CheckResult)))
@@ -244,6 +275,9 @@ async def test_run_target_check_rechecks_changed_after_acknowledgment(tmp_path: 
 
     settings = Settings(DATA_DIR=str(work_dir))
     await run_target_check(db, target, settings, capture_func=fake_capture)
+    first_snapshot = db.scalar(select(Snapshot).where(Snapshot.target_id == target.id))
+    assert first_snapshot is not None
+    approve_baseline(db, target.id, first_snapshot.id, settings)
     changed_result = await run_target_check(db, target, settings, capture_func=fake_capture)
     assert changed_result.check_result is not None
 
@@ -280,6 +314,9 @@ async def test_run_target_check_treats_sub_threshold_diff_as_ok(tmp_path: Path):
         VISUAL_CHANGE_THRESHOLD=0.05,
     )
     await run_target_check(db, target, settings, capture_func=fake_capture)
+    first_snapshot = db.scalar(select(Snapshot).where(Snapshot.target_id == target.id))
+    assert first_snapshot is not None
+    approve_baseline(db, target.id, first_snapshot.id, settings)
     result = await run_target_check(db, target, settings, capture_func=fake_capture)
 
     assert result.status == STATUS_OK
@@ -450,9 +487,9 @@ async def test_released_target_can_be_checked_again(tmp_path: Path):
         capture_func=fake_capture,
     )
 
-    assert result.status == STATUS_OK
+    assert result.status == STATUS_AWAITING_BASELINE
     db.refresh(target)
-    assert target.status == STATUS_OK
+    assert target.status == STATUS_AWAITING_BASELINE
     assert target.last_error is None
 
 
@@ -689,6 +726,9 @@ async def test_run_target_check_flags_an_invisible_script_injection(tmp_path: Pa
 
     settings = Settings(DATA_DIR=str(work_dir))
     await run_target_check(db, target, settings, capture_func=fake_capture)
+    first_snapshot = db.scalar(select(Snapshot).where(Snapshot.target_id == target.id))
+    assert first_snapshot is not None
+    approve_baseline(db, target.id, first_snapshot.id, settings)
     result = await run_target_check(db, target, settings, capture_func=fake_capture)
 
     assert result.check_result is not None
@@ -728,6 +768,9 @@ async def test_run_target_check_ignores_allowlisted_third_party(tmp_path: Path):
 
     settings = Settings(DATA_DIR=str(work_dir))
     await run_target_check(db, target, settings, capture_func=fake_capture)
+    first_snapshot = db.scalar(select(Snapshot).where(Snapshot.target_id == target.id))
+    assert first_snapshot is not None
+    approve_baseline(db, target.id, first_snapshot.id, settings)
     result = await run_target_check(db, target, settings, capture_func=fake_capture)
 
     assert result.check_result is not None
@@ -751,6 +794,7 @@ async def test_run_target_check_fails_when_structural_artifact_missing(tmp_path:
         return cap1
 
     await run_target_check(db, target, settings, capture_func=fake_cap1)
+    approve_baseline(db, target.id, cap1.id, settings)
 
     baseline_snapshot = db.scalar(
         select(Snapshot).where(Snapshot.target_id == target.id, Snapshot.is_baseline.is_(True))
@@ -786,6 +830,7 @@ async def test_multi_baseline_missing_html_does_not_win_over_injected_baseline(t
         return cap1
 
     await run_target_check(db, target, settings, capture_func=fake_cap1)
+    approve_baseline(db, target.id, cap1.id, settings)
 
     cap2 = _write_capture_with_html(work_dir, "b2", "Clean2", "white", "<h1>Clean2</h1>")
 
@@ -858,9 +903,11 @@ async def test_run_target_check_discards_unchanged_staging_artifacts(tmp_path: P
         return captures.pop(0)
 
     settings = Settings(DATA_DIR=str(work_dir))
-    # First check: Baseline
+    # First check: candidate, explicitly approved by the operator.
     base_res = await run_target_check(db, target, settings, capture_func=fake_capture)
-    assert base_res.status == STATUS_OK
+    assert base_res.status == "Awaiting Baseline"
+    assert base_res.snapshot is not None
+    approve_baseline(db, target.id, base_res.snapshot.id, settings)
     assert (work_dir / "screenshots" / "baseline.png").is_file()
     assert not (work_dir / "staging" / "baseline").exists()
 
@@ -895,6 +942,7 @@ async def test_run_target_check_promotes_changed_staging_artifacts(tmp_path: Pat
 
     settings = Settings(DATA_DIR=str(work_dir))
     await run_target_check(db, target, settings, capture_func=fake_capture)
+    approve_baseline(db, target.id, "baseline", settings)
     changed_res = await run_target_check(db, target, settings, capture_func=fake_capture)
 
     assert changed_res.status == STATUS_CHANGED
@@ -922,6 +970,7 @@ async def test_run_target_check_discards_staging_on_diff_failure(tmp_path: Path)
         return initial
 
     await run_target_check(db, target, settings, capture_func=fake_initial)
+    approve_baseline(db, target.id, initial.id, settings)
 
     # Second check has invalid image that causes diff comparison error
     broken_capture = _write_staged_capture(work_dir, "broken", "Hello", "white")
@@ -1161,8 +1210,9 @@ async def test_run_target_check_foreign_key_ordering_on_change(tmp_path: Path):
 
     settings = Settings(DATA_DIR=str(work_dir))
     first_res = await run_target_check(db, target, settings, capture_func=fake_capture)
-    assert first_res.status == STATUS_OK
+    assert first_res.status == "Awaiting Baseline"
     assert first_res.snapshot is not None
+    approve_baseline(db, target.id, first_res.snapshot.id, settings)
 
     second_res = await run_target_check(db, target, settings, capture_func=fake_capture)
     assert second_res.status == STATUS_CHANGED
@@ -1215,6 +1265,7 @@ async def test_run_target_check_rollback_and_promoted_files_cleanup_on_commit_er
 
     settings = Settings(DATA_DIR=str(work_dir))
     await run_target_check(db, target, settings, capture_func=fake_base_capture)
+    approve_baseline(db, target.id, base_cap.id, settings)
 
     # Prepare changed capture in staging
     staging = work_dir / "staging" / "test-change-staging"
@@ -1314,7 +1365,7 @@ async def test_run_target_check_keeps_committed_artifacts_when_refresh_fails(tmp
             capture_func=fake_capture,
         )
 
-    assert result.status == STATUS_OK
+    assert result.status == STATUS_AWAITING_BASELINE
     assert db.get(Snapshot, "committed-snap") is not None
     assert (work_dir / "screenshots" / "committed-snap.png").is_file()
     assert (work_dir / "text" / "committed-snap.txt").is_file()

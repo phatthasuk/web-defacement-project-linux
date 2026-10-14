@@ -232,3 +232,32 @@ def test_srcdoc_hashes_decoded_content_and_tracks_empty_attribute():
         '<iframe srcdoc="<p>Hello</p>">'
     )
     assert compare_structure(facts('<iframe>'), facts('<iframe srcdoc="">')).changed
+
+
+def test_event_handler_addition_modification_and_removal_are_detected():
+    clean = '<button>Continue</button>'
+    added = '<button onclick="console.log(1)">Continue</button>'
+    modified = '<button onclick="console.log(2)">Continue</button>'
+
+    add_diff = compare_structure(facts(clean), facts(added))
+    modify_diff = compare_structure(facts(added), facts(modified))
+    remove_diff = compare_structure(facts(added), facts(clean))
+
+    assert add_diff.score > 0
+    assert modify_diff.score > 0
+    assert remove_diff.score > 0
+    assert add_diff.added[0].startswith("event-handler:button.onclick:")
+    assert "console.log" not in add_diff.summary
+    assert not compare_structure(facts(added), facts(added)).changed
+
+
+def test_javascript_url_is_normalized_hashed_and_never_allowlisted_away():
+    first = '<a href="  JavaScript:alert(1) ">Continue</a>'
+    normalized = '<a href="javascript:alert(1)">Continue</a>'
+    modified = '<a href="javascript:alert(2)">Continue</a>'
+
+    assert not compare_structure(facts(first), facts(normalized)).changed
+    diff = compare_structure(facts(normalized, ("example.com",)), facts(modified, ("example.com",)))
+    assert diff.score > 0
+    assert diff.added[0].startswith("javascript-url:a.href:")
+    assert "alert" not in diff.summary

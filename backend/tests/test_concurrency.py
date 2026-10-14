@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.core.status import (
     STATUS_AVAILABILITY_ISSUE,
+    STATUS_AWAITING_BASELINE,
     STATUS_CHECKING,
     STATUS_FAILED,
-    STATUS_OK,
 )
 from app.db.session import Base
 from app.models import Snapshot, Target
@@ -67,7 +67,7 @@ async def test_run_checks_for_targets_respects_global_cap(tmp_path: Path):
     )
 
     assert counter.max_active <= 2
-    assert [result.status for result in results] == [STATUS_OK] * 5
+    assert [result.status for result in results] == [STATUS_AWAITING_BASELINE] * 5
 
 
 async def test_run_checks_for_targets_respects_per_domain_cap(tmp_path: Path):
@@ -107,7 +107,7 @@ async def test_run_checks_for_targets_respects_per_domain_cap(tmp_path: Path):
     )
 
     assert max_by_host["same.example.com"] <= 1
-    assert [result.status for result in results] == [STATUS_OK] * 4
+    assert [result.status for result in results] == [STATUS_AWAITING_BASELINE] * 4
 
 
 async def test_run_checks_for_targets_skips_already_checking_target(tmp_path: Path):
@@ -186,7 +186,7 @@ async def test_run_checks_for_targets_isolates_expected_capture_failures(tmp_pat
     )
 
     assert results[0].status == STATUS_FAILED
-    assert results[1].status == STATUS_OK
+    assert results[1].status == STATUS_AWAITING_BASELINE
 
     with session_factory() as db:
         t1 = db.get(Target, target_ids[0])
@@ -195,7 +195,7 @@ async def test_run_checks_for_targets_isolates_expected_capture_failures(tmp_pat
         assert t2 is not None
         assert t1.status == STATUS_FAILED
         assert t1.last_error == "capture failed"
-        assert t2.status == STATUS_OK
+        assert t2.status == STATUS_AWAITING_BASELINE
         assert t2.last_error is None
 
 
@@ -221,7 +221,10 @@ async def test_run_checks_for_targets_commits_worker_sessions(tmp_path: Path):
         targets = list(db.scalars(select(Target).order_by(Target.url)))
         snapshots = list(db.scalars(select(Snapshot)))
 
-    assert [target.status for target in targets] == [STATUS_OK, STATUS_OK]
+    assert [target.status for target in targets] == [
+        STATUS_AWAITING_BASELINE,
+        STATUS_AWAITING_BASELINE,
+    ]
     assert len(snapshots) == 2
 
 
@@ -313,6 +316,6 @@ async def test_run_checks_for_targets_with_pre_reserved(tmp_path: Path):
         pre_reserved=True,
     )
 
-    assert results[0].status == STATUS_OK
+    assert results[0].status == STATUS_AWAITING_BASELINE
     # In-flight reservation must have been released automatically
     assert not is_target_in_flight(tid)

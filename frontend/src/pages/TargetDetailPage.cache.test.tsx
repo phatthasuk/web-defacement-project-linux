@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
+import { render } from '../test-utils';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,8 +128,8 @@ afterEach(() => {
 });
 
 describe('TargetDetailPage cache refresh', () => {
-  it('offers approval for a new URL candidate without a comparison result', async () => {
-    const state = makeState('target-1', 2);
+  it.each([1, 2])('offers approval for a pending candidate on revision %i', async (revision) => {
+    const state = makeState('target-1', revision);
     state.target.status = 'Awaiting Baseline';
     server.set('target-1', state);
     vi.mocked(listTargetChecks).mockImplementation(async (_id, includeHistory) =>
