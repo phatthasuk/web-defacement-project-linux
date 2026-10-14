@@ -36,7 +36,7 @@ async def create_target(
     db: DbSession,
     settings: AppSettings,
     user: Annotated[User, Depends(get_current_user)],
-) -> Target:
+) -> TargetRead:
     require_admin(user)
     validate_url(payload.url, settings)
     tags = _resolve_tags(db, payload.tag_ids)
@@ -59,7 +59,7 @@ async def create_target(
     )
     db.commit()
     db.refresh(target)
-    return target
+    return _target_read(db, user, target)
 
 
 @router.get("", response_model=list[TargetRead])
@@ -186,7 +186,7 @@ async def update_target(
     db: DbSession,
     settings: AppSettings,
     user: Annotated[User, Depends(get_current_user)],
-) -> Target:
+) -> TargetRead:
     require_admin(user)
     target = db.get(Target, target_id)
     if target is None:
@@ -239,7 +239,7 @@ async def update_target(
     )
     db.commit()
     db.refresh(target)
-    return target
+    return _target_read(db, user, target)
 
 
 @router.delete("/{target_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -331,7 +331,7 @@ def _apply_tag_filter(statement, tag_ids: list[str] | None, tag_match: str):
 @router.delete("/{target_id}", response_model=TargetRead)
 async def delete_target(
     target_id: str, db: DbSession, user: Annotated[User, Depends(get_current_user)]
-) -> Target:
+) -> TargetRead:
     require_admin(user)
     target = db.get(Target, target_id)
     if target is None:
@@ -350,7 +350,7 @@ async def delete_target(
     )
     db.commit()
     db.refresh(target)
-    return target
+    return _target_read(db, user, target)
 
 
 @router.get("/{target_id}/snapshots", response_model=list[SnapshotRead])

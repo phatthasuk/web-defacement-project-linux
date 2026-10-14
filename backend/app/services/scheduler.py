@@ -129,7 +129,6 @@ class CheckScheduler:
             pending_candidate_ids = set(
                 db.scalars(
                     select(Target.id).where(
-                        Target.url_revision > 1,
                         candidate_exists,
                         ~baseline_exists,
                     )
@@ -159,8 +158,8 @@ class CheckScheduler:
 
             if now >= self._next_due_times[target.id]:
                 if target.id in pending_candidate_ids:
-                    # Keep the candidate until an operator reviews it. A manual
-                    # check can still replace it with a fresher capture.
+                    # Keep candidates until an operator reviews one. A manual
+                    # check may add a fresher candidate without deleting history.
                     self._next_due_times[target.id] = now + 60.0
                     continue
                 # If target is already checking or in flight, retry in 60s rather than

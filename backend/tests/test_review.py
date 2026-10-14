@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.core.status import (
     STATUS_ACKNOWLEDGED,
+    STATUS_AWAITING_BASELINE,
     STATUS_CHANGED,
     STATUS_DEFACED,
     STATUS_OK,
@@ -67,6 +68,19 @@ def test_approve_baseline_adds_to_baseline_set_and_acknowledges_related_check():
     assert approved_latest.is_baseline is True
     assert target.status == STATUS_OK
     assert unrelated_check.acknowledged_at is not None
+
+
+def test_approving_first_candidate_activates_initial_baseline():
+    db = make_session()
+    target = create_target(db, status=STATUS_AWAITING_BASELINE)
+    candidate = create_snapshot(db, target.id, "first-candidate", is_baseline=False)
+
+    approved = approve_baseline(db, target.id, candidate.id)
+
+    db.refresh(target)
+    assert approved.is_baseline is True
+    assert target.status == STATUS_OK
+    assert target.last_error is None
 
 
 

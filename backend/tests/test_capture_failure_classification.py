@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.status import STATUS_AVAILABILITY_ISSUE, STATUS_FAILED, STATUS_OK
+from app.core.status import STATUS_AVAILABILITY_ISSUE, STATUS_AWAITING_BASELINE, STATUS_FAILED
 from app.db.session import Base
 from app.models import Snapshot, Target
 from app.services.checks import TargetCheckResult, run_target_check
@@ -173,6 +173,6 @@ async def test_capture_complete_response_is_ok(tmp_path: Path, framing: str) -> 
         await server.wait_closed()
 
     assert response_sent.is_set()
-    assert result.status == STATUS_OK
-    assert result.snapshot is not None and result.snapshot.is_baseline
+    assert result.status == STATUS_AWAITING_BASELINE
+    assert result.snapshot is not None and not result.snapshot.is_baseline
     assert snapshots == 1

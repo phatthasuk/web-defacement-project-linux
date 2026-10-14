@@ -226,8 +226,8 @@ async def run_target_check(
         baseline = get_baseline_snapshot(db, target.id, target.url_revision)
 
         if baseline is None:
-            # A new target can establish its first baseline. After a URL edit,
-            # keep the capture as a candidate until an operator approves it.
+            # Every new URL revision, including the first, must be reviewed
+            # before it can be trusted as a baseline.
             perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
                 capture.id,
                 staging_dir,
@@ -254,12 +254,10 @@ async def run_target_check(
                 screenshot_format_version=capture.screenshot_format_version,
                 text_path=perm_text,
                 html_path=perm_html,
-                is_baseline=target.url_revision == 1,
+                is_baseline=False,
             )
             db.add(snapshot)
-            next_status = (
-                STATUS_OK if target.url_revision == 1 else STATUS_AWAITING_BASELINE
-            )
+            next_status = STATUS_AWAITING_BASELINE
             transition_target(target, next_status)
             db.commit()
             artifacts_committed = True

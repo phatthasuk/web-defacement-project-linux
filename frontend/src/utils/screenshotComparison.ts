@@ -10,7 +10,7 @@ export function getScreenshotComparisonIds(
 ) {
   const latestCheck = checks?.[0];
   const latestSnapshot = snapshots?.[0] ?? null;
-  const pendingCandidate = target && target.url_revision > 1 && !baselineSnapshot && !latestCheck
+  const pendingCandidate = target && !baselineSnapshot && !latestCheck
     ? latestSnapshot
     : null;
 

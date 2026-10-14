@@ -39,6 +39,9 @@ KIND_FORM = "form"
 KIND_STYLESHEET = "stylesheet"
 KIND_META_REFRESH = "meta-refresh"
 KIND_LINK_HOST = "link-host"
+KIND_EVENT_HANDLER = "event-handler"
+KIND_JAVASCRIPT_URL = "javascript-url"
+_EXECUTABLE_URL_ATTRIBUTES = {"href", "src", "action", "formaction", "xlink:href"}
 
 
 def _host_of(url: str) -> str:
@@ -89,6 +92,7 @@ class _StructureParser(HTMLParser):
         self.stylesheet_hrefs: list[str] = []
         self.meta_refreshes: list[str] = []
         self.link_hrefs: list[str] = []
+        self.executable_attributes: list[tuple[str, str, str]] = []
         self.inline_scripts: list[str] = []
         self._current_inline_chunks: list[str] = []
         self._in_inline_script = False
@@ -103,6 +107,19 @@ class _StructureParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = {name.lower(): (value or "") for name, value in attrs}
+
+        for name, value in attributes.items():
+            if name.startswith("on") and len(name) > 2 and value.strip():
+                self.executable_attributes.append((tag.lower(), name, value.strip()))
+            elif name in _EXECUTABLE_URL_ATTRIBUTES and value.lstrip().lower().startswith(
+                "javascript:"
+            ):
+                # Normalize whitespace before the scheme and scheme casing, but
+                # preserve the script body because whitespace can be meaningful.
+                normalized = value.lstrip()[len("javascript:") :].strip()
+                self.executable_attributes.append(
+                    (tag.lower(), name, f"javascript:{normalized}")
+                )
 
         if tag == "script":
             src = attributes.get("src", "").strip()
@@ -235,6 +252,13 @@ def extract_structure(
     for body in parser.inline_scripts:
         digest = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest()[:16]
         facts.add(f"{KIND_INLINE_SCRIPT}:{digest}")
+
+    # Handler bodies and javascript: URLs can execute without changing visible
+    # text or pixels. Hash content so summaries never expose inline code.
+    for tag, attribute, value in parser.executable_attributes:
+        digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
+        kind = KIND_EVENT_HANDLER if attribute.startswith("on") else KIND_JAVASCRIPT_URL
+        facts.add(f"{kind}:{tag}.{attribute}:{digest}")
 
     # Links are recorded per external *host*, not per URL: a news site adds
     # article links constantly, but a new outbound host is what betrays an

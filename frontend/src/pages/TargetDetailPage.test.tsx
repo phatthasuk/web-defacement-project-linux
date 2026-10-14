@@ -1,4 +1,5 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { render } from '../test-utils';
 import { BrowserRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { useQuery } from '@tanstack/react-query';
@@ -204,6 +205,19 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('button', { name: /Approve as Baseline/i })).not.toHaveTextContent('snap-latest');
     expect(screen.getByText('View Full Details →')).toBeInTheDocument();
     expect(screen.getByText('View Full Details →').closest('a')).toHaveAttribute('href', '/checks/check-1');
+  });
+
+  it('uses the Operator auth fixture to hide Admin-only target controls', () => {
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>,
+      { role: 'operator' },
+    );
+
+    expect(screen.getByText('Production Gateway')).toBeInTheDocument();
+    expect(screen.queryByTestId('detail-edit-target-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('detail-delete-target-btn')).not.toBeInTheDocument();
   });
 
   it('calls approveBaseline when clicking Approve as Baseline button', async () => {

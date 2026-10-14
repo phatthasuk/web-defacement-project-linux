@@ -10,6 +10,12 @@ from PIL import Image
 from playwright.async_api import Error as PlaywrightError
 
 from app.core.config import Settings
+from app.core.errors import (
+    CaptureError,
+    DnsResolutionError,
+    SsrfBlockedError,
+    UpstreamConnectionError,
+)
 from app.services.capture.capture import capture_snapshot
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_page.html"
@@ -753,3 +759,94 @@ async def test_capture_snapshot_blocks_file_subresource_from_remote_target(tmp_p
     await guard_handler(mock_route, mock_request)
     mock_route.continue_.assert_called_once()
     mock_route.abort.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        SsrfBlockedError("Blocked by SSRF guard: private address"),
+        DnsResolutionError("DNS resolution failed for late.example"),
+        UpstreamConnectionError("Upstream connection failed"),
+    ],
+    ids=["repeat-navigation", "ssrf", "dns", "upstream"],
+)
+async def test_late_main_document_navigation_error_rejects_capture(
+    tmp_path: Path, failure: Exception
+):
+    """A main-frame navigation during readiness must not return old artifacts."""
+    settings = Settings(PAGE_STABILIZE_ENABLED=True)
+    url = "https://example.com/page"
+    out_dir = tmp_path / f"capture-late-{uuid4()}"
+    mock_browser = AsyncMock()
+    mock_context = AsyncMock()
+    mock_page = AsyncMock()
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.request = MagicMock(redirected_from=None)
+    mock_page.goto.return_value = mock_response
+    mock_page.main_frame = MagicMock()
+    mock_page.main_frame.page = mock_page
+    mock_page.main_frame.parent_frame = None
+    mock_page.content.return_value = "<html><body>old page</body></html>"
+    mock_page.inner_text.return_value = "old page"
+    mock_page.screenshot.return_value = _png_bytes()
+    mock_page.title.return_value = "Old page"
+    mock_page.url = url
+    mock_browser.new_context.return_value = mock_context
+    mock_context.new_page.return_value = mock_page
+    mock_ap_instance = MagicMock()
+    mock_ap_instance.chromium.launch = AsyncMock(return_value=mock_browser)
+    mock_ap = MagicMock()
+    mock_ap.__aenter__ = AsyncMock(return_value=mock_ap_instance)
+    mock_ap.__aexit__ = AsyncMock(return_value=None)
+    guard_handler = None
+
+    async def capture_route(_pattern, handler):
+        nonlocal guard_handler
+        guard_handler = handler
+
+    mock_context.route = AsyncMock(side_effect=capture_route)
+
+    async def readiness(_page, _options):
+        assert guard_handler is not None
+        request = MagicMock()
+        request.url = "https://late.example/"
+        request.is_navigation_request.return_value = True
+        request.redirected_from = None
+        request.frame = mock_page.main_frame
+        route = AsyncMock()
+        if failure is None:
+            route.fetch.return_value = MagicMock(status=200, headers={})
+        elif isinstance(failure, UpstreamConnectionError):
+            route.fetch.side_effect = RuntimeError("proxy rejected upstream")
+        await guard_handler(route, request)
+        if failure is None:
+            route.fulfill.assert_awaited_once()
+        else:
+            route.abort.assert_awaited_once()
+        return {"stable": True}
+
+    def validate(request_url, _settings):
+        if (
+            failure is not None
+            and not isinstance(failure, UpstreamConnectionError)
+            and request_url.startswith("https://late.example")
+        ):
+            raise failure
+
+    with (
+        patch("app.services.capture.capture.validate_url", side_effect=validate),
+        patch("app.services.capture.capture.wait_page_ready", side_effect=readiness),
+        patch("app.services.capture.capture.async_playwright", return_value=mock_ap),
+        patch(
+            "app.services.capture.ssrf_proxy.SsrfProxy.pop_rejection",
+            return_value=failure if isinstance(failure, UpstreamConnectionError) else None,
+        ),
+    ):
+        expected_error = CaptureError if failure is None else type(failure)
+        with pytest.raises(expected_error):
+            await capture_snapshot(url, settings, out_dir)
+
+    staging_parent = out_dir / "staging"
+    assert not staging_parent.exists() or list(staging_parent.iterdir()) == []

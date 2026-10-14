@@ -172,6 +172,16 @@ async def _capture_snapshot_impl(
             ] = defaultdict(deque)
             main_navigation_complete = asyncio.Event()
             final_http_status: int | None = None
+            final_document_url: str | None = None
+            main_navigation_generation = 0
+
+            def raise_navigation_error() -> None:
+                if blocked_error is not None:
+                    raise blocked_error
+                if availability_error is not None:
+                    raise availability_error
+                if capture_error is not None:
+                    raise capture_error
 
             def is_main_navigation(request: Request) -> bool:
                 if not request.is_navigation_request():
@@ -197,7 +207,8 @@ async def _capture_snapshot_impl(
 
             async def guard_navigation(route: Route, request: Request) -> None:
                 nonlocal blocked_error, availability_error, capture_error
-                nonlocal final_http_status, main_redirect_count
+                nonlocal final_http_status, final_document_url
+                nonlocal main_redirect_count, main_navigation_generation
 
                 url_to_check = request.url
                 main_navigation = is_main_navigation(request)
@@ -358,6 +369,8 @@ async def _capture_snapshot_impl(
                 if main_navigation:
                     main_redirect_count = max(main_redirect_count, redirects_seen)
                     final_http_status = response.status
+                    final_document_url = request.url
+                    main_navigation_generation += 1
                     main_navigation_complete.set()
 
             await context.route("**/*", guard_navigation)
@@ -385,12 +398,8 @@ async def _capture_snapshot_impl(
                         main_navigation_complete.wait(),
                         timeout=float(settings.PAGE_TIMEOUT_SECONDS),
                     )
-                if blocked_error is not None:
-                    raise blocked_error
-                if availability_error is not None:
-                    raise availability_error
-                if capture_error is not None:
-                    raise capture_error
+                raise_navigation_error()
+                completed_navigation_generation = main_navigation_generation
             except PlaywrightError as exc:
                 if blocked_error is not None:
                     raise blocked_error from exc
@@ -405,6 +414,9 @@ async def _capture_snapshot_impl(
             if settings.PAGE_STABILIZE_ENABLED:
                 wait_options = build_wait_options(settings)
                 readiness = await wait_page_ready(page, wait_options)
+                raise_navigation_error()
+                if main_navigation_generation != completed_navigation_generation:
+                    raise CaptureError("Main document navigated again while the page was settling")
 
                 # Page-controlled dismissal handlers can erase defacement.
                 # Preserve overlays in every artifact used by the detectors.
@@ -441,6 +453,13 @@ async def _capture_snapshot_impl(
 
             title = await page.title()
             final_url = page.url
+            raise_navigation_error()
+            if main_navigation_generation != completed_navigation_generation:
+                raise CaptureError("Main document navigated while capture artifacts were collected")
+            if final_document_url and _redirect_key(final_url) != _redirect_key(final_document_url):
+                raise CaptureError(
+                    "Main document navigated while capture artifacts were being collected"
+                )
             http_status = final_http_status if final_http_status is not None else (
                 response.status if response else None
             )

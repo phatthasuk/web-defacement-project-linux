@@ -11,7 +11,6 @@ from app.core.status import (
     STATUS_CHANGED,
     STATUS_CHECKING,
     STATUS_DEFACED,
-    STATUS_NEVER_CHECKED,
     STATUS_OK,
     is_valid_transition,
     require_valid_transition,
@@ -47,9 +46,6 @@ def approve_baseline(
         raise ValidationError("Cannot approve a snapshot from a previous target URL")
     if snapshot.http_status is None or not 200 <= snapshot.http_status < 300:
         raise ValidationError("Only a successful HTTP response can become a baseline")
-
-    if target.status == STATUS_NEVER_CHECKED:
-        require_valid_transition(target.status, STATUS_OK)
 
     cap = settings.MAX_BASELINES_PER_TARGET
     if cap < 1:
@@ -93,7 +89,7 @@ def approve_baseline(
 
     latest_check = get_latest_check_result(db, target_id)
 
-    if target.url_revision > 1 and not active_baselines:
+    if not active_baselines:
         require_valid_transition(target.status, STATUS_OK)
         target.status = STATUS_OK
         target.last_error = None
