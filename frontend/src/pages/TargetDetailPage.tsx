@@ -63,6 +63,7 @@ export function TargetDetailPage() {
   const deleteTargetMutation = useDeleteTargetMutation();
   const triggerCheckMutation = useTriggerCheckMutation();
   const [triageError, setTriageError] = useState<string | null>(null);
+  const [dismissedTriageKey, setDismissedTriageKey] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
   const lastSignatureRef = useRef<{ targetId: string; signature: string | null } | null>(null);
@@ -173,6 +174,17 @@ export function TargetDetailPage() {
   }
 
   const latestCheck = checks?.[0] || null;
+  const triageKey = latestCheck?.id ?? currentSnapshot?.id ?? null;
+  const triageIsPending =
+    approveBaselineMutation.isPending ||
+    acknowledgeCheckMutation.isPending ||
+    confirmDefacedMutation.isPending;
+  const triageAlreadyResolved = Boolean(
+    (triageKey && dismissedTriageKey === triageKey) ||
+    latestCheck?.acknowledged_at ||
+    target.status === 'Defaced' ||
+    currentSnapshot?.is_baseline
+  );
   const isInitialBaseline = !latestCheck;
   const latestCheckIsHistorical =
     target.status === 'Failed' || target.status === 'Availability Issue';
@@ -188,6 +200,7 @@ export function TargetDetailPage() {
         targetId: target.id,
         snapshotId: snapshotToApprove,
       });
+      if (triageKey) setDismissedTriageKey(triageKey);
     } catch (err) {
       console.error('Failed to approve baseline:', err);
       setTriageError(err instanceof Error ? err.message : 'Failed to approve baseline');
@@ -202,6 +215,7 @@ export function TargetDetailPage() {
         targetId: target.id,
         checkId: latestCheck.id,
       });
+      if (triageKey) setDismissedTriageKey(triageKey);
     } catch (err) {
       console.error('Failed to acknowledge check:', err);
       setTriageError(err instanceof Error ? err.message : 'Failed to acknowledge check');
@@ -216,6 +230,7 @@ export function TargetDetailPage() {
         targetId: target.id,
         checkId: latestCheck.id,
       });
+      if (triageKey) setDismissedTriageKey(triageKey);
     } catch (err) {
       console.error('Failed to confirm defacement:', err);
       setTriageError(err instanceof Error ? err.message : 'Failed to confirm defacement');
@@ -252,10 +267,10 @@ export function TargetDetailPage() {
 
   // Determine which actions are available
   const canApproveBaseline = Boolean(
-    currentSnapshot && !currentSnapshot.is_baseline && !isSameSnapshot && (latestCheck || pendingCandidate)
+    !triageAlreadyResolved && currentSnapshot && !currentSnapshot.is_baseline && !isSameSnapshot && (latestCheck || pendingCandidate)
   );
-  const canAcknowledge = latestCheck && latestCheck.status === 'Changed' && !latestCheck.acknowledged_at;
-  const canConfirmDefacement = latestCheck && latestCheck.status === 'Changed' && target.status !== 'Defaced';
+  const canAcknowledge = !triageAlreadyResolved && latestCheck && latestCheck.status === 'Changed' && !latestCheck.acknowledged_at;
+  const canConfirmDefacement = !triageAlreadyResolved && latestCheck && latestCheck.status === 'Changed' && target.status !== 'Defaced';
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -391,7 +406,7 @@ export function TargetDetailPage() {
           {canApproveBaseline && (
             <button
               onClick={handleApproveBaseline}
-              disabled={isChecking || approveBaselineMutation.isPending}
+              disabled={isChecking || triageIsPending}
               title={isChecking ? 'Cannot triage while check is in progress' : undefined}
               className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-4 text-sm font-semibold text-white shadow-md shadow-emerald-950/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -403,7 +418,7 @@ export function TargetDetailPage() {
           {canAcknowledge && (
             <button
               onClick={handleAcknowledge}
-              disabled={isChecking || acknowledgeCheckMutation.isPending}
+              disabled={isChecking || triageIsPending}
               title={isChecking ? 'Cannot triage while check is in progress' : undefined}
               className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-950/20 transition-all hover:from-indigo-400 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -413,7 +428,7 @@ export function TargetDetailPage() {
           {canConfirmDefacement && (
             <button
               onClick={handleConfirmDefaced}
-              disabled={isChecking || confirmDefacedMutation.isPending}
+              disabled={isChecking || triageIsPending}
               title={isChecking ? 'Cannot triage while check is in progress' : undefined}
               className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-rose-600 to-red-700 px-4 text-sm font-semibold text-white shadow-md shadow-rose-950/30 transition-all hover:from-rose-500 hover:to-red-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
