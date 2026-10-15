@@ -334,20 +334,20 @@ Test ทั้งหมดรันบน Windows ด้วย venv แยก (P
 
 | รายการ | เหตุผลที่ยังไม่ทำ |
 | --- | --- |
-| Build image และรัน capture ใน Linux container จริง (Chromium sandbox, seccomp, read-only filesystem, non-root) | ต้องดึง image `playwright/python:v1.63.0-noble` ประมาณ 2 GB จาก MCR ซึ่งยังไม่ได้รับอนุญาตให้ดาวน์โหลด; เกณฑ์ตรวจรับของ SEC-01 ต้องการผลจากขั้นนี้ |
-| ตรวจ version ของ Chromium binary ใน container ที่ deploy จริง | ต้อง build image ก่อน (ข้อบน) ตอนนี้ยืนยันเฉพาะ manifest ของ package และ binary บน Windows |
-| เทียบ `deploy/playwright-seccomp.json` กับโปรไฟล์ของ Playwright 1.63 และแก้ README บรรทัดที่อ้าง v1.48.0 | ไฟล์ในโปรเจกต์มาจากโปรไฟล์ของ 1.48.0 การเทียบต้องดึงไฟล์จาก GitHub ซึ่งยังไม่ได้รับอนุญาต และไม่ควรแก้ README ก่อนยืนยันว่าโปรไฟล์ใช้ได้กับ Chromium 153 |
-| ทดสอบ SSRF proxy, redirects, WebSocket blocking และ CDP session บน Linux | ขึ้นกับการ build image; บน Windows ผ่านแล้วแต่ไม่ครอบคลุมพฤติกรรมของ sandbox/seccomp บน Linux |
-| Rebuild `backend/.venv` เดิม | ตั้งใจไม่แตะ `.venv` ของผู้ใช้ ทดสอบใน venv แยกแทน (`%TEMP%\venv-sec`) `.venv` เดิมยังเป็นรุ่นเก่าและ capture ไม่ได้แล้ว เพราะ `playwright install` ลบ browser รุ่นเก่า (`chromium-1140` ฯลฯ) ออกจากเครื่อง |
+| Build image และรัน capture ใน Linux container จริง (Chromium sandbox, seccomp, read-only filesystem, non-root) | ยังยืนยันไม่ได้: Docker client 29.8.0 ติดตั้งอยู่ แต่การเข้าถึง Docker API ถูกปฏิเสธ (`permission denied` สำหรับ `/var/run/docker.sock`); `docker compose ps --all` จึงอ่าน running containers ไม่ได้ |
+| ตรวจ version ของ Chromium binary ใน container ที่ deploy จริง | Project pin/manifest และ Chromium binary ที่ติดตั้งแยกใน venv Linux สอดคล้องกันที่ Playwright 1.63.0 / Chromium 153.0.8010.12 (revision 1243); binary ใน image/container ที่ deploy ยังตรวจไม่ได้เพราะ Docker API เข้าไม่ถึง |
+| เทียบ `deploy/playwright-seccomp.json` กับโปรไฟล์ของ Playwright 1.63 และแก้ README บรรทัดที่อ้าง v1.48.0 | เทียบกับไฟล์ทางการของ tag v1.63.0 แล้ว แต่ JSON ไม่ตรงกัน: ไฟล์ project เพิ่ม syscall `chroot` ในกฎ allow สำหรับ user namespaces และมี comment เก่า; ยังไม่แก้ไฟล์หรือ README จนกว่าจะตรวจ profile ที่ใช้จริงใน container |
+| ทดสอบ SSRF proxy, redirects, WebSocket blocking และ CDP session บน Linux | Redirect/SSRF guard และ capture tests ได้รันบน Linux host เมื่อ sandbox ปิดเฉพาะ test process; ผลไม่ครอบคลุม sandbox/seccomp ของ image. WebSocket block และ CDP behavior ยังไม่ได้ทดสอบ end-to-end บน container |
+| Rebuild `backend/.venv` เดิม | ไม่แตะ `.venv` ใน project; สร้าง `/tmp/web-defacement-linux-audit` แยกสำหรับ Linux checks. Chromium 153 ถูกติดตั้งลง browser path แยกใน `/tmp` |
 | Re-baseline ทุก target | เป็นขั้นตอนปฏิบัติการหลัง deploy ที่ต้องมีคนตรวจและ approve ทีละ target ไม่ใช่งานโค้ด; ยังไม่ได้เทียบภาพ Chromium 130 กับ 153 เพราะ binary 130 ถูกลบไปแล้ว จึงยังไม่ทราบขนาดของ false positive จริง |
-| Container memory/CPU/PID limits ใน `docker-compose.yml` | ต้องวัดการใช้ memory ของ Chromium 153 บน Linux ก่อนตั้งตัวเลข ตั้งต่ำไปจะ OOM-kill กลางงานและ capture พังเงียบ ๆ; ข้อนี้สำคัญเพราะเป็นกลไกเดียวที่กันกรณีไฟล์บีบอัดที่แตกแล้วกินหน่วยความจำของ browser ได้ |
+| Container memory/CPU/PID limits ใน `docker-compose.yml` | ตรวจแล้วว่าไม่มี limit ดังกล่าวใน production Compose; cgroup ของ shell ปัจจุบันแสดง `cpu.max=max 100000`, `memory.max=max`, `pids.max=max`. ไม่มี container runtime ให้ตรวจหรือทดสอบ limit; ไม่ได้ทำ load/OOM test |
 | แยก capture worker ออกจาก API และฐานข้อมูล (SEC-01, SEC-06) | เป็นงานโครงสร้างใหญ่ (queue, IPC, การเข้าถึง secret/DB, deployment, health check) เสี่ยงสร้าง bug ใหม่ จึงเลื่อนไปทำหลังยืนยัน Linux ด้วยรอบที่เล็กกว่า |
 | แก้ Range parser ของ Starlette ที่ต้นเหตุ (SEC-02) | Starlette 0.52.1 มี parser ที่อัปเดตจากรุ่นเดิม แต่การ merge หลายช่วงยังมี loop O(n²); route screenshot ตัด `Range`/`If-Range` ที่ระดับแอปแล้ว แต่ยังไม่ได้เทียบ advisory ต้นฉบับเพื่อยืนยันขอบเขตแพตช์ CVE-2025-62727 หรือเพิ่มการจำกัด multi-range ที่ Nginx เป็น defense in depth |
 | Policy allowed domains แยกสำหรับ `formaction` (SEC-03) | ต้องให้เจ้าของระบบตัดสินใจ ตอนนี้ใช้ `allowed_hosts` ชุดเดียวกับ form ถ้าเข้มเกินไป เว็บที่ใช้ฟอร์มของบุคคลที่สามจะแจ้งเตือนซ้ำจนคนเลิกใส่ใจ |
 | ครอบคลุม attribute URL อื่นใน detector (เช่น `object data`, `embed src`) และตรวจว่า submit control มี form owner จริงหรือเชื่อมด้วย `form=` หรือไม่ | อยู่นอก scope SEC-03 รอบนี้; หากพบ control ที่ไม่มีฟอร์มรองรับ อาจเกิด false positive ควรพิจารณาเป็น follow-up |
 | Retention ของ audit log และหน้า frontend สำหรับอ่าน (SEC-07) | ใช้ค่าเริ่มต้นที่เสนอ คือไม่ลบอัตโนมัติและอ่านผ่าน API เฉพาะ Admin; นโยบาย retention และ UX ของหน้าอ่านต้องให้เจ้าของระบบตัดสินใจ |
 | Vulnerability scan ของ Python, OS packages และ container image ทั้งหมด | รายงานต้นฉบับระบุว่านอกขอบเขตและยังไม่ได้ทำ ต้องใช้เครื่องมือสแกนและ image ที่ build แล้ว |
-| Load test บน Linux production | ต้องมี environment ที่ deploy แล้วและต้องได้รับอนุญาตก่อนยิงโหลด; ผล test ปัจจุบันปิด limiter ใน fixture ยกเว้น `test_auth.py:415` ซึ่งเปิด limiter จริงและผ่าน |
+| Load test บน Linux production | ไม่ได้ทำ; ต้องมี environment ที่ deploy แล้วและต้องได้รับอนุญาตก่อนยิงโหลด; ผล test ปัจจุบันปิด limiter ใน fixture ยกเว้น `test_auth.py:415` ซึ่งเปิด limiter จริงและผ่าน |
 
 ### 7.5 ข้อจำกัดของสิ่งที่แก้แล้ว
 
@@ -379,3 +379,29 @@ Test ทั้งหมดรันบน Windows ด้วย venv แยก (P
 - พบและแก้ false positive ใน SEC-03: `formaction` จะถูกเก็บเฉพาะบน `<button>` ที่มีสถานะ submit (รวม missing/invalid type) และ `<input type="submit|image">`; เพิ่ม test ยืนยันว่า button/reset/text inputs ไม่สร้าง fact ดังกล่าว
 - ยังไม่ได้ตรวจความสัมพันธ์กับ form owner หรือ `form=` attribute ของ control นอกฟอร์ม; รายงาน alert จาก control ที่ไม่มี form owner ได้ และจัดเป็น follow-up ที่ระบุไว้ในข้อ 7.4
 - รอบยืนยันหลังแก้ submit-control filter: backend **247 passed** (รวม `tests/test_structure.py` 35 passed), Ruff ผ่าน, mypy ผ่าน 58 ไฟล์ และ Offline Chromium 153 probe ทั้ง 5 กรณีผ่าน; ภาพ/ข้อความคงเดิมในทุกกรณี
+
+### 7.9 ผลตรวจ Linux เพิ่มเติม (15-10-2026, Asia/Bangkok)
+
+ตรวจจาก Linux host ด้วย temporary venv แยก ไม่ใช่ container ที่ build/deploy อยู่จริง: kernel `7.0.0-30-generic` x86_64, Python `3.12.3`, shell UID/GID `1003:1003`. Docker client `29.8.0` มีอยู่ แต่ทุกคำสั่งที่ต้องคุยกับ daemon ถูกปฏิเสธด้วย `permission denied` ที่ `/var/run/docker.sock`; จึงยืนยัน running container, image digest, mount flags, capabilities, seccomp ที่ attach จริง หรือ network namespace จริงไม่ได้ และไม่ได้ดึง/build production image.
+
+| รายการตรวจ | หลักฐานและผลจริง |
+| --- | --- |
+| Project/browser versions | `backend/Dockerfile` ใช้ `mcr.microsoft.com/playwright/python:v1.63.0-noble`; `backend/requirements.txt` pin `playwright==1.63.0`. Package manifest ระบุ Chromium `153.0.8010.12`, revision `1243`. ติดตั้ง browser แยกใน `/tmp`; `chrome --version` รายงาน `Google Chrome for Testing 153.0.8010.12`. ตรงกันใน Linux test environment แต่ยังไม่ใช่หลักฐานของ image/container ที่ deploy |
+| Compose isolation ที่คาดหวัง | Source config ระบุ `${APP_UID:-1000}:${APP_GID:-1000}`, `read_only: true`, `cap_drop: ALL`, `no-new-privileges:true`, custom `seccomp:./deploy/playwright-seccomp.json`, `/tmp` แบบ tmpfs และไม่มี `ports` บน backend. Backend กับ frontend อยู่บน bridge network เดียวกัน (`172.30.0.0/24`); Compose ไม่ได้ประกาศ `internal: true` หรือ egress ACL จึงไม่มี egress block ใน config. เป็นการอ่าน config เท่านั้น ไม่ยืนยันค่าที่ runtime ใช้อยู่ |
+| Runtime sandbox/capabilities | Shell ปัจจุบัน UID 1003; `/proc/self/status` ให้ `CapEff=0`, `NoNewPrivs=0`, `Seccomp=0`. ค่านี้เป็นของ shell บน host ไม่ใช่ capture container. Chromium sandbox เปิดไว้ตาม default แล้ว launch ไม่สำเร็จ โดย log ระบุ `Chromium sandboxing failed`; จึงยังยืนยัน sandbox ใน deployment ไม่ได้และไม่ปิด SEC-01 |
+| Seccomp profile | เทียบ JSON กับ [ไฟล์ทางการ Playwright v1.63.0](https://github.com/microsoft/playwright/blob/v1.63.0/utils/docker/seccomp_profile.json). Project file ไม่ตรง: เพิ่ม `chroot` ในกฎ allow สำหรับ user namespaces และคง comment เดิม; upstream rule อนุญาต `clone`, `setns`, `unshare`. ยังไม่ได้แก้ profile หรือทดลอง attach ใน container เพราะ runtime ใช้ไม่ได้ |
+| SSRF/redirects | ใน test run แบบ sandbox ปิด มี automated local tests สำหรับ redirect ไป blocked destination และ private-IP rebinding ผ่าน. `tests/test_ssrf_guard.py` ผ่าน 7 tests. เป็นผลจาก test environment เท่านั้น ยังไม่ยืนยัน network policy หรือ seccomp ใน container |
+| WebSocket/CDP | Config เปิด `BLOCK_WEBSOCKETS=True` และ capture ลงทะเบียน `context.route_web_socket("**/*", ...)`; CDP session ถูกสร้างภายในเพื่ออ่าน page metrics และไม่พบ remote CDP endpoint ใน launch config. ยังไม่มี end-to-end test ยืนยันว่า WebSocket ถูกบล็อกหรือ CDP ไม่ถูก expose ใน running container; runtime ยังไม่ได้ตรวจ |
+| Screenshot Range | `tests/test_api_routes.py::test_raw_screenshot_ignores_range_headers` ผ่านใน full run. Single range, 2,000 ranges และ malformed range ตอบ HTTP 200 พร้อม full body เดิม, `Accept-Ranges: none` และไม่มี `Content-Range` |
+| Capture budgets | ทั้ง 7 tests ใน `tests/test_capture_budgets.py` ผ่านใน test run ที่ปิด Chromium sandbox: in-budget, ขนาด height/pixels/DOM เกิน limit, JavaScript ซ่อน scroll height, transfer เกิน/ไม่เกินงบ. นี่ทดสอบ capture budgets ไม่ใช่ CPU/memory/PID cgroup limits |
+| CPU/memory/PID | Production `docker-compose.yml` ไม่มี `cpus`, memory limit หรือ `pids_limit`. cgroup ของ shell รายงาน `cpu.max=max 100000`, `memory.max=max`, `pids.max=max` (ไม่จำกัด). ไม่มี limit ที่ตั้งไว้ให้ทดสอบใน environment นี้; ไม่ได้ทำ load/OOM test |
+
+**คำสั่งและผล backend บน Linux** (รันจาก `backend/`; ใช้ temporary venv `/tmp/web-defacement-linux-audit`):
+
+- `python3 -m venv /tmp/web-defacement-linux-audit && /tmp/web-defacement-linux-audit/bin/python -m pip install -r requirements-dev.txt` — ผ่าน; ติดตั้ง requirements ที่ pin ไว้ รวม pytest, Ruff, mypy และ Playwright
+- `PLAYWRIGHT_BROWSERS_PATH=/tmp/web-defacement-linux-audit/pw-browsers /tmp/web-defacement-linux-audit/bin/python -m pytest` — **207 passed, 40 failed**. Capture/browser tests เปิด sandbox ตาม default แล้ว Chromium ปฏิเสธการ launch บน host นี้ (`Chromium sandboxing failed`); จึงไม่ใช่ผลยืนยัน production container
+- `BROWSER_DISABLE_SANDBOX=true PLAYWRIGHT_BROWSERS_PATH=/tmp/web-defacement-linux-audit/pw-browsers /tmp/web-defacement-linux-audit/bin/python -m pytest -k 'not test_capture_snapshot_sandbox_configuration'` — **243 passed, 3 failed, 1 deselected**. Tests ของ Range, capture budgets, redirect/SSRF และ detector ทำงานใน test environment นี้. Failure ที่เหลือ: `test_capture_snapshot_routes_all_requests_through_loopback_proxy` ได้ค่า sandbox ปิดจาก environment override; `test_proxy_closes_tunnel_when_upstream_stalls` และ `test_proxy_records_reset_before_response` พบ `ConnectionResetError` ในการอ่าน socket ที่ test คาดว่าจะปิดตามปกติ
+- `/tmp/web-defacement-linux-audit/bin/ruff check app tests scripts alembic` — ผ่าน (`All checks passed!`)
+- `/tmp/web-defacement-linux-audit/bin/mypy app` — ผ่าน (`Success: no issues found in 58 source files`)
+
+**สถานะหลังรอบนี้:** ยังไม่ปิด finding ใดเพิ่ม. SEC-01 acceptance ยังต้องมี running target container ที่ Chromium sandbox/seccomp ทำงานภายใต้ non-root, read-only filesystem, capabilities และ network configuration จริง; SEC-06 ยังไม่มี CPU/memory/PID limits หรือการทดสอบ staging ที่พิสูจน์ budgets ภายใต้ resource limit. SEC-02 ยังคงเป็น mitigation ที่ route screenshot ไม่รับ Range; ยังไม่ได้ปิดประเด็น parser ที่ต้นเหตุ. ต้องแก้/ตรวจความต่างของ seccomp profile ก่อนถือว่า config สอดคล้องกับ Playwright 1.63.
