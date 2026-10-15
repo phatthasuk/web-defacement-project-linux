@@ -22,6 +22,7 @@ from playwright.async_api import ProxySettings
 
 from app.core.config import Settings
 from app.core.errors import (
+    CaptureBudgetExceeded,
     CaptureError,
     DnsResolutionError,
     SsrfBlockedError,
@@ -50,6 +51,25 @@ class SsrfProxy:
         self._server: asyncio.Server | None = None
         self._writers: set[asyncio.StreamWriter] = set()
         self._rejections: dict[tuple[str, int], deque[Exception]] = defaultdict(deque)
+        self._transfer_limit = settings.MAX_CAPTURE_TRANSFER_MB * 1024 * 1024
+        self._transferred = 0
+        self.budget_error: CaptureBudgetExceeded | None = None
+
+    def _over_transfer_budget(self, size: int) -> bool:
+        """Count bytes relayed to the browser; True once the capture is over budget.
+
+        The budget is shared by every connection of the capture, so one huge
+        response and many medium ones are stopped by the same limit.
+        """
+        if self.budget_error is None:
+            self._transferred += size
+            if self._transferred > self._transfer_limit:
+                self.budget_error = CaptureBudgetExceeded(
+                    "Capture exceeded the network transfer budget of "
+                    f"{self._settings.MAX_CAPTURE_TRANSFER_MB} MB"
+                )
+                logger.warning("%s", self.budget_error)
+        return self.budget_error is not None
 
     async def __aenter__(self) -> "SsrfProxy":
         self._server = await asyncio.start_server(self._handle_client, "127.0.0.1", 0)
@@ -87,7 +107,9 @@ class SsrfProxy:
         key = (parsed.hostname.lower(), parsed.port or default_port)
         errors = self._rejections.get(key)
         if not errors:
-            return None
+            # Once over budget every later response is rejected too, so the
+            # capture stops instead of finishing with resources missing.
+            return self.budget_error
         error = errors.popleft()
         if not errors:
             self._rejections.pop(key, None)
@@ -164,6 +186,7 @@ class SsrfProxy:
                 request_sent=request_sent,
                 on_upstream_failure=record_upstream_failure,
                 exchange=exchange,
+                over_budget=self._over_transfer_budget,
             )
         except (DnsResolutionError, SsrfBlockedError) as exc:
             logger.warning("Capture proxy blocked request: %s", exc)
@@ -372,6 +395,7 @@ async def _tunnel(
     request_sent: bool,
     on_upstream_failure: Callable[[str], None],
     exchange: _HttpExchange | None = None,
+    over_budget: Callable[[int], bool] = lambda _size: False,
 ) -> None:
     sent = request_sent
     received = False
@@ -435,6 +459,9 @@ async def _tunnel(
                     if exchange is not None and exchange.pending_response:
                         on_upstream_failure("connection closed before a response")
                         abnormal_end = True
+                    break
+                if over_budget(len(chunk)):
+                    abnormal_end = True
                     break
                 received = True
                 client_writer.write(chunk)

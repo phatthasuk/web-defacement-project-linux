@@ -23,7 +23,7 @@ async def approve_target_baseline(
     user: Annotated[User, Depends(get_current_user)],
 ) -> object:
     require_target_access(db, user, target_id)
-    return approve_baseline(db, target_id, payload.snapshot_id)
+    return approve_baseline(db, target_id, payload.snapshot_id, actor=user)
 
 
 @router.post("/checks/{check_id}/ack", response_model=CheckResultRead)
@@ -34,7 +34,7 @@ async def acknowledge_check(
     if check is None:
         raise NotFoundError("CheckResult not found")
     require_target_access(db, user, check.target_id)
-    return acknowledge_check_result(db, check_id)
+    return acknowledge_check_result(db, check_id, actor=user)
 
 
 @router.post("/checks/{check_id}/confirm-defaced", response_model=CheckResultRead)
@@ -45,4 +45,4 @@ async def confirm_defaced_check(
     if check is None:
         raise NotFoundError("CheckResult not found")
     require_target_access(db, user, check.target_id)
-    return confirm_defacement(db, check_id)
+    return confirm_defacement(db, check_id, actor=user)

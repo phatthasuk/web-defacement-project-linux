@@ -15,7 +15,14 @@ from app.core.status import (
     is_valid_transition,
     require_valid_transition,
 )
-from app.models import CheckResult, Snapshot, Target
+from app.models import CheckResult, Snapshot, Target, User
+from app.services.audit import (
+    ACTION_BASELINE_APPROVED,
+    ACTION_CHECK_ACKNOWLEDGED,
+    ACTION_DEFACEMENT_CONFIRMED,
+    record_baseline_cap_demotions,
+    record_review_event,
+)
 from app.services.checks import prune_baselines
 from app.services.concurrency import is_target_in_flight
 
@@ -27,6 +34,7 @@ def approve_baseline(
     target_id: str,
     snapshot_id: str,
     settings: Settings | None = None,
+    actor: User | None = None,
 ) -> Snapshot:
     settings = settings or get_settings()
 
@@ -76,6 +84,9 @@ def approve_baseline(
     # Approving *adds* to the target's baseline set instead of replacing it, so a
     # page with legitimately rotating content can hold one approved baseline per
     # variant. The oldest are demoted once the configured cap is reached.
+    status_before = target.status
+    baseline_ids_before = [baseline.id for baseline in active_baselines]
+    was_baseline = snapshot.is_baseline
     snapshot.is_baseline = True
     db.flush()
     demoted = prune_baselines(db, target_id, target.url_revision, cap)
@@ -114,12 +125,43 @@ def approve_baseline(
         if related_check is not None:
             related_check.acknowledged_at = datetime.now(UTC)
 
+    baseline_ids_after = [i for i in baseline_ids_before if i not in demoted]
+    if snapshot_id not in baseline_ids_after:
+        baseline_ids_after.append(snapshot_id)
+    record_review_event(
+        db,
+        actor,
+        ACTION_BASELINE_APPROVED,
+        target_id=target_id,
+        before={
+            "snapshot_id": snapshot_id,
+            "is_baseline": was_baseline,
+            "baseline_ids": baseline_ids_before,
+            "target_status": status_before,
+        },
+        after={
+            "snapshot_id": snapshot_id,
+            "is_baseline": True,
+            "baseline_ids": baseline_ids_after,
+            "target_status": target.status,
+        },
+    )
+    record_baseline_cap_demotions(
+        db,
+        actor,
+        target_id=target_id,
+        demoted_snapshot_ids=demoted,
+        caused_by_snapshot_id=snapshot_id,
+    )
+
     db.commit()
     db.refresh(snapshot)
     return snapshot
 
 
-def acknowledge_check_result(db: Session, check_result_id: str) -> CheckResult:
+def acknowledge_check_result(
+    db: Session, check_result_id: str, actor: User | None = None
+) -> CheckResult:
     check_result = db.get(CheckResult, check_result_id)
     if check_result is None:
         raise NotFoundError(f"CheckResult not found: {check_result_id}")
@@ -131,6 +173,7 @@ def acknowledge_check_result(db: Session, check_result_id: str) -> CheckResult:
     if check_result.acknowledged_at is not None:
         return check_result
 
+    status_before = target.status
     check_result.acknowledged_at = datetime.now(UTC)
 
     latest_check = get_latest_check_result(db, check_result.target_id)
@@ -138,12 +181,20 @@ def acknowledge_check_result(db: Session, check_result_id: str) -> CheckResult:
         if is_valid_transition(target.status, STATUS_ACKNOWLEDGED):
             target.status = STATUS_ACKNOWLEDGED
 
+    record_review_event(
+        db,
+        actor,
+        ACTION_CHECK_ACKNOWLEDGED,
+        target_id=check_result.target_id,
+        before={"check_id": check_result_id, "acknowledged": False, "target_status": status_before},
+        after={"check_id": check_result_id, "acknowledged": True, "target_status": target.status},
+    )
     db.commit()
     db.refresh(check_result)
     return check_result
 
 
-def confirm_defacement(db: Session, check_result_id: str) -> CheckResult:
+def confirm_defacement(db: Session, check_result_id: str, actor: User | None = None) -> CheckResult:
     check_result = db.get(CheckResult, check_result_id)
     if check_result is None:
         raise NotFoundError(f"CheckResult not found: {check_result_id}")
@@ -152,6 +203,8 @@ def confirm_defacement(db: Session, check_result_id: str) -> CheckResult:
     if target is None:
         raise NotFoundError(f"Target not found: {check_result.target_id}")
 
+    status_before = target.status
+    was_acknowledged = check_result.acknowledged_at is not None
     if check_result.acknowledged_at is None:
         check_result.acknowledged_at = datetime.now(UTC)
 
@@ -160,6 +213,18 @@ def confirm_defacement(db: Session, check_result_id: str) -> CheckResult:
         if is_valid_transition(target.status, STATUS_DEFACED):
             target.status = STATUS_DEFACED
 
+    record_review_event(
+        db,
+        actor,
+        ACTION_DEFACEMENT_CONFIRMED,
+        target_id=check_result.target_id,
+        before={
+            "check_id": check_result_id,
+            "acknowledged": was_acknowledged,
+            "target_status": status_before,
+        },
+        after={"check_id": check_result_id, "acknowledged": True, "target_status": target.status},
+    )
     db.commit()
     db.refresh(check_result)
     return check_result

@@ -41,7 +41,91 @@ KIND_META_REFRESH = "meta-refresh"
 KIND_LINK_HOST = "link-host"
 KIND_EVENT_HANDLER = "event-handler"
 KIND_JAVASCRIPT_URL = "javascript-url"
+KIND_FORMACTION = "formaction"
 _EXECUTABLE_URL_ATTRIBUTES = {"href", "src", "action", "formaction", "xlink:href"}
+
+# Script classification follows the HTML "prepare the script element" rules: the
+# same body is inert as `text/plain` and live as `text/javascript`.
+SCRIPT_CLASSIC = "classic"
+SCRIPT_MODULE = "module"
+SCRIPT_IMPORTMAP = "importmap"
+SCRIPT_SPECULATIONRULES = "speculationrules"
+SCRIPT_INERT = "inert"
+_JAVASCRIPT_MIME_ESSENCES = frozenset(
+    {
+        "application/ecmascript",
+        "application/javascript",
+        "application/x-ecmascript",
+        "application/x-javascript",
+        "text/ecmascript",
+        "text/javascript",
+        "text/javascript1.0",
+        "text/javascript1.1",
+        "text/javascript1.2",
+        "text/javascript1.3",
+        "text/javascript1.4",
+        "text/javascript1.5",
+        "text/jscript",
+        "text/livescript",
+        "text/x-ecmascript",
+        "text/x-javascript",
+    }
+)
+_URL_STRIP_CHARS = "".join(chr(code) for code in range(0x21))  # C0 controls and space
+_URL_REMOVED_CHARS = str.maketrans("", "", "\t\n\r")
+
+
+def _normalise_url_value(value: str) -> str:
+    """Normalise an attribute value the way a browser's URL parser does.
+
+    Chromium drops leading/trailing C0 controls and spaces and removes every
+    ASCII tab and newline anywhere in the string, so `java<TAB>script:` is still
+    a `javascript:` URL.
+    """
+    return value.strip(_URL_STRIP_CHARS).translate(_URL_REMOVED_CHARS)
+
+
+def _is_javascript_url(value: str) -> bool:
+    return _normalise_url_value(value).lower().startswith("javascript:")
+
+
+def classify_script(attributes: dict[str, str]) -> str:
+    """Classify a `<script>` according to its HTML script type."""
+    if "type" in attributes:
+        type_string = attributes["type"]
+    elif attributes.get("language", ""):
+        type_string = f"text/{attributes['language']}"
+    else:
+        type_string = ""
+    if not type_string:
+        return SCRIPT_CLASSIC
+    # A JavaScript MIME essence match is an exact type string match, ignoring
+    # ASCII case. Parameters make it a data block in an HTML script type value.
+    if type_string.strip(_URL_STRIP_CHARS).lower() in _JAVASCRIPT_MIME_ESSENCES:
+        return SCRIPT_CLASSIC
+    token = type_string.lower()
+    if token == SCRIPT_MODULE:
+        return SCRIPT_MODULE
+    if token == SCRIPT_IMPORTMAP:
+        return SCRIPT_IMPORTMAP
+    if token == SCRIPT_SPECULATIONRULES:
+        return SCRIPT_SPECULATIONRULES
+    return SCRIPT_INERT
+
+
+def _is_form_submitter(tag: str, attributes: dict[str, str]) -> bool:
+    """Return whether a button/input type can use its `formaction` attribute."""
+    control_type = attributes.get("type", "").lower()
+    if tag == "button":
+        # Missing and invalid button types use the submit state.
+        return control_type not in {"button", "reset"}
+    # An input's missing or invalid type defaults to text; only these two
+    # states are submit buttons and honor `formaction`.
+    return control_type in {"submit", "image"}
+
+
+def _script_kind_label(kind: str) -> str:
+    return "" if kind == SCRIPT_CLASSIC else f"[{kind}]"
 
 
 def _host_of(url: str) -> str:
@@ -84,7 +168,8 @@ class _StructureParser(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.script_srcs: list[str] = []
+        self.script_srcs: list[tuple[str, str]] = []
+        self.form_submitters: list[str] = []
         self.iframe_srcs: list[str] = []
         self.iframe_srcdocs: list[str] = []
         self.base_href: str | None = None
@@ -93,15 +178,16 @@ class _StructureParser(HTMLParser):
         self.meta_refreshes: list[str] = []
         self.link_hrefs: list[str] = []
         self.executable_attributes: list[tuple[str, str, str]] = []
-        self.inline_scripts: list[str] = []
+        self.inline_scripts: list[tuple[str, str]] = []
         self._current_inline_chunks: list[str] = []
+        self._current_inline_kind = SCRIPT_CLASSIC
         self._in_inline_script = False
 
     def _flush_inline_script(self) -> None:
         if self._in_inline_script:
             body = "".join(self._current_inline_chunks).strip()
             if body:
-                self.inline_scripts.append(body)
+                self.inline_scripts.append((self._current_inline_kind, body))
             self._current_inline_chunks = []
             self._in_inline_script = False
 
@@ -111,23 +197,21 @@ class _StructureParser(HTMLParser):
         for name, value in attributes.items():
             if name.startswith("on") and len(name) > 2 and value.strip():
                 self.executable_attributes.append((tag.lower(), name, value.strip()))
-            elif name in _EXECUTABLE_URL_ATTRIBUTES and value.lstrip().lower().startswith(
-                "javascript:"
-            ):
-                # Normalize whitespace before the scheme and scheme casing, but
-                # preserve the script body because whitespace can be meaningful.
-                normalized = value.lstrip()[len("javascript:") :].strip()
-                self.executable_attributes.append(
-                    (tag.lower(), name, f"javascript:{normalized}")
-                )
+            elif name in _EXECUTABLE_URL_ATTRIBUTES and _is_javascript_url(value):
+                # Browsers strip tabs/newlines from URLs before parsing, so do the
+                # same; the body keeps its inner spaces because they can matter.
+                normalized = _normalise_url_value(value)[len("javascript:") :]
+                self.executable_attributes.append((tag.lower(), name, f"javascript:{normalized}"))
 
         if tag == "script":
+            kind = classify_script(attributes)
             src = attributes.get("src", "").strip()
             if src:
-                self.script_srcs.append(src)
+                self.script_srcs.append((kind, src))
             else:
                 self._flush_inline_script()
                 self._in_inline_script = True
+                self._current_inline_kind = kind
                 self._current_inline_chunks = []
         elif tag == "iframe":
             if "srcdoc" in attributes:
@@ -144,6 +228,14 @@ class _StructureParser(HTMLParser):
             action = attributes.get("action", "").strip()
             if action:
                 self.form_actions.append(action)
+        elif tag in ("button", "input") and _is_form_submitter(tag, attributes):
+            # `formaction` overrides the owning form's action for that submit
+            # control. An explicit empty value targets the document URL, so keep
+            # it distinct from an absent attribute and from the form's action.
+            if "formaction" in attributes:
+                formaction = attributes["formaction"].strip()
+                if not _is_javascript_url(formaction):
+                    self.form_submitters.append(formaction)
         elif tag == "link":
             rel = attributes.get("rel", "").lower()
             href = attributes.get("href", "").strip()
@@ -232,9 +324,16 @@ def extract_structure(
     if parser.base_href is not None:
         # Track the base independently, including changes on allowlisted hosts.
         facts.add(f"{KIND_BASE}:{effective_base}")
-    add_urls(facts, KIND_SCRIPT, parser.script_srcs)
+    for kind, src in parser.script_srcs:
+        add_urls(facts, f"{KIND_SCRIPT}{_script_kind_label(kind)}", [src])
     add_urls(facts, KIND_IFRAME, parser.iframe_srcs)
     add_urls(facts, KIND_FORM, parser.form_actions)
+    for formaction in parser.form_submitters:
+        # An explicit empty formaction resolves to the current document URL,
+        # whereas a non-empty value resolves against the effective base URL.
+        resolved = base_url if not formaction else resolve(formaction)
+        if not _is_allowed(_host_of(resolved), allowed_hosts):
+            facts.add(f"{KIND_FORMACTION}:{resolved}")
     add_urls(facts, KIND_STYLESHEET, parser.stylesheet_hrefs)
 
     # srcdoc overrides src and may execute even in an invisible iframe. Hash
@@ -249,9 +348,11 @@ def extract_structure(
 
     # Inline scripts are identified by a content hash: the body is often large
     # and may itself contain secrets, so only the digest is kept.
-    for body in parser.inline_scripts:
+    # The script kind is part of the fact so that flipping a block between inert
+    # and executable is a change even when the body is byte-for-byte identical.
+    for kind, body in parser.inline_scripts:
         digest = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest()[:16]
-        facts.add(f"{KIND_INLINE_SCRIPT}:{digest}")
+        facts.add(f"{KIND_INLINE_SCRIPT}{_script_kind_label(kind)}:{digest}")
 
     # Handler bodies and javascript: URLs can execute without changing visible
     # text or pixels. Hash content so summaries never expose inline code.

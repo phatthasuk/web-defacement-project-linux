@@ -261,3 +261,216 @@ def test_javascript_url_is_normalized_hashed_and_never_allowlisted_away():
     assert diff.score > 0
     assert diff.added[0].startswith("javascript-url:a.href:")
     assert "alert" not in diff.summary
+
+
+# --- SEC-03: formaction on submit controls ----------------------------------
+
+FORM_WITH_SAVE = '<form action="https://example.com/save">{control}</form>'
+
+
+def _form(control: str) -> str:
+    return FORM_WITH_SAVE.format(control=control)
+
+
+def test_formaction_addition_modification_and_removal_are_detected():
+    plain = _form("<button>Save</button>")
+    added = _form('<button formaction="https://collector.example/save">Save</button>')
+    modified = _form('<button formaction="https://other.example/save">Save</button>')
+
+    add_diff = compare_structure(facts(plain), facts(added))
+    modify_diff = compare_structure(facts(added), facts(modified))
+    remove_diff = compare_structure(facts(added), facts(plain))
+
+    assert add_diff.added == ("formaction:https://collector.example/save",)
+    assert modify_diff.added == ("formaction:https://other.example/save",)
+    assert modify_diff.removed == ("formaction:https://collector.example/save",)
+    assert remove_diff.removed == ("formaction:https://collector.example/save",)
+    assert not compare_structure(facts(added), facts(added)).changed
+
+
+def test_formaction_on_input_and_relative_urls_resolve_against_the_base():
+    plain = _form('<input type="submit" value="Save">')
+    relative = _form('<input type="submit" value="Save" formaction="/th/other">')
+
+    diff = compare_structure(facts(plain), facts(relative))
+
+    assert diff.added == ("formaction:https://hospital.example.com/th/other",)
+
+
+def test_formaction_only_counts_on_controls_that_can_submit():
+    inert_controls = _form(
+        '<button type="button" formaction="https://collector.example/button">'
+        'No submit</button><button type="reset" '
+        'formaction="https://collector.example/reset">Reset</button>'
+        '<input type="text" formaction="https://collector.example/text">'
+        '<input type="reset" formaction="https://collector.example/input-reset">'
+    )
+    submit_controls = _form(
+        '<button type="submit" formaction="https://collector.example/button">'
+        'Submit</button><input type="image" '
+        'formaction="https://collector.example/image">'
+    )
+
+    assert not any(fact.startswith("formaction:") for fact in facts(inert_controls))
+    assert {
+        "formaction:https://collector.example/button",
+        "formaction:https://collector.example/image",
+    } <= facts(submit_controls)
+
+
+def test_formaction_respects_allowed_hosts_and_detects_empty_override():
+    plain = _form("<button>Save</button>")
+    allowed = _form('<button formaction="https://pay.example.org/go">Save</button>')
+
+    assert not compare_structure(
+        facts(plain, ("example.org",)), facts(allowed, ("example.org",))
+    ).changed
+    empty = _form('<button formaction="">Save</button>')
+    diff = compare_structure(facts(plain), facts(empty))
+    assert diff.added == (f"formaction:{BASE_URL}",)
+
+
+def test_empty_formaction_is_not_confused_with_an_absent_attribute():
+    # The form posts to a separate host. An explicit empty formaction instead
+    # submits to this document URL and therefore changes the effective target.
+    plain = _form("<button>Save</button>")
+    override = _form('<button formaction="">Save</button>')
+
+    assert compare_structure(facts(plain), facts(override)).changed
+
+
+def test_empty_formaction_uses_document_url_even_with_a_base_element():
+    plain = (
+        '<base href="https://base.example/assets/">'
+        '<form action="https://example.com/save"><button>Save</button></form>'
+    )
+    override = (
+        '<base href="https://base.example/assets/">'
+        '<form action="https://example.com/save"><button formaction="">Save</button></form>'
+    )
+
+    diff = compare_structure(facts(plain), facts(override))
+
+    assert diff.added == (f"formaction:{BASE_URL}",)
+
+
+def test_formaction_javascript_url_is_reported_once_as_executable():
+    code = _form('<button formaction="javascript:alert(1)">Save</button>')
+
+    added = compare_structure(facts(_form("<button>Save</button>")), facts(code)).added
+
+    assert len(added) == 1
+    assert added[0].startswith("javascript-url:button.formaction:")
+
+
+# --- SEC-04: javascript: URLs obfuscated with control characters ------------
+
+
+def _javascript_url_facts(href: str) -> set[str]:
+    found = facts(f'<a href="{href}">Go</a>')
+    return {fact for fact in found if fact.startswith("javascript-url:")}
+
+
+def test_javascript_url_with_tab_newline_or_entities_is_detected():
+    canonical = _javascript_url_facts("javascript:void(0)")
+    assert len(canonical) == 1
+
+    for href in (
+        "java&#9;script:void(0)",
+        "java&#10;script:void(0)",
+        "java&#13;script:void(0)",
+        "java\tscript:void(0)",
+        "java\nscript:void(0)",
+        "j\ta\nv\ra\tscript:void(0)",
+        "JaVa&Tab;ScRiPt:void(0)",
+        "&#1;&#32;javascript:void(0)",
+        "javascript:void(0)&#9;",
+    ):
+        assert _javascript_url_facts(href) == canonical, href
+
+
+def test_obfuscated_javascript_url_addition_raises_a_change():
+    clean = '<a href="#">Continue</a>'
+    defaced = '<a href="java&#9;script:void(window.auditProbe=1)">Continue</a>'
+
+    diff = compare_structure(facts(clean), facts(defaced))
+
+    assert diff.changed
+    expected = _javascript_url_facts("javascript:void(window.auditProbe=1)")
+    assert diff.added == tuple(sorted(expected))
+
+
+def test_non_javascript_urls_are_not_reported_as_executable():
+    for href in ("https://example.com/javascript:alert(1)", "/path/java script", "#javascript:x"):
+        assert _javascript_url_facts(href) == set(), href
+
+
+# --- SEC-05: inert -> executable script transitions -------------------------
+
+PROBE = "window.auditProbe = 1"
+
+
+def _inline(type_attr: str | None) -> str:
+    attr = "" if type_attr is None else f' type="{type_attr}"'
+    return f"<p>Same page</p><script{attr}>{PROBE}</script>"
+
+
+def test_inert_script_becoming_executable_is_detected_with_identical_body():
+    inert = facts(_inline("text/plain"))
+
+    for live_type in ("text/javascript", "module", None):
+        diff = compare_structure(inert, facts(_inline(live_type)))
+        assert diff.changed, live_type
+        assert len(diff.added) == 1 and len(diff.removed) == 1
+    assert compare_structure(facts(_inline("module")), facts(_inline("text/plain"))).changed
+
+
+def test_script_type_spellings_that_browsers_treat_alike_do_not_flap():
+    classic = facts(_inline(None))
+
+    for spelling in (
+        "text/javascript",
+        "  TEXT/JavaScript  ",
+        "text/ecmascript",
+        "",
+    ):
+        assert facts(_inline(spelling)) == classic, spelling
+    # HTML script type values are not parsed like Content-Type headers: a MIME
+    # parameter changes the entire value, so the script is an inert data block.
+    for spelling in (
+        "application/javascript; charset=utf-8",
+        "text/javascript; charset=utf-8",
+        "\u00a0text/javascript\u00a0",
+    ):
+        inert = facts(_inline(spelling))
+        assert inert != classic, spelling
+        assert next(iter(inert)).startswith("inline-script[inert]:"), spelling
+    assert facts('<script language="javascript">' + PROBE + "</script><p>Same page</p>") == classic
+    assert facts(_inline("MODULE")) == facts(_inline("module"))
+    assert facts(_inline("module")) != classic
+    assert facts(_inline(" module ")) != facts(_inline("module"))
+
+
+def test_non_classic_scripts_are_labelled_in_facts():
+    module = next(iter(facts(_inline("module"))))
+    inert = next(iter(facts(_inline("application/json"))))
+    importmap = next(iter(facts(_inline("importmap"))))
+    speculationrules = next(iter(facts(_inline("speculationrules"))))
+
+    assert module.startswith("inline-script[module]:")
+    assert inert.startswith("inline-script[inert]:")
+    assert importmap.startswith("inline-script[importmap]:")
+    assert speculationrules.startswith("inline-script[speculationrules]:")
+    assert next(iter(facts(_inline(None)))).startswith("inline-script:")
+
+
+def test_external_script_type_changes_are_detected():
+    def external(type_attr: str | None) -> str:
+        attr = "" if type_attr is None else f' type="{type_attr}"'
+        return f'<script{attr} src="/assets/app.js"></script>'
+
+    assert facts(external(None)) == {"script:https://hospital.example.com/assets/app.js"}
+    assert facts(external("module")) == {"script[module]:https://hospital.example.com/assets/app.js"}
+    assert compare_structure(facts(external("text/plain")), facts(external(None))).changed
+    assert compare_structure(facts(external("text/plain")), facts(external("module"))).changed
+    assert not compare_structure(facts(external(None)), facts(external("text/javascript"))).changed

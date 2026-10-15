@@ -22,3 +22,9 @@ pythonpath = ["."]
 python_version = "3.11"
 ignore_missing_imports = true
 exclude = "^(data|\\.venv|\\.pytest_cache|\\.ruff_cache|\\.mypy_cache|\\.pytest-tmp)(/|\\\\)"
+
+# The latest Deprecated package uses Python 3.12 syntax, while this app supports
+# Python 3.11. limits only uses it for a decorator, so don't type-check upstream.
+[[tool.mypy.overrides]]
+module = ["deprecated.*"]
+follow_imports = "skip"

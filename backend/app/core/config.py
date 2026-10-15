@@ -58,6 +58,18 @@ class Settings(BaseSettings):
     REDIRECT_LIMIT: int = 5
     MAX_ARTIFACT_SIZE_MB: int = 10
 
+    # Resource budgets for one capture. MAX_ARTIFACT_SIZE_MB only measures what
+    # is written after the fact, so a hostile page could still spend memory on a
+    # huge response, DOM or bitmap first. These are enforced while the data is
+    # being received or measured, and a capture over budget fails.
+    #   transfer: total bytes relayed from every site the page contacts
+    #   height/pixels: the full-page screenshot, measured by the browser itself
+    #   nodes: live DOM size, checked before the DOM is serialised
+    MAX_CAPTURE_TRANSFER_MB: int = 100
+    MAX_SCREENSHOT_HEIGHT_PX: int = 30000
+    MAX_SCREENSHOT_PIXELS: int = 64_000_000
+    MAX_DOM_NODES: int = 300_000
+
     # A fixed viewport keeps captures comparable between checks; a viewport that
     # follows the window would move layout and register as a visual change.
     VIEWPORT_WIDTH: int = 1440

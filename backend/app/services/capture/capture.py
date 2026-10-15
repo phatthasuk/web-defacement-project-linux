@@ -1,20 +1,30 @@
 import asyncio
 import json
 import logging
+import math
 import shutil
 import uuid
 from collections import defaultdict, deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from PIL import Image
+from playwright.async_api import (
+    BrowserContext,
+    Page,
+    Request,
+    Route,
+    WebSocketRoute,
+    async_playwright,
+)
 from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import Request, Route, WebSocketRoute, async_playwright
 
 from app.core.config import Settings
 from app.core.errors import (
+    CaptureBudgetExceeded,
     CaptureError,
     DnsResolutionError,
     SsrfBlockedError,
@@ -74,6 +84,40 @@ def _crop_screenshot_to_viewport(
         output = BytesIO()
         cropped.save(output, format="PNG")
     return output.getvalue(), raw_width, raw_height
+
+
+async def _enforce_render_budget(context: BrowserContext, page: Page, settings: Settings) -> None:
+    """Reject a page whose DOM or full-page bitmap is larger than the budget.
+
+    The numbers come from the browser (CDP), not from page JavaScript, so a
+    hostile page cannot understate them. This runs before the DOM is serialised
+    and before a full-page screenshot is allocated.
+    """
+    session = await context.new_cdp_session(page)
+    try:
+        layout = await session.send("Page.getLayoutMetrics")
+        counters = await session.send("Memory.getDOMCounters")
+    finally:
+        with suppress(PlaywrightError):
+            await session.detach()
+
+    content = layout.get("cssContentSize") or layout["contentSize"]
+    width = math.ceil(content["width"])
+    height = math.ceil(content["height"])
+    nodes = int(counters["nodes"])
+    if nodes > settings.MAX_DOM_NODES:
+        raise CaptureBudgetExceeded(
+            f"Page DOM has {nodes} nodes, over the limit of {settings.MAX_DOM_NODES}"
+        )
+    if height > settings.MAX_SCREENSHOT_HEIGHT_PX:
+        raise CaptureBudgetExceeded(
+            f"Page is {height}px tall, over the limit of {settings.MAX_SCREENSHOT_HEIGHT_PX}px"
+        )
+    if width * height > settings.MAX_SCREENSHOT_PIXELS:
+        raise CaptureBudgetExceeded(
+            f"Page screenshot would be {width}x{height}px, over the limit of "
+            f"{settings.MAX_SCREENSHOT_PIXELS} pixels"
+        )
 
 
 def _navigation_redirect_document(target_url: str) -> str:
@@ -307,6 +351,8 @@ async def _capture_snapshot_impl(
                             proxy_rejection, DnsResolutionError | UpstreamConnectionError
                         ):
                             availability_error = proxy_rejection
+                        elif isinstance(proxy_rejection, CaptureError):
+                            capture_error = proxy_rejection
                         else:
                             capture_error = CaptureError(str(proxy_rejection))
                         main_navigation_complete.set()
@@ -430,6 +476,10 @@ async def _capture_snapshot_impl(
                     f"Redirect limit exceeded: {redirect_count} > {settings.REDIRECT_LIMIT}"
                 )
 
+            if ssrf_proxy.budget_error is not None:
+                raise ssrf_proxy.budget_error
+            await _enforce_render_budget(context, page, settings)
+
             html = await page.content()
             if len(html.encode("utf-8")) > max_bytes:
                 raise CaptureError("Captured HTML exceeds MAX_ARTIFACT_SIZE_MB")
@@ -443,7 +493,15 @@ async def _capture_snapshot_impl(
                 # above, so re-pin with nothing left to run before the shutter.
                 await pin_for_capture(page)
 
+            # The budget could have been spent while the page settled or while
+            # the DOM was read; re-measure now that nothing else will run.
+            if ssrf_proxy.budget_error is not None:
+                raise ssrf_proxy.budget_error
+            await _enforce_render_budget(context, page, settings)
+
             raw_screenshot_bytes = await page.screenshot(full_page=True)
+            if ssrf_proxy.budget_error is not None:
+                raise ssrf_proxy.budget_error
             if len(raw_screenshot_bytes) > max_bytes:
                 raise CaptureError("Captured screenshot exceeds MAX_ARTIFACT_SIZE_MB")
             screenshot_bytes, raw_width, _ = _crop_screenshot_to_viewport(

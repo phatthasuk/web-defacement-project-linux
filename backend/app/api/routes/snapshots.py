@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import FileResponse
 from PIL import Image
 from sqlalchemy.orm import Session
+from starlette.types import Receive, Scope, Send
 
 from app.api.authorization import require_target_access
 from app.api.deps import get_current_user, get_db, get_settings
@@ -24,6 +25,23 @@ DbSession = Annotated[Session, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
 
 
+class WholeFileResponse(FileResponse):
+    """Serve the whole artifact and ignore client Range headers.
+
+    Starlette's multi-range merge loop is quadratic in the number of ranges, and
+    the upgrade to 0.52.1 does not change that.  Screenshots are small PNGs that
+    browsers load whole, so Range support buys nothing; HTTP lets a server ignore it.
+    """
+
+    def __init__(self, path: Path, media_type: str | None = None) -> None:
+        super().__init__(path, media_type=media_type, headers={"accept-ranges": "none"})
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        ignored = (b"range", b"if-range")
+        headers = [(name, value) for name, value in scope["headers"] if name.lower() not in ignored]
+        await super().__call__({**scope, "headers": headers}, receive, send)
+
+
 def _resolve_contained_artifact(raw_path: str, data_dir: Path) -> Path:
     resolved_base = data_dir.resolve()
     resolved_file = Path(raw_path).resolve()
@@ -37,12 +55,12 @@ def _normalised_screenshot_response(screenshot_path: Path, viewport_width: int) 
     try:
         with Image.open(screenshot_path) as image:
             if image.width <= viewport_width:
-                return FileResponse(screenshot_path, media_type="image/png")
+                return WholeFileResponse(screenshot_path, media_type="image/png")
             output = BytesIO()
             image.crop((0, 0, viewport_width, image.height)).save(output, format="PNG")
     except OSError:
         # Let FileResponse preserve the normal error handling for a corrupt legacy artifact.
-        return FileResponse(screenshot_path, media_type="image/png")
+        return WholeFileResponse(screenshot_path, media_type="image/png")
     return Response(output.getvalue(), media_type="image/png")
 
 
@@ -79,7 +97,7 @@ async def get_raw_snapshot_screenshot(
     db: DbSession,
     settings: AppSettings,
     user: Annotated[User, Depends(get_current_user)],
-) -> FileResponse:
+) -> WholeFileResponse:
     snapshot = db.get(Snapshot, snapshot_id)
     if snapshot is None:
         raise NotFoundError(f"Snapshot not found: {snapshot_id}")
@@ -88,7 +106,7 @@ async def get_raw_snapshot_screenshot(
     # Pre-normalisation snapshots only have screenshot_path; it is their raw evidence.
     raw_path = snapshot.raw_screenshot_path or snapshot.screenshot_path
     artifact_path = _resolve_contained_artifact(raw_path, settings.data_dir_path)
-    return FileResponse(artifact_path, media_type="image/png")
+    return WholeFileResponse(artifact_path, media_type="image/png")
 
 
 @router.get("/{snapshot_id}/text")

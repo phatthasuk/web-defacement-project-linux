@@ -22,6 +22,7 @@ from app.models import (
     UserTargetAssignment,
 )
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
+from app.services.audit import ACTION_BASELINE_DEMOTED, record_review_event
 from app.services.concurrency import is_target_in_flight
 
 router = APIRouter(prefix="/targets", tags=["targets"], dependencies=[Depends(get_current_user)])
@@ -467,6 +468,14 @@ async def demote_target_baseline(
         )
 
     snapshot.is_baseline = False
+    record_review_event(
+        db,
+        user,
+        ACTION_BASELINE_DEMOTED,
+        target_id=target_id,
+        before={"snapshot_id": snapshot_id, "is_baseline": True, "baseline_count": remaining + 1},
+        after={"snapshot_id": snapshot_id, "is_baseline": False, "baseline_count": remaining},
+    )
     db.commit()
     db.refresh(snapshot)
     return snapshot
