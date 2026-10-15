@@ -18,9 +18,24 @@ async def main():
             "? document.querySelector('button').formAction : document.querySelector('form').action",
         ),
         (
+            "formaction-empty",
+            '<form action="https://example.com/save"><button>Save</button></form>',
+            '<form action="https://example.com/save"><button formaction="">Save</button></form>',
+            "document.querySelector('button').hasAttribute('formaction') "
+            "? document.querySelector('button').formAction : document.querySelector('form').action",
+        ),
+        (
             "script-type",
             '<script type="text/plain">window.auditProbe = 1</script><p>Same page</p>',
             '<script type="text/javascript">window.auditProbe = 1</script><p>Same page</p>',
+            "window.auditProbe || 0",
+        ),
+        (
+            "script-type-parameters",
+            '<script type="application/javascript; charset=utf-8">'
+            'window.auditProbe = 1</script><p>Same page</p>',
+            '<script type="application/javascript">'
+            'window.auditProbe = 1</script><p>Same page</p>',
             "window.auditProbe || 0",
         ),
         (
@@ -37,7 +52,16 @@ async def main():
                 records = []
                 for markup in (before, after):
                     page = await browser.new_page()
-                    await page.set_content(markup)
+                    if name == "formaction-empty":
+                        await page.route(
+                            "**/*",
+                            lambda route, _request, body=markup: route.fulfill(
+                                status=200, content_type="text/html", body=body
+                            ),
+                        )
+                        await page.goto("https://example.com/account")
+                    else:
+                        await page.set_content(markup)
                     if name == "javascript-tab":
                         await page.locator("a").click()
                     records.append({

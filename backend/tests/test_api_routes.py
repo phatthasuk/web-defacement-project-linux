@@ -1094,3 +1094,45 @@ async def test_target_patch_response_preserves_assignees(
             "is_active": True,
         }
     ]
+
+
+async def test_raw_screenshot_ignores_range_headers(
+    client: httpx.AsyncClient,
+    api_session_factory,
+    api_work_dir: Path,
+):
+    target_id = await create_target(client)
+    snapshot_id = "range-probe"
+    screenshot_path = api_work_dir / "screenshots" / f"{snapshot_id}.png"
+    text_path = api_work_dir / "text" / f"{snapshot_id}.txt"
+    html_path = api_work_dir / "html" / f"{snapshot_id}.html"
+    for path in (screenshot_path, text_path, html_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), "white").save(screenshot_path)
+    text_path.write_text("snapshot", encoding="utf-8")
+    html_path.write_text("<html></html>", encoding="utf-8")
+    with api_session_factory() as db:
+        db.add(
+            Snapshot(
+                id=snapshot_id,
+                target_id=target_id,
+                final_url="https://93.184.216.34",
+                http_status=200,
+                title="Range probe",
+                screenshot_path=str(screenshot_path),
+                text_path=str(text_path),
+                html_path=str(html_path),
+                is_baseline=True,
+            )
+        )
+        db.commit()
+
+    expected = screenshot_path.read_bytes()
+    many_ranges = "bytes=" + ",".join(f"{i * 3}-{i * 3 + 1}" for i in range(2000))
+    for url in (f"/snapshots/{snapshot_id}/screenshot", f"/snapshots/{snapshot_id}/screenshot/raw"):
+        for range_header in ("bytes=0-9", many_ranges, "bytes=garbage"):
+            response = await client.get(url, headers={"Range": range_header})
+            assert response.status_code == 200
+            assert response.content == expected
+            assert response.headers["accept-ranges"] == "none"
+            assert "content-range" not in response.headers

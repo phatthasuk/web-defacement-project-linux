@@ -26,6 +26,18 @@ def _png_bytes() -> bytes:
     Image.new("RGB", (1, 1), "white").save(output, format="PNG")
     return output.getvalue()
 
+def _mock_cdp(context: AsyncMock) -> None:
+    """Give a mocked browser context the CDP answers the render budget reads."""
+    session = AsyncMock()
+
+    async def send(method: str) -> dict:
+        if method == "Page.getLayoutMetrics":
+            return {"cssContentSize": {"width": 1440, "height": 900}}
+        return {"nodes": 10}
+
+    session.send.side_effect = send
+    context.new_cdp_session.return_value = session
+
 
 async def test_capture_snapshot(tmp_path: Path):
     settings = Settings()
@@ -186,6 +198,7 @@ async def test_capture_snapshot_routes_all_requests_through_loopback_proxy(tmp_p
     mock_response.request = AsyncMock()
     mock_response.request.redirected_from = None
     mock_browser.new_context.return_value = mock_context
+    _mock_cdp(mock_context)
     mock_context.new_page.return_value = mock_page
 
     mock_playwright_instance = MagicMock()
@@ -226,6 +239,7 @@ async def test_capture_snapshot_sandbox_configuration(tmp_path: Path):
         mock_response.request = AsyncMock()
         mock_response.request.redirected_from = None
         mock_browser.new_context.return_value = mock_context
+        _mock_cdp(mock_context)
         mock_context.new_page.return_value = mock_page
 
         mock_playwright_instance = MagicMock()
@@ -716,6 +730,7 @@ async def test_capture_snapshot_blocks_file_subresource_from_remote_target(tmp_p
     mock_response.request = AsyncMock()
     mock_response.request.redirected_from = None
     mock_browser.new_context.return_value = mock_context
+    _mock_cdp(mock_context)
     mock_context.new_page.return_value = mock_page
 
     mock_playwright_instance = MagicMock()
@@ -794,6 +809,7 @@ async def test_late_main_document_navigation_error_rejects_capture(
     mock_page.title.return_value = "Old page"
     mock_page.url = url
     mock_browser.new_context.return_value = mock_context
+    _mock_cdp(mock_context)
     mock_context.new_page.return_value = mock_page
     mock_ap_instance = MagicMock()
     mock_ap_instance.chromium.launch = AsyncMock(return_value=mock_browser)

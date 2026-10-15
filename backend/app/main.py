@@ -10,7 +10,17 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 
-from app.api.routes import auth, checks, config, members, review, snapshots, tags, targets
+from app.api.routes import (
+    audit,
+    auth,
+    checks,
+    config,
+    members,
+    review,
+    snapshots,
+    tags,
+    targets,
+)
 from app.api.routes.auth import limiter
 from app.core.config import get_settings
 from app.core.errors import (
@@ -197,6 +207,7 @@ app.include_router(review.router)
 app.include_router(config.router)
 app.include_router(auth.router, prefix="/auth")
 app.include_router(members.router)
+app.include_router(audit.router)
 
 
 @app.exception_handler(NotFoundError)
