@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   usePaginatedTargetsQuery,
@@ -34,6 +34,7 @@ export function TargetListPage() {
   const tagFilterTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
@@ -49,7 +50,12 @@ export function TargetListPage() {
   const sortValue = searchParams.get('sort_by');
   const sortBy = sortValue === 'status' || sortValue === 'last_activity' ? sortValue : undefined;
   const sortOrder = searchParams.get('sort_order') === 'asc' ? 'asc' : 'desc';
-  const { data: paginatedData, isLoading, isError, error } = usePaginatedTargetsQuery(
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const { data: paginatedData, isLoading, isPlaceholderData, isError, error } = usePaginatedTargetsQuery(
     pageSize,
     offset,
     false,
@@ -58,7 +64,7 @@ export function TargetListPage() {
     activeStatus || undefined,
     sortBy,
     sortOrder,
-    searchQuery,
+    debouncedSearchQuery,
   );
   const { data: tagData } = useTagsQuery();
   const availableTags = tagData?.items ?? [];
@@ -298,7 +304,15 @@ export function TargetListPage() {
             </div>
 
             <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4">
-              <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full max-w-sm rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
+              <div className="flex min-h-10 w-full max-w-sm items-center gap-3">
+                <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
+                {searchQuery !== debouncedSearchQuery && (
+                  <span className="shrink-0 text-xs text-slate-500" role="status" aria-live="polite">Searching…</span>
+                )}
+                {searchQuery === debouncedSearchQuery && isPlaceholderData && (
+                  <span className="shrink-0 text-xs text-slate-500" role="status" aria-live="polite">Updating…</span>
+                )}
+              </div>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter tags</span>

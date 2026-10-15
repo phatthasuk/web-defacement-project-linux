@@ -27,6 +27,7 @@ export function usePaginatedTargetsQuery(
   return useQuery({
     queryKey: [...TARGETS_QUERY_KEY, 'page', { limit, offset, includeInactive, tagIds: sortedTagIds, tagMatch, status, sortBy, sortOrder, search }],
     queryFn: () => getPaginatedTargets(limit, offset, includeInactive, sortedTagIds, tagMatch, status, sortBy, sortOrder, search),
+    placeholderData: (previousData) => previousData,
     refetchInterval: 4000,
   });
 }
