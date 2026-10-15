@@ -383,7 +383,7 @@ export function TargetListPage() {
                     <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="px-6 py-4">Target / URL</th>
                       <th aria-sort={sortBy === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-4 whitespace-nowrap">{sortButton('status', 'Status')}</th>
-                      <th aria-sort={sortBy === 'last_activity' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-6 py-4 whitespace-nowrap min-w-[190px]">{sortButton('last_activity', 'Last Activity')}</th>
+                      <th aria-sort={sortBy === 'last_activity' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="px-4 py-4 whitespace-nowrap">{sortButton('last_activity', 'Last Activity')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/50">
@@ -497,7 +497,7 @@ export function TargetListPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-400 font-mono whitespace-nowrap">
+                        <td className="px-4 py-4 text-xs text-slate-400 font-mono whitespace-nowrap">
                           {formatLastActivity(target.updated_at)}
                         </td>
                       </tr>
