@@ -66,6 +66,7 @@ class CaptureResult:
     viewport_width: int | None = None
     document_width: int | None = None
     screenshot_format_version: int | None = None
+    retry_after: str | None = None
 
 
 def _crop_screenshot_to_viewport(
@@ -217,6 +218,7 @@ async def _capture_snapshot_impl(
             main_navigation_complete = asyncio.Event()
             final_http_status: int | None = None
             final_document_url: str | None = None
+            final_retry_after: str | None = None
             main_navigation_generation = 0
 
             def raise_navigation_error() -> None:
@@ -251,7 +253,7 @@ async def _capture_snapshot_impl(
 
             async def guard_navigation(route: Route, request: Request) -> None:
                 nonlocal blocked_error, availability_error, capture_error
-                nonlocal final_http_status, final_document_url
+                nonlocal final_http_status, final_document_url, final_retry_after
                 nonlocal main_redirect_count, main_navigation_generation
 
                 url_to_check = request.url
@@ -416,6 +418,7 @@ async def _capture_snapshot_impl(
                     main_redirect_count = max(main_redirect_count, redirects_seen)
                     final_http_status = response.status
                     final_document_url = request.url
+                    final_retry_after = response.headers.get("retry-after")
                     main_navigation_generation += 1
                     main_navigation_complete.set()
 
@@ -565,4 +568,5 @@ async def _capture_snapshot_impl(
         viewport_width=settings.VIEWPORT_WIDTH,
         document_width=raw_width,
         screenshot_format_version=2,
+        retry_after=final_retry_after,
     )

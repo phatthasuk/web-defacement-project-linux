@@ -19,6 +19,13 @@ export interface Target {
   status: TargetStatus;
   is_active: boolean;
   last_error: string | null;
+  last_error_code?: string | null;
+  last_http_status?: number | null;
+  next_check_at?: string | null;
+  check_run_id?: string | null;
+  check_run_source?: string | null;
+  check_attempt_count?: number;
+  check_retry_max_attempts?: number;
   latest_structure_change_score?: number | null;
   tags?: Tag[];
   assignees?: { id:number; username:string; display_name:string; is_active:boolean }[] | null;

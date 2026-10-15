@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     CHECK_INTERVAL_SECONDS: int = 3600  # 1 hour
     CHECK_JITTER_MAX_SECONDS: int = 180  # 0-3 minutes random jitter
     SCHEDULER_POLL_INTERVAL_SECONDS: int = 15
+    CHECK_RETRY_ENABLED: bool = True
+    CHECK_RETRY_MAX_ATTEMPTS: int = 3  # Includes the initial attempt
+    CHECK_RETRY_DELAYS_SECONDS: str = "120,300"
+    CHECK_RETRY_JITTER_MAX_SECONDS: int = 30
+    CHECK_RETRY_AFTER_MAX_SECONDS: int = 3600
     STAGING_CLEANUP_MAX_AGE_SECONDS: int = 1800  # 30 minutes
 
     MAX_CONCURRENT_CHECKS: int = 4
@@ -125,6 +130,25 @@ class Settings(BaseSettings):
     @property
     def allowed_schemes_list(self) -> list[str]:
         return [scheme.strip() for scheme in self.ALLOWED_SCHEMES.split(",") if scheme.strip()]
+
+    @property
+    def check_retry_delays_list(self) -> list[int]:
+        return [int(delay.strip()) for delay in self.CHECK_RETRY_DELAYS_SECONDS.split(",") if delay.strip()]
+
+    def validate_retry_settings(self) -> None:
+        delays = self.check_retry_delays_list
+        if self.CHECK_RETRY_MAX_ATTEMPTS < 1:
+            raise ValueError("CHECK_RETRY_MAX_ATTEMPTS must be at least 1")
+        if self.CHECK_INTERVAL_SECONDS < 1:
+            raise ValueError("CHECK_INTERVAL_SECONDS must be at least 1")
+        if (
+            len(delays) < self.CHECK_RETRY_MAX_ATTEMPTS - 1
+            or any(delay < 1 for delay in delays)
+            or self.CHECK_JITTER_MAX_SECONDS < 0
+            or self.CHECK_RETRY_JITTER_MAX_SECONDS < 0
+            or self.CHECK_RETRY_AFTER_MAX_SECONDS < 1
+        ):
+            raise ValueError("Retry delays must provide one positive delay per retry")
 
     @property
     def data_dir_path(self) -> Path:

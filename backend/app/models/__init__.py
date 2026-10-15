@@ -1,4 +1,5 @@
 from .check_result import CheckResult
+from .check_attempt import CheckAttempt
 from .member import MemberAuditEvent, UserTargetAssignment
 from .session import Session
 from .snapshot import Snapshot
@@ -9,6 +10,7 @@ from .user import User
 
 __all__ = [
     "CheckResult",
+    "CheckAttempt",
     "Snapshot",
     "Target",
     "Tag",

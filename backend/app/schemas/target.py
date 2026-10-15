@@ -66,6 +66,13 @@ class TargetRead(BaseModel):
     status: str
     is_active: bool
     last_error: str | None = None
+    last_error_code: str | None = None
+    last_http_status: int | None = None
+    next_check_at: datetime | None = None
+    check_run_id: str | None = None
+    check_run_source: str | None = None
+    check_attempt_count: int = 0
+    check_retry_max_attempts: int = 3
     latest_structure_change_score: float | None = None
     allowed_domains: list[str] | None = None
     tags: list[TagRead] = Field(default_factory=list)
@@ -73,8 +80,10 @@ class TargetRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    @field_serializer("created_at", "updated_at")
-    def _serialize_datetime(self, dt: datetime) -> str:
+    @field_serializer("created_at", "updated_at", "next_check_at")
+    def _serialize_datetime(self, dt: datetime | None) -> str | None:
+        if dt is None:
+            return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         return dt.isoformat().replace("+00:00", "Z")

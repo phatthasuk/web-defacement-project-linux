@@ -1,4 +1,5 @@
 from app.schemas.check_result import CheckResultRead
+from app.schemas.check_attempt import CheckAttemptRead
 from app.schemas.check_trigger import CheckTriggerResponse
 from app.schemas.config import ConfigRead
 from app.schemas.review import BaselineApproveRequest
@@ -9,6 +10,7 @@ from app.schemas.target import PaginatedTargetsRead, TargetCreate, TargetRead, T
 __all__ = [
     "BaselineApproveRequest",
     "CheckResultRead",
+    "CheckAttemptRead",
     "CheckTriggerResponse",
     "SnapshotRead",
     "TargetCreate",

@@ -1,16 +1,22 @@
 import asyncio
 import logging
+import random
 import shutil
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
+from app.core.time import utcnow
 from app.core.errors import (
+    CaptureBudgetExceeded,
     CaptureError,
     DnsResolutionError,
     SsrfBlockedError,
@@ -26,7 +32,7 @@ from app.core.status import (
     STATUS_OK,
     require_valid_transition,
 )
-from app.models import CheckResult, Snapshot, Target
+from app.models import CheckAttempt, CheckResult, Snapshot, Target
 from app.services.capture.capture import CaptureResult, capture_snapshot
 from app.services.diff import compare_snapshot_artifacts
 from app.services.diff.diff import DiffResult
@@ -49,6 +55,49 @@ class TargetCheckResult:
     target_id: str | None = None
     error: str | None = None
     skipped: bool = False
+    error_code: str | None = None
+    http_status: int | None = None
+    retry_after_seconds: int | None = None
+
+
+def parse_retry_after(value: str | None) -> int | None:
+    """Parse the delta-seconds or HTTP-date forms of Retry-After."""
+    if not value:
+        return None
+    try:
+        return max(0, int(value.strip()))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            return max(0, int((retry_at - datetime.now(UTC)).total_seconds()))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+def classify_capture_error(exc: Exception) -> tuple[str, bool]:
+    """Return a stable error code and whether a bounded retry can help."""
+    if isinstance(exc, CaptureBudgetExceeded):
+        return "resource_budget_exceeded", False
+    if isinstance(exc, SsrfBlockedError):
+        return "ssrf_blocked", False
+    if isinstance(exc, DnsResolutionError):
+        return "dns_resolution", True
+    if isinstance(exc, UpstreamConnectionError):
+        return "upstream_connection", True
+    if isinstance(exc, TimeoutError):
+        return "capture_timeout", True
+    if is_availability_error(exc):
+        return "network_unavailable", True
+    if isinstance(exc, CaptureError):
+        return "capture_error", False
+    return "internal_error", False
+
+
+def classify_http_failure(status_code: int) -> tuple[str, bool]:
+    retryable = status_code in {408, 429, 500, 502, 503, 504}
+    return f"http_{status_code}", retryable
 
 
 def is_availability_error(exc: Exception) -> bool:
@@ -171,12 +220,16 @@ async def run_target_check(
 ) -> TargetCheckResult:
     transition_target(target, STATUS_CHECKING)
     target.last_error = None
+    target.last_error_code = None
+    target.last_http_status = None
     db.commit()
 
     try:
         capture = await capture_func(target.url, settings, settings.data_dir_path)
     except Exception as exc:
         target.last_error = str(exc)
+        target.last_error_code, _ = classify_capture_error(exc)
+        target.last_http_status = None
         next_status = STATUS_AVAILABILITY_ISSUE if is_availability_error(exc) else STATUS_FAILED
         transition_target(target, next_status)
         db.commit()
@@ -187,6 +240,7 @@ async def run_target_check(
             check_result=None,
             target_id=target.id,
             error=str(exc),
+            error_code=target.last_error_code,
         )
 
     staging_dir = Path(capture.staging_dir) if capture.staging_dir else None
@@ -206,6 +260,8 @@ async def run_target_check(
             else "Target returned no HTTP response"
         )
         target.last_error = error_msg
+        target.last_http_status = capture.http_status
+        target.last_error_code, _ = classify_http_failure(capture.http_status) if capture.http_status is not None else ("no_http_response", True)
         next_status = (
             STATUS_AVAILABILITY_ISSUE
             if capture.http_status is not None and capture.http_status >= 400
@@ -220,6 +276,9 @@ async def run_target_check(
             check_result=None,
             target_id=target.id,
             error=error_msg,
+            error_code=target.last_error_code,
+            http_status=capture.http_status,
+            retry_after_seconds=parse_retry_after(capture.retry_after),
         )
 
     try:
@@ -418,6 +477,8 @@ async def run_target_check(
             _discard_snapshot_files(capture)
         target_in_db = db.get(Target, target.id) or target
         target_in_db.last_error = str(exc)
+        target_in_db.last_error_code = "internal_error"
+        target_in_db.last_http_status = None
         next_status = STATUS_AVAILABILITY_ISSUE if is_availability_error(exc) else STATUS_FAILED
         transition_target(target_in_db, next_status)
         db.commit()
@@ -428,13 +489,14 @@ async def run_target_check(
             check_result=None,
             target_id=target.id,
             error=str(exc),
+            error_code="internal_error",
         )
     finally:
         if not artifacts_promoted:
             _discard_snapshot_files(capture)
 
 
-def recover_stale_checks(db: Session) -> list[str]:
+def recover_stale_checks(db: Session, settings: Settings | None = None) -> list[str]:
     """Release targets left in `Checking` by a process that no longer exists.
 
     Checks run in-process via FastAPI ``BackgroundTasks``, and `run_target_check`
@@ -455,13 +517,79 @@ def recover_stale_checks(db: Session) -> list[str]:
 
     Returns the ids of the targets that were released.
     """
-    stale_targets = list(db.scalars(select(Target).where(Target.status == STATUS_CHECKING)))
+    settings = settings or get_settings()
+    stale_targets = list(
+        db.scalars(
+            select(Target).where(
+                (Target.status == STATUS_CHECKING)
+                | ((Target.check_run_id.is_not(None)) & Target.next_check_at.is_(None))
+            )
+        )
+    )
     if not stale_targets:
         return []
 
     for target in stale_targets:
-        target.last_error = STALE_CHECK_ERROR
-        transition_target(target, STATUS_FAILED)
+        now = utcnow()
+        was_checking = target.status == STATUS_CHECKING
+        if target.check_run_id is None:
+            target.check_run_id = str(uuid.uuid4())
+            target.check_run_source = "scheduled"
+            target.check_attempt_count = max(1, target.check_attempt_count)
+        if was_checking:
+            target.last_error = STALE_CHECK_ERROR
+            target.last_error_code = "process_interrupted"
+            target.last_http_status = None
+            transition_target(target, STATUS_FAILED)
+
+        # Close a durable attempt left open by an unclean shutdown. If the
+        # worker had not started yet, record the interrupted reservation too.
+        open_attempt = db.scalar(
+            select(CheckAttempt)
+            .where(CheckAttempt.target_id == target.id, CheckAttempt.finished_at.is_(None))
+            .order_by(CheckAttempt.started_at.desc())
+            .limit(1)
+        )
+        if open_attempt is not None:
+            open_attempt.finished_at = now
+            open_attempt.status = STATUS_AVAILABILITY_ISSUE
+            open_attempt.error_code = "process_interrupted"
+            open_attempt.error_message = STALE_CHECK_ERROR
+        else:
+            target.check_attempt_count = max(1, target.check_attempt_count)
+            db.add(
+                CheckAttempt(
+                    target_id=target.id,
+                    url_revision=target.url_revision,
+                    run_id=target.check_run_id,
+                    attempt_number=target.check_attempt_count,
+                    source=target.check_run_source or "scheduled",
+                    started_at=now,
+                    finished_at=now,
+                    status=STATUS_AVAILABILITY_ISSUE,
+                    error_code="process_interrupted",
+                    error_message=STALE_CHECK_ERROR,
+                )
+            )
+
+        delays = settings.check_retry_delays_list
+        if (
+            settings.CHECK_RETRY_ENABLED
+            and target.check_attempt_count < settings.CHECK_RETRY_MAX_ATTEMPTS
+            and target.check_attempt_count <= len(delays)
+        ):
+            delay = delays[target.check_attempt_count - 1] + random.uniform(
+                0, settings.CHECK_RETRY_JITTER_MAX_SECONDS
+            )
+            target.next_check_at = now + timedelta(seconds=delay)
+        else:
+            target.next_check_at = now + timedelta(
+                seconds=settings.CHECK_INTERVAL_SECONDS
+                + random.uniform(0, settings.CHECK_JITTER_MAX_SECONDS)
+            )
+            target.check_run_id = None
+            target.check_run_source = None
+            target.check_attempt_count = 0
     db.commit()
 
     released_ids = [target.id for target in stale_targets]

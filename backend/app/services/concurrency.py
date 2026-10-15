@@ -19,6 +19,7 @@ from app.services.capture.capture import capture_snapshot
 from app.services.checks import (
     CaptureFunc,
     TargetCheckResult,
+    classify_capture_error,
     is_availability_error,
     run_target_check,
 )
@@ -180,7 +181,11 @@ async def run_checks_for_targets(
                             error_msg = f"Check timed out after {timeout:.2f} seconds"
                             logger.warning(f"Timeout checking target {target_id}: {error_msg}")
                             mark_target_status(
-                                db, target_id, STATUS_AVAILABILITY_ISSUE, error=error_msg
+                                db,
+                                target_id,
+                                STATUS_AVAILABILITY_ISSUE,
+                                error=error_msg,
+                                error_code="check_timeout",
                             )
                             return TargetCheckResult(
                                 status=STATUS_AVAILABILITY_ISSUE,
@@ -188,6 +193,7 @@ async def run_checks_for_targets(
                                 check_result=None,
                                 target_id=target_id,
                                 error=error_msg,
+                                error_code="check_timeout",
                             )
                         except Exception as exc:
                             error_msg = str(exc)
@@ -196,18 +202,28 @@ async def run_checks_for_targets(
                                 target_id,
                                 error_msg,
                             )
+                            error_code, _retryable = classify_capture_error(exc)
                             err_status = (
                                 STATUS_AVAILABILITY_ISSUE
                                 if is_availability_error(exc)
                                 else STATUS_FAILED
                             )
-                            mark_target_status(db, target_id, err_status, error=error_msg)
+                            mark_target_status(
+                                db, target_id, err_status, error=error_msg, error_code=error_code
+                            )
                             return TargetCheckResult(
                                 status=err_status,
                                 snapshot=None,
                                 check_result=None,
                                 target_id=target_id,
                                 error=error_msg,
+                                error_code=(
+                                    "check_timeout"
+                                    if is_availability_error(exc) and "timeout" in error_msg.lower()
+                                    else "network_unavailable"
+                                    if is_availability_error(exc)
+                                    else "internal_error"
+                                ),
                             )
         finally:
             _in_flight_targets.discard(target_id)
@@ -235,6 +251,7 @@ async def run_checks_for_targets(
                     check_result=None,
                     target_id=target_id,
                     error=error_msg,
+                    error_code="internal_error",
                 )
             )
         else:
@@ -268,12 +285,16 @@ def mark_target_status(
     target_id: str,
     status: str,
     error: str | None = None,
+    error_code: str | None = None,
+    http_status: int | None = None,
 ) -> None:
     db.rollback()
     target = db.get(Target, target_id)
     if target is None:
         return
     target.last_error = error
+    target.last_error_code = error_code
+    target.last_http_status = http_status
     if is_valid_transition(target.status, status):
         target.status = status
     else:
@@ -284,4 +305,6 @@ def mark_target_status(
 
 
 def mark_target_failed(db: Session, target_id: str, error: str | None = None) -> None:
-    mark_target_status(db, target_id, STATUS_FAILED, error=error)
+    mark_target_status(
+        db, target_id, STATUS_FAILED, error=error, error_code="internal_error"
+    )

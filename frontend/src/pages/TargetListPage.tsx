@@ -460,9 +460,9 @@ export function TargetListPage() {
                               Delete
                             </button>}
                           </div>
-                          {target.status === 'Failed' && target.last_error && (
+                          {(target.status === 'Failed' || target.status === 'Availability Issue') && target.last_error && (
                             <span className="text-xs text-rose-400 block mt-1 max-w-md truncate" title={target.last_error}>
-                              Error: {target.last_error}
+                              {target.status}: {target.last_error}
                             </span>
                           )}
                           {triggerNotice[target.id] && (
@@ -474,8 +474,18 @@ export function TargetListPage() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <TargetStatusBadge
                             status={target.status}
-                            title={target.status === 'Failed' ? target.last_error || undefined : undefined}
+                            title={target.last_error || undefined}
                           />
+                          {target.check_run_id && target.next_check_at && target.status !== 'Checking' && (
+                            <span className="mt-1 block text-xs text-amber-400" title={target.last_error || undefined}>
+                              Retry {Math.min((target.check_attempt_count ?? 0) + 1, target.check_retry_max_attempts ?? 3)}/{target.check_retry_max_attempts ?? 3} · {formatDateTime(target.next_check_at)}
+                            </span>
+                          )}
+                          {!target.check_run_id && target.next_check_at && (
+                            <span className="mt-1 block text-xs text-slate-500">
+                              Next check · {formatDateTime(target.next_check_at)}
+                            </span>
+                          )}
                           {target.status === 'Changed' && (
                             <span className="mt-1 block text-xs text-slate-500">
                               Structural Score:{' '}

@@ -18,6 +18,7 @@ An automated, deterministic website integrity and unauthorized change detection 
   - Supports multiple valid baselines per target (e.g. seasonal promotions, localized variations).
   - Dynamic matching selects the closest matching baseline to minimize false positives while honoring strict retention caps (`max_baselines_per_target`).
   - Every first capture, as well as captures after a URL change, remains a candidate until an authorized operator approves it. Manual recaptures create a newer candidate while keeping earlier captures in history; scheduled checks pause until approval.
+- **Bounded Automatic Retries:** Transient network failures and selected HTTP responses are retried up to three attempts, with retry deadlines and attempt history stored in the database so a backend restart does not lose pending retries. Resource-budget, SSRF, and non-retryable HTTP failures stop immediately.
 - **Security-First Architecture:**
   - **SSRF Guard:** Pre-flight DNS resolution and IP validation blocking private CIDR ranges (RFC 1918), loopback, link-local, and IPv6 mapped addresses, with DNS rebinding protection.
   - **Local Authentication:** Cookie-based session authentication (`HttpOnly`, `SameSite=Lax`), Argon2id password hashing, and progressive brute-force rate-limiting and account lockout.
@@ -70,6 +71,32 @@ flowchart LR
     DB --> OperatorUI
     ReviewAction --> Approve & Acknowledge & ConfirmDefaced
     Approve --> Baselines
+```
+
+---
+
+## Check Scheduling and Retries
+
+Scheduled checks run hourly by default, with up to three minutes of jitter to
+spread capture load. Transient network errors and HTTP 408, 429, 500, 502, 503,
+and 504 responses get at most two retries after the initial attempt. The default
+delays are 2 and 5 minutes, each with up to 30 seconds of jitter. Resource-budget
+errors (including `MAX_CAPTURE_TRANSFER_MB`), SSRF blocks, and other HTTP errors
+do not retry. For retryable HTTP responses, a valid `Retry-After` header can
+extend the delay, capped at one hour. After the final attempt, the next hourly
+interval starts when that attempt finishes. The target list and detail page show the retry or next-check
+time, and `/api/targets/{target_id}/check-attempts` exposes attempt history.
+
+These values can be changed in `backend/.env`:
+
+```dotenv
+CHECK_INTERVAL_SECONDS=3600
+CHECK_JITTER_MAX_SECONDS=180
+CHECK_RETRY_ENABLED=true
+CHECK_RETRY_MAX_ATTEMPTS=3
+CHECK_RETRY_DELAYS_SECONDS=120,300
+CHECK_RETRY_JITTER_MAX_SECONDS=30
+CHECK_RETRY_AFTER_MAX_SECONDS=3600
 ```
 
 ---

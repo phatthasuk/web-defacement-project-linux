@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+import uuid
 
 from app.api.authorization import require_target_access
 from app.api.deps import (
@@ -15,15 +16,15 @@ from app.api.deps import (
 from app.core.config import Settings
 from app.core.errors import NotFoundError, ValidationError
 from app.core.status import STATUS_CHECKING
-from app.models import CheckResult, Snapshot, User
-from app.schemas import CheckResultRead, CheckTriggerResponse
+from app.models import CheckAttempt, CheckResult, Snapshot, User
+from app.schemas import CheckAttemptRead, CheckResultRead, CheckTriggerResponse
 from app.services.checks import CaptureFunc
 from app.services.concurrency import (
     SessionFactory,
     release_in_flight,
-    run_checks_for_targets,
     try_acquire_in_flight,
 )
+from app.services.attempts import run_check_attempt
 
 router = APIRouter(tags=["checks"], dependencies=[Depends(get_current_user)])
 
@@ -49,14 +50,22 @@ async def trigger_target_check(
     if target.status == STATUS_CHECKING or not try_acquire_in_flight(target_id):
         return CheckTriggerResponse(target_id=target_id, accepted=False)
 
+    run_id = str(uuid.uuid4())
+    target.check_run_id = run_id
+    target.check_run_source = "manual"
+    target.check_attempt_count = 0
+    target.next_check_at = None
+    db.commit()
     try:
         background_tasks.add_task(
-            run_checks_for_targets,
-            [target_id],
+            run_check_attempt,
+            target_id,
             settings,
+            run_id=run_id,
+            initial_source="manual",
             capture_func=capture_func,
             session_factory=session_factory,
-            pre_reserved=True,
+            actor_id=user.id,
         )
     except Exception:
         release_in_flight(target_id)
@@ -101,5 +110,26 @@ async def list_target_check_results(
             statement.order_by(CheckResult.created_at.desc(), CheckResult.id.desc())
             .limit(limit)
             .offset(offset)
+        )
+    )
+
+
+@router.get(
+    "/targets/{target_id}/check-attempts",
+    response_model=list[CheckAttemptRead],
+)
+async def list_target_check_attempts(
+    target_id: str,
+    db: DbSession,
+    user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 20,
+) -> list[CheckAttempt]:
+    require_target_access(db, user, target_id)
+    return list(
+        db.scalars(
+            select(CheckAttempt)
+            .where(CheckAttempt.target_id == target_id)
+            .order_by(CheckAttempt.started_at.desc(), CheckAttempt.id.desc())
+            .limit(limit)
         )
     )

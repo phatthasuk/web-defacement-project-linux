@@ -24,6 +24,14 @@ class Target(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default=STATUS_NEVER_CHECKED)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    last_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    check_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    check_run_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    check_attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     # Hosts whose scripts/iframes/links are expected on this target (analytics,
     # tag managers, CDNs). Without it the structural detector would report the
     # site's own third parties on every check. Matching covers subdomains.

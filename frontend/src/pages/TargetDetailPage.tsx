@@ -361,14 +361,26 @@ export function TargetDetailPage() {
             </button>}
           </div>
 
-          {target.status === 'Failed' && target.last_error && (
+          {(target.status === 'Failed' || target.status === 'Availability Issue') && target.last_error && (
             <div className="mt-3 p-4 bg-rose-950/40 border border-rose-800/40 rounded-xl text-rose-300 text-sm max-w-2xl flex gap-3">
               <svg className="h-5 w-5 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               <div>
-                <span className="font-semibold block mb-0.5">Check Execution Failed</span>
+                <span className="font-semibold block mb-0.5">{target.status}</span>
                 <span className="font-mono text-xs">{target.last_error}</span>
+                {target.last_error_code && <span className="block mt-1 text-xs text-rose-400/80">Code: {target.last_error_code}</span>}
+                {target.last_http_status && <span className="block mt-1 text-xs text-rose-400/80">HTTP {target.last_http_status}</span>}
+                {target.check_run_id && target.next_check_at && (
+                  <span className="block mt-2 text-xs text-amber-300">
+                    Automatic retry {Math.min((target.check_attempt_count ?? 0) + 1, target.check_retry_max_attempts ?? 3)}/{target.check_retry_max_attempts ?? 3} at {formatDateTime(target.next_check_at)}
+                  </span>
+                )}
+                {!target.check_run_id && target.next_check_at && (
+                  <span className="block mt-2 text-xs text-slate-400">
+                    Next scheduled check at {formatDateTime(target.next_check_at)}
+                  </span>
+                )}
               </div>
             </div>
           )}

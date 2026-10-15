@@ -51,6 +51,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_retry_settings()
     # Fail closed if production and secure cookies are disabled
     if settings.ENVIRONMENT == "production" and not settings.SESSION_COOKIE_SECURE:
         raise RuntimeError("Production environment must run with SESSION_COOKIE_SECURE=True")
@@ -90,7 +91,7 @@ async def lifespan(app: FastAPI):
     # Release targets stuck in "Checking" by a previous process, and clean up
     # orphaned staging/artifact files.
     with SessionLocal() as db:
-        recover_stale_checks(db)
+        recover_stale_checks(db, settings)
         reconcile_artifacts(db, settings)
 
     scheduler: CheckScheduler | None = None

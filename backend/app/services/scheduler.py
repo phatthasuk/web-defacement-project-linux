@@ -1,19 +1,22 @@
 import asyncio
 import logging
 import random
-import time
+import uuid
 from contextlib import suppress
+from datetime import timedelta
 
 from sqlalchemy import select
 
 from app.core.config import Settings
 from app.core.status import STATUS_CHECKING
+from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.models import Snapshot, Target
+from app.services.attempts import run_check_attempt
+from app.services.capture.capture import capture_snapshot
 from app.services.concurrency import (
     SessionFactory,
     release_in_flight,
-    run_checks_for_targets,
     try_acquire_in_flight,
 )
 
@@ -37,7 +40,6 @@ class CheckScheduler:
         self.session_factory = session_factory
         self._stopping = asyncio.Event()
         self._task: asyncio.Task | None = None
-        self._next_due_times: dict[str, float] = {}
         self._background_tasks: set[asyncio.Task] = set()
 
     @property
@@ -103,9 +105,11 @@ class CheckScheduler:
                 pass
 
     async def _tick(self) -> None:
-        now = time.time()
+        now = utcnow()
         with self.session_factory() as db:
-            active_targets = list(db.scalars(select(Target).where(Target.is_active.is_(True))))
+            active_target_ids = list(
+                db.scalars(select(Target.id).where(Target.is_active.is_(True)))
+            )
             candidate_exists = (
                 select(Snapshot.id)
                 .where(
@@ -127,76 +131,79 @@ class CheckScheduler:
                 .exists()
             )
             pending_candidate_ids = set(
-                db.scalars(
-                    select(Target.id).where(
-                        candidate_exists,
-                        ~baseline_exists,
-                    )
-                )
+                db.scalars(select(Target.id).where(candidate_exists, ~baseline_exists))
             )
 
-        active_ids = {target.id for target in active_targets}
-
-        # Purge tracking for removed or deactivated targets
-        for target_id in list(self._next_due_times.keys()):
-            if target_id not in active_ids:
-                self._next_due_times.pop(target_id, None)
-
-        for target in active_targets:
-            if target.id not in self._next_due_times:
-                # Stagger newly observed targets with an initial jitter delay
-                initial_delay = random.uniform(
-                    1.0, min(float(self.settings.CHECK_JITTER_MAX_SECONDS), 60.0)
-                )
-                self._next_due_times[target.id] = now + initial_delay
-                logger.debug(
-                    "Registered target %s with initial check due in %.1fs",
-                    target.id,
-                    initial_delay,
-                )
-                continue
-
-            if now >= self._next_due_times[target.id]:
-                if target.id in pending_candidate_ids:
-                    # Keep candidates until an operator reviews one. A manual
-                    # check may add a fresher candidate without deleting history.
-                    self._next_due_times[target.id] = now + 60.0
-                    continue
-                # If target is already checking or in flight, retry in 60s rather than
-                # advancing a full interval (Review 6.3)
-                if target.status == STATUS_CHECKING or not try_acquire_in_flight(target.id):
-                    logger.debug(
-                        "Skipping scheduled check for target %s: "
-                        "check already in progress; retrying in 60s",
-                        target.id,
-                    )
-                    self._next_due_times[target.id] = now + 60.0
+        for target_id in active_target_ids:
+            with self.session_factory() as db:
+                target = db.get(Target, target_id)
+                if target is None or not target.is_active or target.status == STATUS_CHECKING:
                     continue
 
-                # Schedule the subsequent check interval + jitter
-                jitter = random.uniform(0.0, float(self.settings.CHECK_JITTER_MAX_SECONDS))
-                self._next_due_times[target.id] = (
-                    now + float(self.settings.CHECK_INTERVAL_SECONDS) + jitter
-                )
-
-                logger.info(
-                    "Scheduler triggering check for target %s (%s); next check in %.1fs",
-                    target.id,
-                    target.name,
-                    float(self.settings.CHECK_INTERVAL_SECONDS) + jitter,
-                )
-                try:
-                    task = asyncio.create_task(
-                        run_checks_for_targets(
-                            [target.id],
-                            self.settings,
-                            session_factory=self.session_factory,
-                            pre_reserved=True,
-                        ),
-                        name=f"scheduled_check_{target.id}",
+                if target.next_check_at is None:
+                    if target.check_run_id is not None:
+                        # An active manual run owns the target; its attempt wrapper
+                        # will persist either the retry deadline or the hourly run.
+                        continue
+                    initial_delay = random.uniform(
+                        1.0, min(float(self.settings.CHECK_JITTER_MAX_SECONDS), 60.0)
                     )
-                    self._background_tasks.add(task)
-                    task.add_done_callback(self._on_task_done)
-                except Exception:
-                    release_in_flight(target.id)
-                    raise
+                    target.next_check_at = now + timedelta(seconds=initial_delay)
+                    db.commit()
+                    continue
+
+                due_at = target.next_check_at
+                if due_at.tzinfo is not None:
+                    due_at = due_at.replace(tzinfo=None)
+                if now < due_at:
+                    continue
+
+                if target_id in pending_candidate_ids and target.check_run_id is None:
+                    # Wait for operator baseline approval without polling this
+                    # candidate every minute or creating duplicate snapshots.
+                    jitter = random.uniform(0.0, self.settings.CHECK_JITTER_MAX_SECONDS)
+                    target.next_check_at = now + timedelta(
+                        seconds=self.settings.CHECK_INTERVAL_SECONDS + jitter
+                    )
+                    db.commit()
+                    continue
+
+                if not try_acquire_in_flight(target_id):
+                    continue
+
+                if target.check_run_id is None:
+                    target.check_run_id = str(uuid.uuid4())
+                    target.check_run_source = "scheduled"
+                    target.check_attempt_count = 0
+                run_id = target.check_run_id
+                if run_id is None:
+                    raise RuntimeError(f"Target {target.id} has no reserved check run")
+                target.next_check_at = None
+                target_id_for_log = target.id
+                target_name = target.name
+                db.commit()
+
+            source = "scheduled"
+            logger.info(
+                "Scheduler triggering check for target %s (%s); attempt %d",
+                target_id_for_log,
+                target_name,
+                1,
+            )
+            try:
+                task = asyncio.create_task(
+                    run_check_attempt(
+                        target_id_for_log,
+                        self.settings,
+                        run_id=run_id,
+                        initial_source=source,
+                        capture_func=capture_snapshot,
+                        session_factory=self.session_factory,
+                    ),
+                    name=f"scheduled_check_{target_id_for_log}",
+                )
+                self._background_tasks.add(task)
+                task.add_done_callback(self._on_task_done)
+            except Exception:
+                release_in_flight(target_id_for_log)
+                raise

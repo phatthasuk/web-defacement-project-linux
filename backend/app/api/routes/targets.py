@@ -10,7 +10,7 @@ from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.ssrf_guard import validate_url
-from app.core.status import STATUS_AWAITING_BASELINE, STATUS_CHECKING
+from app.core.status import STATUS_AWAITING_BASELINE, STATUS_CHECKING, STATUS_NEVER_CHECKED
 from app.core.time import utcnow
 from app.models import (
     CheckResult,
@@ -213,10 +213,18 @@ async def update_target(
                 is not None
             )
             target.url = new_url
+            target.last_error = None
+            target.last_error_code = None
+            target.last_http_status = None
+            target.check_run_id = None
+            target.check_run_source = None
+            target.check_attempt_count = 0
+            target.next_check_at = None
             if has_history:
                 target.url_revision += 1
                 target.status = STATUS_AWAITING_BASELINE
-                target.last_error = None
+            else:
+                target.status = STATUS_NEVER_CHECKED
     if "is_active" in update_data:
         target.is_active = update_data["is_active"]
     if "allowed_domains" in update_data:
@@ -292,7 +300,9 @@ def _resolve_tags(db: Session, tag_ids: list[str]) -> list[Tag]:
 
 
 def _target_read(db: Session, user: User, target: Target) -> TargetRead:
-    result = TargetRead.model_validate(target)
+    result = TargetRead.model_validate(target).model_copy(
+        update={"check_retry_max_attempts": get_settings().CHECK_RETRY_MAX_ATTEMPTS}
+    )
     if user.role == "admin":
         assignees = db.execute(
             select(User.id, User.username, User.display_name, User.is_active)
