@@ -410,12 +410,12 @@ export function TargetListPage() {
                             </div>
                           )}
                           {isAdmin && (target.assignees?.length ?? 0) > 0 && <p className="mt-2 text-xs text-slate-500">Assigned: {target.assignees?.map(a => `${a.display_name}${a.is_active ? '' : ' (suspended)'}`).join(', ')}</p>}
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className="mt-2 flex flex-nowrap items-center gap-1.5">
                             <button
                               data-testid={`run-check-${target.id}`}
                               onClick={() => handleRunCheck(target.id)}
                               disabled={target.status === 'Checking' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id)}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-slate-600 hover:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                              className="whitespace-nowrap px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-slate-600 hover:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
                               {target.status === 'Checking' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id) ? 'Checking...' : 'Run Check'}
                             </button>
@@ -429,7 +429,7 @@ export function TargetListPage() {
                                 setPreviewTarget(target);
                               }}
                               title="Preview screenshot comparison"
-                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                              className="whitespace-nowrap px-2 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2.25 12s3.5-6.5 9.75-6.5 9.75 6.5 9.75 6.5-3.5 6.5-9.75 6.5S2.25 12 2.25 12z" />
@@ -440,7 +440,7 @@ export function TargetListPage() {
                             {isAdmin && <button
                               data-testid={`edit-target-${target.id}`}
                               onClick={() => setEditingTarget(target)}
-                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5"
+                              className="whitespace-nowrap px-2 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-cyan-500/50 hover:text-cyan-300 transition-all flex items-center gap-1.5"
                               title="Edit Target"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -451,7 +451,7 @@ export function TargetListPage() {
                             {isAdmin && <button
                               data-testid={`delete-target-${target.id}`}
                               onClick={() => setDeletingTarget(target)}
-                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-rose-950/40 hover:border-rose-700/60 hover:text-rose-400 transition-all flex items-center gap-1.5"
+                              className="whitespace-nowrap px-2 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-rose-950/40 hover:border-rose-700/60 hover:text-rose-400 transition-all flex items-center gap-1.5"
                               title="Delete Target"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
