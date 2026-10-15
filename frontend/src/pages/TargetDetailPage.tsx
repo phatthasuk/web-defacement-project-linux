@@ -9,9 +9,6 @@ import {
   useTargetBaselinesQuery,
   useDemoteBaselineMutation,
   useTargetChecksQuery,
-  useApproveBaselineMutation,
-  useAcknowledgeCheckMutation,
-  useConfirmDefacedMutation,
   useConfigQuery,
 } from '../hooks/useTargetDetail';
 import { useUpdateTargetMutation, useDeleteTargetMutation, useTriggerCheckMutation } from '../hooks/useTargets';
@@ -30,6 +27,8 @@ import { TagBadge } from '../components/TagBadge';
 import { useTagsQuery } from '../hooks/useTags';
 import { getScreenshotComparisonIds } from '../utils/screenshotComparison';
 import { useAuth } from '../hooks/authContext';
+import { useTargetTriageActions } from '../hooks/useTargetTriageActions';
+import { TargetTriageActionButtons } from '../components/TargetTriageActionButtons';
 
 export function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,9 +49,6 @@ export function TargetDetailPage() {
     enabled: Boolean(target && target.url_revision > 1),
   });
 
-  const approveBaselineMutation = useApproveBaselineMutation();
-  const acknowledgeCheckMutation = useAcknowledgeCheckMutation();
-  const confirmDefacedMutation = useConfirmDefacedMutation();
   const demoteBaselineMutation = useDemoteBaselineMutation();
   const [isBaselineModalOpen, setIsBaselineModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -63,7 +59,6 @@ export function TargetDetailPage() {
   const deleteTargetMutation = useDeleteTargetMutation();
   const triggerCheckMutation = useTriggerCheckMutation();
   const [triageError, setTriageError] = useState<string | null>(null);
-  const [dismissedTriageKey, setDismissedTriageKey] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
   const lastSignatureRef = useRef<{ targetId: string; signature: string | null } | null>(null);
@@ -107,6 +102,14 @@ export function TargetDetailPage() {
   const currentMetadataQuery = useSnapshotQuery(compareCurrentId, cachedCurrent);
   const matchedBaseline = baselineMetadataQuery.data;
   const currentSnapshot = currentMetadataQuery.data;
+  const triageActions = useTargetTriageActions({
+    targetId,
+    targetStatus: target?.status ?? '',
+    latestCheck: latestCheckItem ?? null,
+    currentSnapshot: currentSnapshot ?? null,
+    hasReviewCandidate: Boolean(latestCheckItem || pendingCandidate),
+    isChecking: target?.status === 'Checking',
+  });
 
   // The latest snapshot may itself be the baseline; then one fetch covers both.
   const isSameSnapshot = !!compareCurrentId && compareCurrentId === compareBaselineId;
@@ -174,68 +177,11 @@ export function TargetDetailPage() {
   }
 
   const latestCheck = checks?.[0] || null;
-  const triageKey = latestCheck?.id ?? currentSnapshot?.id ?? null;
-  const triageIsPending =
-    approveBaselineMutation.isPending ||
-    acknowledgeCheckMutation.isPending ||
-    confirmDefacedMutation.isPending;
-  const triageAlreadyResolved = Boolean(
-    (triageKey && dismissedTriageKey === triageKey) ||
-    latestCheck?.acknowledged_at ||
-    target.status === 'Defaced' ||
-    currentSnapshot?.is_baseline
-  );
   const isInitialBaseline = !latestCheck;
   const latestCheckIsHistorical =
     target.status === 'Failed' || target.status === 'Availability Issue';
 
   const isChecking = target.status === 'Checking';
-
-  const handleApproveBaseline = async () => {
-    const snapshotToApprove = currentSnapshot?.id;
-    if (!snapshotToApprove) return;
-    setTriageError(null);
-    try {
-      await approveBaselineMutation.mutateAsync({
-        targetId: target.id,
-        snapshotId: snapshotToApprove,
-      });
-      if (triageKey) setDismissedTriageKey(triageKey);
-    } catch (err) {
-      console.error('Failed to approve baseline:', err);
-      setTriageError(err instanceof Error ? err.message : 'Failed to approve baseline');
-    }
-  };
-
-  const handleAcknowledge = async () => {
-    if (!latestCheck) return;
-    setTriageError(null);
-    try {
-      await acknowledgeCheckMutation.mutateAsync({
-        targetId: target.id,
-        checkId: latestCheck.id,
-      });
-      if (triageKey) setDismissedTriageKey(triageKey);
-    } catch (err) {
-      console.error('Failed to acknowledge check:', err);
-      setTriageError(err instanceof Error ? err.message : 'Failed to acknowledge check');
-    }
-  };
-
-  const handleConfirmDefaced = async () => {
-    if (!latestCheck) return;
-    setTriageError(null);
-    try {
-      await confirmDefacedMutation.mutateAsync({
-        targetId: target.id,
-        checkId: latestCheck.id,
-      });
-      if (triageKey) setDismissedTriageKey(triageKey);
-    } catch (err) {
-      console.error('Failed to confirm defacement:', err);
-      setTriageError(err instanceof Error ? err.message : 'Failed to confirm defacement');
-    }
-  };
 
   const handleTriggerCheck = async () => {
     setTriageError(null);
@@ -265,13 +211,6 @@ export function TargetDetailPage() {
     ? `${(appConfig.structure_change_threshold * 100).toFixed(1)}%`
     : '0.0%';
 
-  // Determine which actions are available
-  const canApproveBaseline = Boolean(
-    !triageAlreadyResolved && currentSnapshot && !currentSnapshot.is_baseline && !isSameSnapshot && (latestCheck || pendingCandidate)
-  );
-  const canAcknowledge = !triageAlreadyResolved && latestCheck && latestCheck.status === 'Changed' && !latestCheck.acknowledged_at;
-  const canConfirmDefacement = !triageAlreadyResolved && latestCheck && latestCheck.status === 'Changed' && target.status !== 'Defaced';
-
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {/* Back Link & Header */}
@@ -284,16 +223,19 @@ export function TargetDetailPage() {
         </Link>
       </div>
 
-      {triageError && (
+      {(triageActions.error || triageError) && (
         <div data-testid="triage-error-banner" className="mb-6 p-4 bg-rose-950/40 border border-rose-800/60 rounded-xl text-rose-300 text-sm flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <svg className="h-5 w-5 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
-            <span>{triageError}</span>
+            <span>{triageActions.error || triageError}</span>
           </div>
           <button
-            onClick={() => setTriageError(null)}
+            onClick={() => {
+              triageActions.dismissError();
+              setTriageError(null);
+            }}
             className="text-rose-400 hover:text-rose-200 text-xs font-semibold px-2 py-1 rounded hover:bg-rose-900/40 transition-colors"
             title="Dismiss error"
           >
@@ -402,40 +344,7 @@ export function TargetDetailPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:shrink-0">
-          {canApproveBaseline && (
-            <button
-              onClick={handleApproveBaseline}
-              disabled={isChecking || triageIsPending}
-              title={isChecking ? 'Cannot triage while check is in progress' : undefined}
-              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-4 text-sm font-semibold text-white shadow-md shadow-emerald-950/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {approveBaselineMutation.isPending
-                ? 'Approving...'
-                : 'Approve as Baseline'}
-            </button>
-          )}
-          {canAcknowledge && (
-            <button
-              onClick={handleAcknowledge}
-              disabled={isChecking || triageIsPending}
-              title={isChecking ? 'Cannot triage while check is in progress' : undefined}
-              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-950/20 transition-all hover:from-indigo-400 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {acknowledgeCheckMutation.isPending ? 'Acknowledging...' : 'Acknowledge Change'}
-            </button>
-          )}
-          {canConfirmDefacement && (
-            <button
-              onClick={handleConfirmDefaced}
-              disabled={isChecking || triageIsPending}
-              title={isChecking ? 'Cannot triage while check is in progress' : undefined}
-              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-gradient-to-r from-rose-600 to-red-700 px-4 text-sm font-semibold text-white shadow-md shadow-rose-950/30 transition-all hover:from-rose-500 hover:to-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {confirmDefacedMutation.isPending ? 'Confirming...' : 'Confirm Defacement'}
-            </button>
-          )}
-        </div>
+        <TargetTriageActionButtons actions={triageActions} className="lg:shrink-0" />
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

@@ -77,6 +77,7 @@ export function useApproveBaselineMutation() {
     mutationFn: ({ targetId, snapshotId }: { targetId: string; snapshotId: string }) =>
       approveBaseline(targetId, snapshotId),
     onSuccess: (_, { targetId }) => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
       queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
       queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
       queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });
@@ -119,6 +120,7 @@ export function useAcknowledgeCheckMutation() {
     mutationFn: ({ checkId }: { targetId: string; checkId: string }) =>
       acknowledgeCheck(checkId),
     onSuccess: (_, { targetId }) => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
       queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
       queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
       queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });
@@ -138,6 +140,7 @@ export function useConfirmDefacedMutation() {
     mutationFn: ({ checkId }: { targetId: string; checkId: string }) =>
       confirmDefacedCheck(checkId),
     onSuccess: (_, { targetId }) => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
       queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
       queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
       queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });

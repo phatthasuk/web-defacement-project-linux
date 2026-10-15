@@ -236,6 +236,9 @@ describe('TargetDetailPage', () => {
         snapshotId: 'snap-latest',
       });
     });
+    expect(screen.queryByRole('button', { name: /Approve as Baseline/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Acknowledge Change/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Confirm Defacement/i })).not.toBeInTheDocument();
   });
 
   it('does not fall back to approving an unrelated latest snapshot', () => {
