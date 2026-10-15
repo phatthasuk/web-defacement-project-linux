@@ -304,13 +304,13 @@ export function TargetListPage() {
             </div>
 
             <div className="flex flex-col gap-3 border-b border-slate-800/80 px-6 py-4">
-              <div className="flex min-h-10 w-full max-w-sm items-center gap-3">
-                <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600" />
+              <div className="relative w-full max-w-sm">
+                <input aria-label="Search websites" placeholder="Search by website name or URL" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setPage(1); }} className="w-full rounded-lg border border-slate-800 bg-slate-950 py-2 pl-3 pr-28 text-sm text-slate-200 placeholder:text-slate-600" />
                 {searchQuery !== debouncedSearchQuery && (
-                  <span className="shrink-0 text-xs text-slate-500" role="status" aria-live="polite">Searching…</span>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500" role="status" aria-live="polite">Searching…</span>
                 )}
                 {searchQuery === debouncedSearchQuery && isPlaceholderData && (
-                  <span className="shrink-0 text-xs text-slate-500" role="status" aria-live="polite">Updating…</span>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500" role="status" aria-live="polite">Updating…</span>
                 )}
               </div>
               <div className="flex items-start justify-between gap-4">
