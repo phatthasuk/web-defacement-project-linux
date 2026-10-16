@@ -1,61 +1,133 @@
 # Artifact Cleanup Plan
 
-**Status:** inventory and dry run complete; no artifacts or database rows were deleted.
+**Status:** Linux hardening and local-workspace dry run complete. No real artifact files or database rows were deleted or changed, no migration was run, and no service was stopped.
 
-**Scope:** local workspace data in `backend/data`; the Linux deployment host was not inspected.
+**Apply readiness:** **Not ready for production.** The production host and its mounted database were not accessible for verification. The verified local workspace dry run has **0 eligible orphan files and 0 bytes to reclaim**, so there is nothing to apply from this inventory.
 
-## Inventory
+## Deployment data path and evidence limits
 
-Filesystem sizes and modification times were inspected on October 16, 2026. Times below are UTC.
+The repository's production `docker-compose.yml` sets `DATABASE_URL=sqlite:////app/data/app.db` and `DATA_DIR=/app/data`, and bind mounts `./backend/data` on the host to `/app/data` in the backend container. Resolving Compose from this checkout maps that source to `/home/filtervisual/Desktop/github/web-defacement-project-linux/backend/data`; the database in this checkout is `backend/data/app.db`.
 
-| Directory | Files | Size | Modification date range |
+This identifies the path configured by the Compose file in this checkout. It does **not** prove that the same Compose file, checkout, mount source, database, or data is currently deployed on the Linux server. Docker daemon access from this workspace failed with `permission denied` for `/var/run/docker.sock`; the documented SSH host key was not trusted. Do not treat the workspace database as production evidence. Re-run the read-only inventory on the deployment host and verify its Compose project and mount before considering cleanup.
+
+The backend scheduler runs in-process with the FastAPI application when `SCHEDULER_ENABLED` is true. The Compose backend is therefore the writer to stop for maintenance, along with any separate process or deployment that writes to the same SQLite database. The Dockerfile runs `alembic upgrade head` on container startup; restarting the service can apply pending migrations. This task did not start or restart the service.
+
+## Read-only schema and migration check
+
+Checked on **2026-10-16 08:39 UTC** using host Python **3.12.3** (meets the 3.11 minimum), SQLite opened in read-only/query-only mode, and source migration files parsed without invoking Alembic:
+
+- Current database migration revision: `7e3a9c2f1b64`.
+- Source migration head: `7e3a9c2f1b64` (9 revision files inspected).
+- `check_attempts` exists with 15 columns; the database also contains `snapshots`, `check_results`, and `alembic_version`.
+- Counts: 3,594 snapshots, 3,624 check results, and 97 check attempts; 14 snapshots are active baselines.
+
+The inspected workspace database is at the source head and contains `check_attempts`; no schema repair or migration was needed or run. If a deployment database lacks `check_attempts`, its schema is behind the durable-check-retries migration (or is otherwise inconsistent). The cleanup script stops with an explicit missing-table error because references cannot be classified safely without it. Inspect that deployment's migration revision and take a verified backup; use the project's planned migration procedure separately, never as an automatic cleanup response.
+
+## Linux artifact inventory
+
+Filesystem inventory measured on **2026-10-16 08:39 UTC**. Modification ranges below are exact UTC timestamps. Decimal byte totals are shown for file sizes; the host filesystem display rounds capacity to whole GiB.
+
+| Directory | Files | Bytes | Modification range (UTC) |
 |---|---:|---:|---|
-| `screenshots` | 3,594 | 9.64 GB | Sep 8–Oct 16, 2026 |
-| `html` | 3,594 | 1.59 GB | Sep 8–Oct 16, 2026 |
-| `text` | 3,594 | 60 MB | Sep 8–Oct 16, 2026 |
-| `raw_screenshots` | 815 | 1.93 GB | Oct 8–Oct 16, 2026 |
+| `screenshots` | 3,594 | 9,642,091,589 | 2026-09-08 09:59:29.202253 to 2026-10-16 08:02:05.063984 |
+| `raw_screenshots` | 815 | 1,933,404,899 | 2026-10-08 04:17:10.689368 to 2026-10-16 08:02:05.065009 |
+| `html` | 3,594 | 1,593,766,375 | 2026-09-08 09:59:29.203739 to 2026-10-16 08:02:05.066244 |
+| `text` | 3,594 | 59,993,328 | 2026-09-08 09:59:29.203300 to 2026-10-16 08:02:05.065950 |
 
-The local SQLite database contains 3,594 snapshot rows and 14 active baseline snapshots. There are 3,624 check results. Each screenshot, HTML, and text artifact has a matching snapshot ID; all 815 raw screenshots have a database reference. The inventory found **zero unreferenced files**.
+At the inventory time, `df -h backend/data` reported a 98G filesystem, 73G used, 21G available, 79% used. This is the workspace host's filesystem, not a production-server capacity check.
 
-## Fourteen-day retention assessment
+A 14-day dry run used cutoff **2026-10-02 08:39:35.817006 UTC**. It inventoried **6,660** expired artifacts: 6,648 files referenced by check history (2,216 snapshot IDs, 7,261,384,315 bytes) and 12 files from four older active baselines (13,574,138 bytes). All were retained. There were **0 safe expired orphans**, so cleanup would delete **0 files and reclaim 0 bytes**. All 3,594 screenshot, HTML, and text artifacts are snapshot-ID matched, and all 815 raw screenshots have database references.
 
-The dry run used a rolling 14-day cutoff. It listed 6,654 older artifact files:
+Much of this workspace's Stage 2 evidence dates from September 8 onward. A 14-day retention policy would discard evidence that may still be needed for audit reproduction. Preserve it until the audit is accepted and archived. History and baseline artifacts are not candidates for this orphan-only script. Any later history pruning requires a separately reviewed, transactional database-and-artifact retention plan.
 
-- 6,642 files from 2,214 snapshots referenced by check history.
-- 12 files from four older active baselines, which must be retained.
-- Zero expired, unreferenced orphan files eligible for safe cleanup.
+## Hardened script and synthetic checks
 
-Deleting the 6,642 history files after coordinated database pruning could reclaim about **6.76 GiB** in this workspace. This is a potential estimate, not a deletion authorization or a server disk measurement. The Stage 2 evidence spans September 8–October 16, so a 14-day policy would discard much of the observation history needed to reproduce the audit. Keep the full Stage 2 evidence until the audit is accepted and archived. Preserve active baselines regardless of age.
+[cleanup_artifacts.py](../backend/scripts/cleanup_artifacts.py) remains dry-run by default. It requires Python 3.11+, uses a read-only SQLite connection for inventory, rejects symlink data/artifact directories and symlink/non-regular artifact files, and enforces path containment. Apply validation checks every manifest row before unlinking anything, including absolute/relative path agreement, allowed directory, snapshot ID, database disposition, expiry, exact `mtime_ns`, and exact size. A same-size file with a changed modification time is rejected. It rechecks candidates immediately before unlinking and uses directory file descriptors with no-follow flags.
 
-Deleting artifact files alone would leave snapshot and check rows whose screenshot, text, and comparison views can no longer load. Deleting those rows would shorten the history endpoints. Retention therefore needs a coordinated database-and-file procedure.
+Manifest output is refused if it resolves to the database, an artifact, or a path inside an artifact directory; it also refuses to overwrite the approved manifest. Apply mode requires `--approved-manifest` and `--confirm-writers-stopped`. The flag is an operator attestation, so the operator must actually stop every application/scheduler writer first. The script also holds a SQLite exclusive writer lock while validating and unlinking; it does not alter database rows.
 
-## Dry-run script and manifest
+Synthetic tests were run with:
 
-The script [cleanup_artifacts.py](../backend/scripts/cleanup_artifacts.py) defaults to dry run. It scans only `screenshots`, `raw_screenshots`, `text`, and `html`; rejects symlinks and paths outside `backend/data`; opens the database read-only; and protects files matching snapshots, check history, or active baselines. Its optional apply mode only accepts an approved manifest and can remove expired orphan files. It does not prune snapshot history or modify the database.
+```bash
+python3 -m unittest discover -s backend/tests -p 'test_cleanup_artifacts.py' -v
+```
 
-The reviewed dry-run list is [artifact-cleanup-dry-run.csv](artifact-cleanup-dry-run.csv). It classifies all 6,654 expired files as retained; the dry run would delete **zero files** and reclaim **zero bytes**.
+All 6 tests passed. They verify retaining baselines/history, deleting only approved expired synthetic orphans, rejecting a changed same-size file, rejecting an out-of-bound path before any deletion, rejecting symlink files/directories, and protecting database/artifact/approved-manifest output paths and writer-stop attestation. These are synthetic fixtures; no real data was used for apply testing.
 
-Recreate the inventory and manifest from the repository root with:
+The current-workspace dry-run CSV is [artifact-cleanup-linux-dry-run.csv](artifact-cleanup-linux-dry-run.csv). The original [artifact-cleanup-dry-run.csv](artifact-cleanup-dry-run.csv) was left intact. Recreate the workspace inventory from the repository root with:
 
 ```bash
 python3 backend/scripts/cleanup_artifacts.py \
   --retention-days 14 \
-  --manifest plan/artifact-cleanup-dry-run.csv
+  --manifest plan/artifact-cleanup-linux-dry-run.csv
 ```
 
-No apply command was run. Any future orphan deletion must be reviewed and approved against its manifest first.
+## Future maintenance procedure
 
-## Database consistency procedure for a future history prune
+These commands are for the deployment host, from the directory containing its verified `docker-compose.yml`. Confirm its resolved bind mount and database first; replace the sample backup destination with a protected path outside the data directory. Stop any other process writing to that database as well.
 
-Before pruning database-referenced snapshots:
+1. Stop the backend cleanly so the in-process scheduler drains and exits, then verify it is stopped:
 
-1. Quiesce the application and scheduler so no checks or reviews write to the database during maintenance.
-2. Create an online SQLite backup with SQLite’s backup API or `.backup` command. Do not copy only `app.db` while WAL mode is active; the WAL may contain committed data. Store the backup outside the data directory and verify it with `PRAGMA integrity_check` and table row counts.
-3. In one database transaction, remove only check results outside the approved retention window. Preserve the full Stage 2 audit range until it has been archived and accepted. Keep every active baseline and any snapshot referenced by a retained check result. Delete a snapshot row only after confirming no retained result references it; check-attempt snapshot/result foreign keys use `ON DELETE SET NULL`.
-4. Commit the database transaction before unlinking the matching artifact files from the reviewed manifest. Then run `PRAGMA foreign_key_check` and `PRAGMA integrity_check`, compare row counts with the plan, and verify that retained history and comparisons still load.
+   ```bash
+   sudo docker compose stop backend
+   sudo docker compose ps -a backend
+   ```
 
-If the database transaction fails, roll it back and leave all artifact files in place. If file removal fails after the database commit, the remaining files are unreferenced orphans and can be reviewed by a later dry run.
+2. Make an online SQLite backup with Python's backup API. This includes committed WAL contents without copying only the live database file. Keep the backup outside the mounted data directory:
 
-## Evidence boundary
+   ```bash
+   python3 - <<'PY'
+   import sqlite3
+   source = sqlite3.connect('file:backend/data/app.db?mode=ro', uri=True)
+   backup = sqlite3.connect('/secure/backup/app-pre-cleanup.db')
+   source.backup(backup)
+   backup.close()
+   source.close()
+   PY
+   ```
 
-The SSH host key for the documented server was not trusted in this workspace, and local Docker access was denied. These figures describe `backend/data` here only. Before applying any policy to production, repeat the inventory on the server and compare it with the production database and its backup.
+3. Verify the backup before maintenance. Keep the integrity and row-count output with the maintenance record:
+
+   ```bash
+   python3 - <<'PY'
+   import sqlite3
+   db = sqlite3.connect('file:/secure/backup/app-pre-cleanup.db?mode=ro', uri=True)
+   print('integrity:', db.execute('PRAGMA integrity_check').fetchall())
+   print('foreign keys:', db.execute('PRAGMA foreign_key_check').fetchall())
+   for table in ('snapshots', 'check_results', 'check_attempts'):
+       print(table, db.execute(f'SELECT count(*) FROM {table}').fetchone()[0])
+   db.close()
+   PY
+   ```
+
+4. If a separately reviewed manifest ever contains expired orphans, first produce and inspect a fresh dry run on the deployment host. Apply only after confirming the manifest against that same database and stopping all writers:
+
+   ```bash
+   python3 backend/scripts/cleanup_artifacts.py \
+     --data-dir backend/data --database backend/data/app.db \
+     --retention-days 14 --manifest plan/artifact-cleanup-linux-dry-run.csv
+   # Review the manifest and confirm backup verification and stopped writers first.
+   python3 backend/scripts/cleanup_artifacts.py \
+     --data-dir backend/data --database backend/data/app.db \
+     --retention-days 14 --apply-orphans \
+     --approved-manifest plan/artifact-cleanup-linux-dry-run.csv \
+     --confirm-writers-stopped
+   ```
+
+   The command is a template, not an instruction to apply this workspace manifest to production. This workspace manifest has zero orphan candidates and should not be applied. The manifest must come from the verified deployment data and database.
+
+5. To restore after a failed maintenance, keep the backend stopped. Preserve the current `app.db`, `app.db-wal`, and `app.db-shm` together in a recovery directory; do not discard sidecars from a live database. Validate the backup first, then copy it to a temporary file in the database directory, set ownership and permissions to match the deployment, move the existing database and sidecars aside, and atomically rename the verified backup copy to `backend/data/app.db`. Keep all recovery copies until the restored service is verified. Restart and inspect:
+
+   ```bash
+   sudo docker compose up -d backend
+   sudo docker compose ps backend
+   sudo docker compose logs --tail=100 backend
+   ```
+
+   The container entrypoint runs `alembic upgrade head` at startup, so check migration state and backup before restart. After startup, repeat read-only integrity, foreign-key, table-count, and application health checks. Do not restore an old database while leaving later artifacts or database sidecars mixed with it; follow the recovery procedure for the verified deployment layout.
+
+## Limitations and decision
+
+The inventory, schema, and free-space figures above describe only this Linux workspace. The Docker daemon could not be queried and the documented SSH host key could not be validated, so live container state, remote Python version, production schema, production database path, and production artifact counts remain unverified. No service was stopped and no production command was run.
+
+**Decision:** Apply mode is not ready for production because deployment state and backup are unverified. For the inspected local workspace, there is no orphan cleanup to perform: **0 files / 0 bytes**. Keep the evidence; if disk pressure requires reclamation, separately evaluate a reviewed retention archive/prune process that preserves required audit history and active baselines.
