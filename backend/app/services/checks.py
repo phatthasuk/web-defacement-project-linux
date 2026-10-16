@@ -220,6 +220,7 @@ async def run_target_check(
     settings: Settings,
     capture_func: CaptureFunc = capture_snapshot,
 ) -> TargetCheckResult:
+    target_id = target.id
     transition_target(target, STATUS_CHECKING)
     target.last_error = None
     target.last_error_code = None
@@ -235,12 +236,12 @@ async def run_target_check(
         next_status = STATUS_AVAILABILITY_ISSUE if is_availability_error(exc) else STATUS_FAILED
         transition_target(target, next_status)
         db.commit()
-        logger.warning(f"Capture failed for target {target.id}: {exc} (status={next_status})")
+        logger.warning(f"Capture failed for target {target_id}: {exc} (status={next_status})")
         return TargetCheckResult(
             status=next_status,
             snapshot=None,
             check_result=None,
-            target_id=target.id,
+            target_id=target_id,
             error=str(exc),
             error_code=target.last_error_code,
         )
@@ -271,12 +272,12 @@ async def run_target_check(
         )
         transition_target(target, next_status)
         db.commit()
-        logger.warning("Target %s: %s", target.id, error_msg)
+        logger.warning("Target %s: %s", target_id, error_msg)
         return TargetCheckResult(
             status=next_status,
             snapshot=None,
             check_result=None,
-            target_id=target.id,
+            target_id=target_id,
             error=error_msg,
             error_code=target.last_error_code,
             http_status=capture.http_status,
@@ -284,7 +285,7 @@ async def run_target_check(
         )
 
     try:
-        baseline = get_baseline_snapshot(db, target.id, target.url_revision)
+        baseline = get_baseline_snapshot(db, target_id, target.url_revision)
 
         if baseline is None:
             # Every new URL revision, including the first, must be reviewed
@@ -303,7 +304,7 @@ async def run_target_check(
             artifacts_promoted = True
             snapshot = Snapshot(
                 id=capture.id,
-                target_id=target.id,
+                target_id=target_id,
                 url_revision=target.url_revision,
                 final_url=capture.final_url,
                 http_status=capture.http_status,
@@ -328,19 +329,19 @@ async def run_target_check(
             except Exception:
                 logger.exception(
                     "Baseline snapshot %s committed but could not be refreshed",
-                    snapshot.id,
+                    snapshot_id,
                 )
             return TargetCheckResult(
                 status=next_status,
                 snapshot=snapshot,
                 check_result=None,
-                target_id=target.id,
+                target_id=target_id,
                 snapshot_id=snapshot_id,
             )
 
         # Compare against approved baselines using the staged files
         baselines = get_baseline_snapshots(
-            db, target.id, target.url_revision, settings.MAX_BASELINES_PER_TARGET
+            db, target_id, target.url_revision, settings.MAX_BASELINES_PER_TARGET
         )
         if not baselines:
             baselines = [baseline]
@@ -381,7 +382,7 @@ async def run_target_check(
         if len(comparisons) > 1:
             logger.debug(
                 "Target %s matched baseline %s out of %d (text=%.6f visual=%.6f)",
-                target.id,
+                target_id,
                 matched_baseline_id,
                 len(comparisons),
                 diff.text_change_score,
@@ -404,7 +405,7 @@ async def run_target_check(
             artifacts_promoted = True
             snapshot = Snapshot(
                 id=capture.id,
-                target_id=target.id,
+                target_id=target_id,
                 url_revision=target.url_revision,
                 final_url=capture.final_url,
                 http_status=capture.http_status,
@@ -421,7 +422,7 @@ async def run_target_check(
             db.add(snapshot)
             db.flush()
             check_result = CheckResult(
-                target_id=target.id,
+                target_id=target_id,
                 baseline_snapshot_id=matched_baseline_id,
                 current_snapshot_id=snapshot.id,
                 status=STATUS_CHANGED,
@@ -443,13 +444,13 @@ async def run_target_check(
             except Exception:
                 logger.exception(
                     "Changed result for target %s committed but could not be refreshed",
-                    target.id,
+                    target_id,
                 )
             return TargetCheckResult(
                 status=STATUS_CHANGED,
                 snapshot=snapshot,
                 check_result=check_result,
-                target_id=target.id,
+                target_id=target_id,
                 snapshot_id=snapshot_id,
                 check_result_id=check_result_id,
             )
@@ -458,7 +459,7 @@ async def run_target_check(
             _discard_snapshot_files(capture)
             matched_baseline = db.get(Snapshot, matched_baseline_id) or baseline
             check_result = CheckResult(
-                target_id=target.id,
+                target_id=target_id,
                 baseline_snapshot_id=matched_baseline_id,
                 current_snapshot_id=matched_baseline_id,
                 status=STATUS_OK,
@@ -478,7 +479,7 @@ async def run_target_check(
                 status=STATUS_OK,
                 snapshot=matched_baseline,
                 check_result=check_result,
-                target_id=target.id,
+                target_id=target_id,
                 snapshot_id=snapshot_id,
                 check_result_id=check_result_id,
             )
@@ -489,19 +490,19 @@ async def run_target_check(
             _cleanup_promoted_files(perm_screenshot, perm_raw_screenshot, perm_text, perm_html)
         elif not artifacts_promoted:
             _discard_snapshot_files(capture)
-        target_in_db = db.get(Target, target.id) or target
+        target_in_db = db.get(Target, target_id) or target
         target_in_db.last_error = str(exc)
         target_in_db.last_error_code = "internal_error"
         target_in_db.last_http_status = None
         next_status = STATUS_AVAILABILITY_ISSUE if is_availability_error(exc) else STATUS_FAILED
         transition_target(target_in_db, next_status)
         db.commit()
-        logger.exception("Error checking target %s: %s", target.id, exc)
+        logger.exception("Error checking target %s: %s", target_id, exc)
         return TargetCheckResult(
             status=next_status,
             snapshot=None,
             check_result=None,
-            target_id=target.id,
+            target_id=target_id,
             error=str(exc),
             error_code="internal_error",
         )

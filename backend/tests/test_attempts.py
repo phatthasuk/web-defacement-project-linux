@@ -132,7 +132,9 @@ async def test_ok_attempt_records_primitive_ids_and_next_schedule(tmp_path: Path
         engine.dispose()
 
 
-async def test_changed_attempt_keeps_result_ids(tmp_path: Path) -> None:
+async def test_changed_attempt_keeps_result_ids_after_snapshot_refresh_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
     session_factory, engine = make_db(tmp_path)
     settings = Settings(
         DATA_DIR=str(tmp_path), CHECK_INTERVAL_SECONDS=3600, CHECK_JITTER_MAX_SECONDS=0
@@ -158,6 +160,16 @@ async def test_changed_attempt_keeps_result_ids(tmp_path: Path) -> None:
             target.check_run_source = "scheduled"
             db.commit()
 
+        original_refresh = Session.refresh
+
+        def fail_snapshot_refresh(db: Session, instance, *args, **kwargs) -> None:
+            if isinstance(instance, Snapshot):
+                db.expunge(instance)
+                raise RuntimeError("injected snapshot refresh failure")
+            original_refresh(db, instance, *args, **kwargs)
+
+        monkeypatch.setattr(Session, "refresh", fail_snapshot_refresh)
+
         async def changed_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
             return make_capture(out_dir, "changed", "Entirely different words", "black")
 
@@ -181,7 +193,9 @@ async def test_changed_attempt_keeps_result_ids(tmp_path: Path) -> None:
         engine.dispose()
 
 
-async def test_awaiting_baseline_attempt_records_snapshot_id(tmp_path: Path) -> None:
+async def test_awaiting_baseline_attempt_records_snapshot_id_after_refresh_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
     session_factory, engine = make_db(tmp_path)
     settings = Settings(DATA_DIR=str(tmp_path))
     try:
@@ -192,6 +206,16 @@ async def test_awaiting_baseline_attempt_records_snapshot_id(tmp_path: Path) -> 
             target_id = target.id
             target.check_run_id = "baseline-run"
             db.commit()
+
+        original_refresh = Session.refresh
+
+        def fail_snapshot_refresh(db: Session, instance, *args, **kwargs) -> None:
+            if isinstance(instance, Snapshot):
+                db.expunge(instance)
+                raise RuntimeError("injected snapshot refresh failure")
+            original_refresh(db, instance, *args, **kwargs)
+
+        monkeypatch.setattr(Session, "refresh", fail_snapshot_refresh)
 
         async def capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
             return make_capture(out_dir, "first-candidate", "First page", "white")

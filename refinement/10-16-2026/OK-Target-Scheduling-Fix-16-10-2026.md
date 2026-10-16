@@ -20,6 +20,15 @@ Command run from `backend`:
 python -m pytest tests/test_attempts.py tests/test_scheduler.py tests/test_checks.py tests/test_review.py -q
 ```
 
-Result: **71 passed**, with one existing `argon2` deprecation warning.
+Initial result: **71 passed**, with one existing `argon2` deprecation warning.
 
 UI behavior was not manually checked. This code change does not modify production data or run deployment recovery; existing stuck rows should be released by the normal startup recovery after deploying and restarting the application.
+
+## Follow-up: Refresh Failure Logging and Approval Schedule Preservation
+
+- Captured `target_id` before the check's first commit and used the primitive value in logs and returned results after commits. The baseline refresh failure log now uses its previously captured `snapshot_id`.
+- Added tests that force snapshot refresh to fail after commit in both `Awaiting Baseline` and `Changed` results, then verify the durable attempt still records its primitive IDs.
+- Added parameterized approval tests for routine scheduling and pending retry state. Both verify that `next_check_at`, `check_run_id`, `check_run_source`, and `check_attempt_count` remain unchanged after reloading the target.
+
+Updated verification command result: **73 passed**, with one existing `argon2` deprecation warning.
+

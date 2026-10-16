@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -81,6 +82,49 @@ def test_approving_first_candidate_activates_initial_baseline():
     assert approved.is_baseline is True
     assert target.status == STATUS_OK
     assert target.last_error is None
+
+
+@pytest.mark.parametrize(
+    ("run_id", "run_source", "attempt_count"),
+    [(None, None, 0), ("retry-run", "scheduled", 2)],
+    ids=["routine-schedule", "pending-retry"],
+)
+def test_approve_baseline_preserves_existing_schedule(
+    run_id: str | None, run_source: str | None, attempt_count: int
+) -> None:
+    db = make_session()
+    target = create_target(db, status=STATUS_CHANGED)
+    create_snapshot(db, target.id, "approved-existing", is_baseline=True)
+    candidate = create_snapshot(db, target.id, "approval-candidate", is_baseline=False)
+    deadline = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+    target.check_run_id = run_id
+    target.check_run_source = run_source
+    target.check_attempt_count = attempt_count
+    target.next_check_at = deadline
+    db.commit()
+
+    db.expire_all()
+    persisted_target = db.get(Target, target.id)
+    assert persisted_target is not None
+    before = (
+        persisted_target.next_check_at,
+        persisted_target.check_run_id,
+        persisted_target.check_run_source,
+        persisted_target.check_attempt_count,
+    )
+
+    approve_baseline(db, persisted_target.id, candidate.id)
+
+    db.expire_all()
+    persisted_target = db.get(Target, target.id)
+    assert persisted_target is not None
+    after = (
+        persisted_target.next_check_at,
+        persisted_target.check_run_id,
+        persisted_target.check_run_source,
+        persisted_target.check_attempt_count,
+    )
+    assert after == before
 
 
 
