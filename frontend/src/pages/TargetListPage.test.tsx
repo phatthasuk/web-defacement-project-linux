@@ -101,7 +101,7 @@ describe('TargetListPage', () => {
       </BrowserRouter>
     );
 
-    expect(screen.getByText('Web Defacement Monitor')).toBeInTheDocument();
+    expect(screen.getByText('Monitor Management')).toBeInTheDocument();
     expect(screen.getByText('Google')).toBeInTheDocument();
     expect(screen.getByText('https://google.com')).toBeInTheDocument();
     expect(screen.getByText('Example')).toBeInTheDocument();

@@ -210,7 +210,7 @@ export function TargetListPage() {
       {/* Header */}
       <header className="mb-10 text-center md:text-left">
         <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 bg-clip-text text-transparent">
-          Web Defacement Monitor
+          Monitor Management
         </h1>
         <p className="text-slate-400 mt-2">
           Monitor your websites for unexpected visual and content alterations in real time.
