@@ -392,7 +392,12 @@ export function TargetListPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+                <table className="w-full table-fixed text-left border-collapse">
+                  <colgroup>
+                    <col className="w-[48%]" />
+                    <col className="w-[26%]" />
+                    <col className="w-[26%]" />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="px-6 py-4">Target / URL</th>
@@ -414,7 +419,7 @@ export function TargetListPage() {
                             href={target.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs text-slate-500 hover:text-cyan-400 font-mono transition-colors block mt-0.5"
+                            className="text-xs text-slate-500 hover:text-cyan-400 font-mono transition-colors block mt-0.5 break-all"
                           >
                             {target.url}
                           </a>
@@ -424,7 +429,7 @@ export function TargetListPage() {
                             </div>
                           )}
                           {isAdmin && (target.assignees?.length ?? 0) > 0 && <p className="mt-2 text-xs text-slate-500">Assigned: {target.assignees?.map(a => `${a.display_name}${a.is_active ? '' : ' (suspended)'}`).join(', ')}</p>}
-                          <div className="mt-2 flex flex-nowrap items-center gap-1.5">
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             <button
                               data-testid={`run-check-${target.id}`}
                               onClick={() => handleRunCheck(target.id)}
@@ -485,7 +490,7 @@ export function TargetListPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-6 py-4">
                           <TargetStatusBadge
                             status={target.status}
                             title={target.last_error || undefined}
