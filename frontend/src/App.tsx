@@ -154,8 +154,8 @@ function NavBar() {
             <LogOut className="h-4 w-4" aria-hidden="true" />
             {isLoggingOut ? 'Logging out...' : 'Logout'}
           </button>
+        </div>}
       </div>
-        }
     </nav>
   );
 }
