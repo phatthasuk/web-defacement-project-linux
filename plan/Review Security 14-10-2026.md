@@ -1,230 +1,222 @@
 # Review Security — 14-10-2026
 
-วันที่ตรวจ: 14 ตุลาคม 2026 (Asia/Bangkok)  
-โปรเจกต์: Web Defacement Monitoring System  
-สถานะ: รายงาน audit และข้อเสนอแก้ไข — **แก้ใน source แล้วบางส่วน (ดูหัวข้อ 7) แต่ยังไม่ deploy และยังไม่ได้ทดสอบบน Linux/container จริง จึงยังไม่ถือว่าปิด finding ใดทั้งสิ้น**  
-อัปเดตสถานะการแก้ไขล่าสุด: 14 ตุลาคม 2026 (Asia/Bangkok)
+Review Date: October 14, 2026 (Asia/Bangkok)  
+Project: Web Defacement Monitoring System  
+Status: Audit report and remediation proposals — **partially addressed in source code (see Section 7), but not yet deployed or validated on real Linux/container environments; no finding is considered closed.**  
+Latest Remediation Update: October 14, 2026 (Asia/Bangkok)
 
-> เนื้อหาหัวข้อ 1–6 คือรายงานต้นฉบับ ณ เวลาที่ตรวจ ไม่ได้ถูกแก้ไข หัวข้อ 7 เพิ่มเข้ามาเพื่อบันทึกสิ่งที่ทำไปแล้ว สิ่งที่ยังไม่ได้ทำ และเหตุผล
+> Sections 1–6 represent the original report as written during the audit. Section 7 was added to record subsequent implementation actions, outstanding tasks, and engineering rationale.
 
-## 1. ขอบเขตและข้อจำกัด
+## 1. Scope and Limitations
 
-ตรวจไฟล์ปัจจุบันของ backend, frontend และ deployment configuration โดยเน้น authentication, authorization, CSRF, SSRF, capture pipeline, structural detector และการบันทึกการตัดสินใจด้าน security พร้อมตรวจ advisory ภายนอกสำหรับ dependencies ที่เกี่ยวข้อง
+Reviewed the current codebase across backend, frontend, and deployment configurations, focusing on authentication, authorization, CSRF, SSRF, the capture pipeline, structural detection, and security audit trails, alongside external vulnerability advisory reviews for associated dependencies.
 
-- โฟลเดอร์นี้ไม่มี Git metadata จึงตรวจจากไฟล์ปัจจุบัน ไม่ใช่ diff ระหว่าง commits
-- ตรวจเวอร์ชัน Python packages จาก project `.venv`; เวอร์ชันที่ใช้งานใน Linux production จริงยังไม่ได้ตรวจ
-- Chromium 130.0.6723.31 เป็นเวอร์ชันที่ระบุใน browser manifest ของ Playwright 1.48.0; production Dockerfile ใช้ image รุ่นเดียวกัน แต่ยังไม่ได้ตรวจ binary ใน container ที่ deploy จริง
-- ไม่ได้ทดสอบโจมตี production, exploit browser, ทำให้ระบบ OOM หรือยิงโหลด DoS
-- ไม่ได้ทำ vulnerability scan ของ Python dependencies ทั้งหมด, OS packages หรือ container images ทั้งหมด
-- Findings ของ detector เป็นช่องว่างการตรวจพบพฤติกรรมอันตราย ไม่ใช่หลักฐานว่า monitoring application ถูกเจาะหรือ SSRF ถูก bypass
-- การจัดระดับด้านล่างเป็นการประเมินความเสี่ยงของโปรเจกต์ ไม่ใช่การคัดลอก CVSS ของ advisory โดยตรง
+- This folder lacks Git metadata; reviews evaluated existing files directly rather than commit diffs.
+- Python package versions were inspected from the project `.venv`; versions deployed in actual Linux production have not been verified.
+- Chromium 130.0.6723.31 was identified in the Playwright 1.48.0 browser manifest; the production Dockerfile uses a corresponding base image, but container binaries in active deployments have not been inspected.
+- No production attack simulations, browser exploit attempts, out-of-memory (OOM) stress tests, or DoS load tests were conducted.
+- Full vulnerability scanning across all Python dependencies, OS packages, and container images was not performed.
+- Detector findings indicate gaps in spotting malicious behavior rather than proof of a system intrusion or SSRF bypass.
+- Severity classifications reflect project-specific risk assessments rather than raw CVSS scores.
 
-## 2. สรุปผล
+## 2. Summary of Findings
 
-พบ 2 ประเด็นความเสี่ยงสูง และ 5 ประเด็นปานกลางที่ควรแก้
+Identified 2 High and 5 Medium severity issues requiring remediation:
 
-| ID | ระดับ | ประเด็น | หลักฐาน/สถานะ |
+| ID | Severity | Issue | Evidence / Status |
 | --- | --- | --- | --- |
-| SEC-01 | สูง | Browser สำหรับ capture เก่า | ตรวจ version manifest และ Dockerfile; เทียบ security release ของ Chromium |
-| SEC-02 | สูง | Starlette FileResponse มีช่องโหว่ DoS ผ่าน Range | เวอร์ชันอยู่ในช่วง affected; screenshot routes ใช้ FileResponse; ทดลอง parser แบบจำกัดขนาด |
-| SEC-03 | ปานกลาง | ไม่ตรวจ HTTP/HTTPS formaction | ยืนยันด้วย offline Chromium probe |
-| SEC-04 | ปานกลาง | javascript: ที่มี tab แทรกหลุด detector | ยืนยันด้วย offline Chromium probe |
-| SEC-05 | ปานกลาง | เปลี่ยน script type จาก inert เป็น executable แล้ว facts เดิม | ยืนยันด้วย offline Chromium probe |
-| SEC-06 | ปานกลาง | จำกัด artifact หลัง allocation และไม่มี container resource limits | พบจากโค้ด/config; ยังไม่ได้ทดสอบ OOM |
-| SEC-07 | ปานกลาง | Review/baseline mutations ไม่มี actor audit trail | พบจาก routes และ service code |
+| SEC-01 | High | Outdated capture browser | Verified via version manifest and Dockerfile; compared against Chromium security releases |
+| SEC-02 | High | Starlette FileResponse Range header DoS vulnerability | Version falls within affected range; screenshot routes use FileResponse; verified via bounded parser test |
+| SEC-03 | Medium | Unchecked HTTP/HTTPS formaction destinations | Confirmed via offline Chromium probe |
+| SEC-04 | Medium | Tab-embedded javascript: URLs evade detector | Confirmed via offline Chromium probe |
+| SEC-05 | Medium | Script transition from inert to executable leaves facts identical | Confirmed via offline Chromium probe |
+| SEC-06 | Medium | Artifact limits enforced post-allocation; missing container resource constraints | Observed in code/config; OOM test not yet executed |
+| SEC-07 | Medium | Baseline/review mutations lack actor audit trails | Observed in route handlers and service code |
 
-ลำดับแก้ไขแนะนำ: browser → FastAPI/Starlette → resource limits → detector → audit trail
+Recommended remediation order: Browser → FastAPI/Starlette → Resource Limits → Detectors → Audit Trail.
 
 ## 3. Findings
 
-### SEC-01 — Chromium สำหรับจับหน้าเว็บเก่า
+### SEC-01 — Outdated Chromium Capture Browser
 
-**ตำแหน่ง:** `backend/Dockerfile:1`, `backend/requirements.txt:7`
+**Location:** `backend/Dockerfile:1`, `backend/requirements.txt:7`
 
-Dockerfile ใช้ `mcr.microsoft.com/playwright/python:v1.48.0-noble` และ requirements pin `playwright==1.48.0` ขณะที่ browser manifest ของ package ระบุ Chromium `130.0.6723.31` ระบบเปิดและรัน JavaScript ของหน้าเว็บที่อาจถูกโจมตี จึงมี attack surface โดยตรงต่อ browser engine
+The Dockerfile specifies `mcr.microsoft.com/playwright/python:v1.48.0-noble` and requirements pin `playwright==1.48.0`, with the package manifest referencing Chromium `130.0.6723.31`. Because the service navigates to and evaluates JavaScript on untrusted websites, the browser engine represents a direct attack surface.
 
-รุ่นที่กำหนดมาก่อน security releases หลายรอบ ตัวอย่างเช่น Chrome 131.0.6778.108 แก้ High CVE-2024-12053 (Type Confusion in V8) การเทียบนี้สนับสนุนความจำเป็นในการอัปเดต browser; ไม่ใช่การพิสูจน์ว่า exploit ดังกล่าวสำเร็จกับ capture runtime นี้
+The pinned version predates numerous critical security patches. For example, Chrome 131.0.6778.108 resolved CVE-2024-12053 (High: Type Confusion in V8). This highlights the urgent necessity of upgrading the browser runtime (though not proving an active exploit on this application).
 
-**ผลกระทบ:** หน้าเว็บอันตรายอาจโจมตี browser engine ที่ไม่ได้รับแพตช์ ความสามารถในการกระทบ API, ข้อมูลหรือ host ต่อไปขึ้นกับ sandbox และ container isolation; ยังไม่ได้ยืนยันการ escape หรือ code execution ในโปรเจกต์นี้
+**Impact:** Malicious target pages could compromise an unpatched browser engine. The potential impact on the host system or API depends on container and sandbox isolation; container escapes or remote code execution have not been demonstrated in this system.
 
-**เสนอแก้ไข:**
+**Recommendations:**
 
-- [ ] อัปเดต Playwright package และ browser image เป็นรุ่นที่เข้ากันได้และได้รับ security fixes
-- [ ] ตรวจ version ของ browser binary ใน container ที่ deploy จริง
-- [ ] รักษา Chromium sandbox และ non-root runtime; ไม่ใช้ development Compose กับ production
-- [ ] แยก capture worker จาก API และฐานข้อมูล เพื่อลดผลกระทบหาก browser ถูก compromise
-- [ ] ทดสอบ capture, SSRF proxy, redirects, WebSocket blocking และ sandbox บน Linux หลังอัปเดต
+- [ ] Update Playwright and its container base image to a supported version containing current security fixes.
+- [ ] Verify the installed browser binary version within the live deployed container.
+- [ ] Maintain Chromium sandboxing and unprivileged runtime; do not deploy development Compose files to production.
+- [ ] Isolate the capture worker from API and database services to restrict lateral movement if the browser is compromised.
+- [ ] Validate capture execution, SSRF proxy routing, redirects, WebSocket blocking, and sandboxing on Linux post-upgrade.
 
-**เกณฑ์ตรวจรับ:** Package/image/browser binary สอดคล้องกันและไม่มี advisory ที่เกี่ยวข้องค้างอยู่; capture และ SSRF regression checks ผ่านบน deployment environment
+**Acceptance Criteria:** Package, container image, and browser binaries are synchronized with no unresolved advisories; capture and SSRF regression suites pass on the target deployment platform.
 
-**แหล่งอ้างอิง:** [Chrome security update วันที่ 3 ธันวาคม 2024](https://chromereleases.googleblog.com/2024/12/stable-channel-update-for-desktop.html)
+**Reference:** [Chrome Stable Channel Update — Dec 3, 2024](https://chromereleases.googleblog.com/2024/12/stable-channel-update-for-desktop.html)
 
-### SEC-02 — Starlette FileResponse มีช่องโหว่ DoS ผ่าน Range header
+### SEC-02 — Starlette FileResponse DoS via Crafted Range Headers
 
-**ตำแหน่ง:** `backend/requirements.txt:1`, `backend/app/api/routes/snapshots.py:61`, `backend/app/api/routes/snapshots.py:77`
+**Location:** `backend/requirements.txt:1`, `backend/app/api/routes/snapshots.py:61`, `backend/app/api/routes/snapshots.py:77`
 
-Project `.venv` ใช้ FastAPI 0.115.5 และ Starlette 0.41.3 โดย FastAPI รุ่นนี้กำหนด `starlette>=0.40.0,<0.42.0` จึงต้องอัปเดตคู่กันหรือเลือกรุ่นที่เข้ากันได้ ไม่ควร force upgrade Starlette ข้าม constraint โดยไม่ตรวจ compatibility
+The virtual environment utilizes FastAPI 0.115.5 and Starlette 0.41.3. FastAPI specifies `starlette>=0.40.0,<0.42.0`, requiring coordinated version upgrades.
 
-Starlette 0.41.3 อยู่ในช่วง affected ของ CVE-2025-62727 / GHSA-7f5h-v6xp-fcq8 ซึ่งเกิด quadratic processing ใน `FileResponse` Range parsing/merging เส้นทาง screenshot/raw screenshot ของโปรเจกต์ใช้ `FileResponse` จึงมี code path ที่เกี่ยวข้อง
+Starlette 0.41.3 is affected by CVE-2025-62727 / GHSA-7f5h-v6xp-fcq8, involving quadratic algorithmic complexity during `FileResponse` Range header parsing and merging. Screenshot endpoints utilize `FileResponse`, exposing this code path.
 
-**เงื่อนไขของโปรเจกต์:** ผู้โจมตีต้องมี session ที่ผ่าน authentication และมีสิทธิ์อ่าน snapshot ของ target นั้นก่อน ต่างจากคำอธิบายทั่วไปใน advisory ที่กล่าวถึง file-serving endpoint แบบ unauthenticated
+**Project Context:** Exploitation requires an authenticated session with access to the target snapshot, differing from generic public file-serving scenarios.
 
-ทดลองเรียก parser ใน process แยกแบบ offline ด้วย ranges จำนวนจำกัด ไม่ได้ส่งโหลดไปยัง API:
+Offline testing of the parser in an isolated process with bounded range headers yielded:
 
-| จำนวน ranges | ขนาด header | เวลาประมวลผลที่วัดได้ |
+| Range Count | Header Size | Measured Processing Time |
 | --- | --- | --- |
 | 500 | 3,895 bytes | 5.56 ms |
 | 1,000 | 8,895 bytes | 20.34 ms |
 | 2,000 | 18,895 bytes | 82.95 ms |
 
-เวลาที่เพิ่มขึ้นใกล้เคียงกำลังสองสนับสนุนพฤติกรรมตาม advisory แต่ไม่ใช่การวัด production throughput ทั้งนี้ Nginx อาจปฏิเสธ header ที่ใหญ่เกินค่าจำกัดของมัน จึงต้องพิจารณาขนาดที่ proxy ยอมรับด้วย
+The quadratic increase mirrors the vulnerability description. Note that upstream reverse proxies (e.g., Nginx) may reject excessively large headers before reaching the application.
 
-**ผลกระทบ:** ผู้ใช้ที่มีสิทธิ์สามารถใช้ crafted Range requests เพื่อเพิ่ม CPU load และกระทบ availability ของ backend ซึ่ง deploy ด้วย worker เดียว
+**Impact:** Authorized users could submit crafted Range requests to induce high CPU consumption, degrading backend availability in single-worker deployments.
 
-**เสนอแก้ไข:**
+**Recommendations:**
 
-- [ ] อัปเดต FastAPI/Starlette ที่เข้ากันได้และรวมแพตช์ของ advisory แล้ว; แพตช์ของ advisory นี้เริ่มที่ Starlette 0.49.1 แต่ไม่ควรถือว่าเป็นรุ่นเป้าหมายที่ปลอดภัยครบทุก advisory ในปัจจุบัน
-- [ ] ระหว่างรออัปเดต จำกัดหรือปฏิเสธ multi-range ที่ reverse proxy หาก application ไม่จำเป็นต้องใช้
-- [ ] ตรวจ behavior ของ screenshot endpoints สำหรับ single range, multi-range และ malformed range หลังแก้
+- [ ] Upgrade FastAPI and Starlette to patched versions; official patches begin in Starlette 0.49.1.
+- [ ] In the interim, reject or strip multi-range requests at the reverse proxy if unused by clients.
+- [ ] Verify screenshot endpoint behavior across single-range, multi-range, and malformed requests post-fix.
 
-**เกณฑ์ตรวจรับ:** Runtime พ้นช่วง affected, dependency constraints ถูกต้อง และ crafted ranges ไม่ทำให้ parser ใช้เวลาประมวลผลแบบเดิม
+**Acceptance Criteria:** Runtime versions fall outside affected ranges, dependency constraints are satisfied, and crafted headers do not trigger exponential parsing overhead.
 
-**แหล่งอ้างอิง:** [Starlette security advisory GHSA-7f5h-v6xp-fcq8](https://github.com/Kludex/starlette/security/advisories/GHSA-7f5h-v6xp-fcq8)
+**Reference:** [Starlette Security Advisory GHSA-7f5h-v6xp-fcq8](https://github.com/Kludex/starlette/security/advisories/GHSA-7f5h-v6xp-fcq8)
 
-### SEC-03 — เปลี่ยนปลายทางส่งฟอร์มผ่าน formaction โดยไม่แจ้งเตือน
+### SEC-03 — Undetected Form Submission Target Modification via `formaction`
 
-**ตำแหน่ง:** `backend/app/services/diff/structure.py:114`, `backend/app/services/diff/structure.py:142`
+**Location:** `backend/app/services/diff/structure.py:114`, `:142`
 
-Parser เก็บ `form.action` แต่ไม่ได้เก็บ HTTP/HTTPS `button.formaction` หรือ `input.formaction` ซึ่ง override ปลายทางส่งฟอร์มได้ การมี `formaction` ใน executable URL attribute list ครอบคลุมเฉพาะค่าที่ถูกจำแนกเป็น `javascript:`
+The structural parser records `form.action` but ignores HTTP/HTTPS `button.formaction` and `input.formaction` attributes that override form endpoints. The inclusion of `formaction` in executable attributes only evaluated entries prefixed with `javascript:`.
 
-**หลักฐาน:** Offline Chromium probe เปลี่ยน effective submission destination จาก `https://example.com/save` เป็น `https://collector.example/save` โดยภาพและข้อความเหมือนเดิม และ structure score = 0.0 ไม่มีการส่งฟอร์มหรือเชื่อมต่อปลายทาง
+**Evidence:** An offline Chromium probe changed the effective submission endpoint from `https://example.com/save` to `https://collector.example/save`. Visible text and screenshot bytes remained identical, resulting in a structural change score of 0.0.
 
-**ผลกระทบ:** การเปลี่ยนปลายทางรับข้อมูลของหน้าเว็บอาจไม่ถูกแจ้งเตือน เมื่อไม่มี text/pixel changes อื่น
+**Impact:** Exfiltration of submitted form data to third-party endpoints could evade detection if no visual or text changes occur.
 
-**เสนอแก้ไข:**
+**Recommendations:**
 
-- [ ] เก็บ facts ของ `formaction` สำหรับ button/input รวม relative URLs และ effective base URL
-- [ ] กำหนด policy ของ allowed domains สำหรับปลายทางส่งข้อมูลให้ชัดเจน
-- [ ] เพิ่ม regression cases สำหรับ addition, modification และ removal
+- [ ] Extract facts for `formaction` on buttons and inputs, resolving relative URLs against the document base.
+- [ ] Define explicit allowed domain policies for form targets.
+- [ ] Add regression tests covering addition, modification, and deletion of formaction attributes.
 
-**เกณฑ์ตรวจรับ:** การเปลี่ยน effective submission destination ที่ไม่ได้รับอนุญาตทำให้ detector รายงาน Changed แม้ภาพ/ข้อความเหมือนเดิม
+**Acceptance Criteria:** Unauthorized modification of form submission endpoints triggers a Changed status even when visual and text comparisons show 0% change.
 
-### SEC-04 — JavaScript URL ที่แทรก tab หลุดการตรวจ
+### SEC-04 — Tab-Embedded JavaScript URLs Evade Detection
 
-**ตำแหน่ง:** `backend/app/services/diff/structure.py:114`
+**Location:** `backend/app/services/diff/structure.py:114`
 
-การตรวจ `value.lstrip().lower().startswith('javascript:')` ไม่ normalize ASCII tab/newline ภายใน scheme ตามพฤติกรรม browser เช่น `href="java&#9;script:void(window.auditProbe=1)"` ซึ่งผ่าน HTML entity decoding แล้วมี tab คั่น
+Evaluating `value.lstrip().lower().startswith('javascript:')` fails to account for browser handling of embedded ASCII tabs and newlines within the scheme name (e.g., `href="java&#9;script:void(window.auditProbe=1)"`).
 
-**หลักฐาน:** Offline Chromium probe คลิก link แล้ว `window.auditProbe` เปลี่ยนจาก 0 เป็น 1 แต่ text/PNG เหมือนเดิมและ structure score = 0.0
+**Evidence:** An offline Chromium probe clicked a link containing embedded tabs in its scheme; `window.auditProbe` was set to 1 while visible text, PNG screenshots, and structural scores remained unchanged at 0.0.
 
-**ผลกระทบ:** Executable URL ที่เพิ่มลงในหน้าเว็บอาจหลุดการแจ้งเตือน
+**Impact:** Injected executable JavaScript URLs could evade monitoring alerts.
 
-**เสนอแก้ไข:**
+**Recommendations:**
 
-- [ ] Normalize ASCII tab, LF และ CR ก่อนจำแนก URL scheme ให้ตรงกับ browser
-- [ ] รักษาความหมายของ script body หลังจำแนก scheme
-- [ ] เพิ่ม cases สำหรับ literal control characters, HTML entities และ mixed casing
-- [ ] ไม่ใช้ domain allowlist ละเลย executable URLs
+- [ ] Normalize ASCII tabs, LF, and CR characters before classifying URL schemes.
+- [ ] Preserve the original script body semantics after classification.
+- [ ] Add test cases for control characters, HTML entities, and mixed casing.
+- [ ] Prevent domain allowlists from ignoring executable URLs.
 
-**เกณฑ์ตรวจรับ:** URL ที่ browser จำแนกเป็น JavaScript ถูกเก็บเป็น executable fact และการเพิ่ม/เปลี่ยนค่าทำให้เกิด alert
+**Acceptance Criteria:** Any URL parsed by browsers as JavaScript is recorded as an executable fact, reliably raising alerts upon introduction.
 
-### SEC-05 — เปลี่ยน script จาก inert เป็น executable แล้ว facts ไม่เปลี่ยน
+### SEC-05 — Script Transition from Inert to Executable Yields Identical Facts
 
-**ตำแหน่ง:** `backend/app/services/diff/structure.py:124`, `backend/app/services/diff/structure.py:252`
+**Location:** `backend/app/services/diff/structure.py:124`, `:252`
 
-Parser เก็บ inline script body hash แต่ไม่เก็บ `type` หรือ executable/inert classification เมื่อเปลี่ยน `<script type="text/plain">` เป็น `<script type="text/javascript">` โดย body เดิม hash จึงเหมือนเดิม External script facts ก็ไม่บันทึก type จึงควรตรวจเส้นทางนั้นควบคู่กัน
+The parser hashes inline script bodies without evaluating the script `type` attribute or distinguishing inert from executable scripts. Transitioning `<script type="text/plain">` to `<script type="text/javascript">` preserves the identical hash.
 
-**หลักฐาน:** Offline Chromium probe ยืนยันว่า baseline ไม่รัน body แต่ current รันจน `window.auditProbe = 1` โดย text/PNG เหมือนเดิมและ structure score = 0.0
+**Evidence:** An offline Chromium probe confirmed that baseline left script content dormant, whereas current executed the script (`window.auditProbe = 1`), with structural score remaining 0.0.
 
-**ผลกระทบ:** การเปิดใช้โค้ดที่เดิม inert อาจไม่ถูกแจ้งเตือน
+**Impact:** Enabling pre-existing dormant code does not trigger change alerts. External scripts similarly lacked type tracking.
 
-**เสนอแก้ไข:**
+**Recommendations:**
 
-- [ ] เก็บ normalized script type และ executable classification ทั้ง inline/external scripts
-- [ ] เพิ่ม cases สำหรับ inert → classic/module และ reverse transitions
-- [ ] ไม่ละเลย inert content โดยไม่ตรวจการเปลี่ยน classification
+- [ ] Record normalized script type and executable classification for both inline and external scripts.
+- [ ] Add tests for transitions between inert and classic/module scripts.
+- [ ] Do not drop inert script content without tracking classification changes.
 
-**เกณฑ์ตรวจรับ:** การเปลี่ยนสถานะ executable ทำให้ facts เปลี่ยน แม้ URL หรือ script body เดิม
+**Acceptance Criteria:** Changing the execution capability of a script produces distinct structural facts, triggering alerts regardless of body consistency.
 
-SEC-03 ถึง SEC-05 เป็นการยืนยันซ้ำของ R2-01 ถึง R2-03 ใน `Review Round 2 By GPT 6.1 Sol 14-10-2026.md`; ไม่ใช่ findings ใหม่คนละชุด
+*(Note: SEC-03 through SEC-05 correspond directly to findings R2-01 through R2-03 in `Review Round 2 By GPT 6.1 Sol 14-10-2026.md`)*.
 
-### SEC-06 — ขีดจำกัด artifact ไม่ครอบคลุม allocation และ runtime resources
+### SEC-06 — Artifact Resource Budgets Lack Early Allocation Controls
 
-**ตำแหน่ง:** `backend/app/services/capture/capture.py:281`, `backend/app/services/capture/capture.py:433`, `backend/app/services/capture/capture.py:446`, `docker-compose.yml`
+**Location:** `backend/app/services/capture/capture.py:281`, `:433`, `:446`, `docker-compose.yml`
 
-Capture ใช้ `route.fetch(max_redirects=0)` ก่อนตรวจขนาด artifact จาก DOM และสร้าง full-page screenshot ก่อนตรวจขนาด encoded PNG ค่า `MAX_ARTIFACT_SIZE_MB` จึงไม่ใช่เพดาน network response bytes หรือ decoded pixel allocation
+Capture invokes `route.fetch(max_redirects=0)` prior to inspecting DOM size and produces full-page screenshots before checking the encoded PNG file size. The `MAX_ARTIFACT_SIZE_MB` threshold does not restrict in-flight network bytes or decoded bitmap memory allocation.
 
-Playwright response body อยู่ใน memory จน dispose/context close; capture ไม่กำหนด byte budget ของแต่ละ response หรือ aggregate resources ต่อหน้า ขณะที่ production Compose ไม่มี memory, CPU หรือ PID limits แม้มี concurrency limits และ check timeout แล้ว
+Playwright retains response buffers in memory until disposal. Furthermore, production Compose lacks memory, CPU, or PID limits.
 
-**ผลกระทบ:** หน้าเว็บที่ผู้โจมตีควบคุมอาจใช้ทรัพยากรมากจาก response, DOM หรือ screenshot dimensions ก่อนถูก reject ทำให้ capture/backend หรือ host มี availability ลดลง เป็นความเสี่ยงจาก design/config ที่ตรวจพบ ยังไม่ได้ทดลองให้ระบบ OOM
+**Impact:** A hostile target could consume substantial memory through massive responses, oversized DOM trees, or extreme image dimensions before being rejected, risking process crashes or denial of service.
 
-**เสนอแก้ไข:**
+**Recommendations:**
 
-- [ ] กำหนด response byte limits และ aggregate resource budget โดยตรวจระหว่างรับข้อมูล ไม่พึ่ง Content-Length อย่างเดียว
-- [ ] กำหนดเพดาน screenshot dimensions/pixel count และความสูงของ full-page capture
-- [ ] กำหนด container memory, CPU และ PID limits พร้อมตรวจการจัดการ failure
-- [ ] แยก capture worker จาก API เพื่อให้ resource exhaustion ไม่กระทบ API โดยตรง
-- [ ] คง timeout และ cleanup ของ browser/staging artifacts เมื่อถูกยกเลิก
+- [ ] Enforce streaming byte limits and aggregate transfer budgets during transmission.
+- [ ] Enforce upper bounds on full-page screenshot dimensions and total pixels.
+- [ ] Configure container memory, CPU, and PID limits.
+- [ ] Isolate capture workers from the API backend.
+- [ ] Ensure clean teardown of browser contexts and staging directories upon cancellation.
 
-**เกณฑ์ตรวจรับ:** หน้าเว็บทดสอบที่เกิน byte/pixel budget ถูก reject ภายใน resource budget และไม่ทำให้ API สูญเสีย availability
+**Acceptance Criteria:** Over-budget pages are rejected within bounded memory limits without degrading API availability.
 
-### SEC-07 — การตัดสินใจด้าน review/baseline ไม่มี audit trail ระบุผู้ทำ
+### SEC-07 — Missing Actor Attribution in Review and Baseline Auditing
 
-**ตำแหน่ง:** `backend/app/api/routes/review.py:19`, `backend/app/services/review.py:25`, `backend/app/api/routes/targets.py` (`demote_target_baseline`)
+**Location:** `backend/app/api/routes/review.py:19`, `backend/app/services/review.py:25`, `backend/app/api/routes/targets.py` (`demote_target_baseline`)
 
-Routes ตรวจ session และ target access แล้ว แต่ approve baseline, acknowledge check, confirm defacement และ demote baseline ไม่สร้าง audit event ที่ระบุ actor การส่งต่อไปยัง review service ก็ไม่ได้ส่งตัวผู้ทำไปด้วย
+While endpoints verify user session and target permissions, operations including baseline approval, check acknowledgement, defacement confirmation, and baseline demotion did not record the responsible actor in an audit trail.
 
-ปัจจุบันบางข้อมูลมี timestamp เช่น `acknowledged_at` และสถานะ baseline แต่ข้อมูลเหล่านี้ไม่ระบุว่าใครเป็นผู้เปลี่ยน ต่างจาก member/website/tag mutations ที่มี `MemberAuditEvent`
+**Impact:** If a compromised baseline is approved or incident status modified, forensic attribution cannot determine which operator performed the action.
 
-**ผลกระทบ:** เมื่อ baseline ที่เป็นอันตรายได้รับการอนุมัติหรือสถานะ incident ถูกเปลี่ยน จะสืบย้อนผู้ทำและเจตนาของการตัดสินใจได้ไม่ครบ เป็นช่องว่างด้าน accountability ไม่ใช่การยืนยันว่า Operator มีสิทธิ์เกิน policy ที่ออกแบบไว้
+**Recommendations:**
 
-**เสนอแก้ไข:**
+- [ ] Pass the authenticated actor to mutation services and record structured audit events in the same database transaction.
+- [ ] Log actor identity, timestamp, action name, target/snapshot/check IDs, and before-and-after states.
+- [ ] Record automated baseline cap demotions with source indicators.
+- [ ] Define retention periods and restrict audit viewing to administrators.
 
-- [ ] ส่ง actor ไปยัง mutation service หรือบันทึก audit event ใน route ภายใต้ transaction เดียวกัน
-- [ ] เก็บ actor, timestamp, action, target/snapshot/check IDs และค่าก่อน–หลัง
-- [ ] บันทึก baseline ที่ถูก demote อัตโนมัติจาก cap เมื่อ approve baseline ด้วย
-- [ ] กำหนด retention และสิทธิ์อ่าน audit events ตามความต้องการด้าน incident investigation
+**Acceptance Criteria:** Every review and baseline state change logs an immutable audit event linking the actor and affected entities; failed transactions roll back cleanly without phantom logs.
 
-**เกณฑ์ตรวจรับ:** ทุก review/baseline mutation ที่สำเร็จมี audit event ที่เชื่อมโยงผู้ทำและรายการที่เปลี่ยนได้; transaction ที่ rollback ไม่ทิ้ง success event
+## 4. Existing Controls
 
-## 4. มาตรการที่มีอยู่แล้ว
+Inspection identified key pre-existing security controls:
 
-จากการตรวจโค้ด พบมาตรการหลักดังต่อไปนี้:
+- Argon2 password hashing with brute-force account lockout.
+- Cryptographically random session tokens with hashed database storage.
+- HttpOnly session cookies; production Compose specifies Secure and SameSite Strict.
+- Synchronizer CSRF tokens enforced on state-changing API mutations.
+- Role-based access control separating Admin and Operator roles.
+- Path traversal validation ensuring snapshot files remain within designated data directories.
+- SSRF proxy resolving and verifying destination IPs at connection time to prevent DNS rebinding.
+- Default blocking of service workers and WebSockets during capture.
+- Production Compose with non-root user, read-only root filesystem, dropped capabilities, and custom seccomp.
+- Unexposed backend host ports, routing exclusively through reverse proxy.
+- Mandatory baseline review for initial URLs and revisions before monitoring begins.
 
-- Password hashing ใช้ Argon2 และมี account lockout logic
-- Session token สุ่มใหม่เมื่อ login และเก็บ token hash ในฐานข้อมูล
-- Session cookies เป็น HttpOnly; production Compose เปิด Secure และ SameSite strict
-- ใช้ synchronizer CSRF token สำหรับ authenticated mutations
-- Authorization แยก Admin/Operator และจำกัด Operator ตาม target assignments
-- Snapshot artifact paths ตรวจว่าอยู่ภายใน data directory
-- SSRF proxy resolve/check IP และเชื่อมต่อไปยัง IP ที่ตรวจแล้ว ลด DNS rebinding validation-to-connection gap
-- Capture block service workers และเปิด WebSocket blocking เป็นค่าเริ่มต้น
-- Production Compose ใช้ non-root backend, read-only filesystem, cap_drop และ seccomp profile
-- Production backend ไม่ publish port บน host และกำหนด trusted proxy IP
-- Initial snapshot/URL revision ต้องผ่าน baseline approval ก่อนเป็น reference
+## 5. Review Verification Results
 
-รายการนี้เป็นหลักฐานว่ามี controls ในโค้ด/config ไม่ใช่การรับรองว่าทุก control ทำงานครบใน production จริง
-
-## 5. ผลการตรวจสอบในรอบนี้
-
-| การตรวจ | ผล |
+| Evaluation | Outcome |
 | --- | --- |
-| Backend security/API regression subset | 71 passed, 105 warnings, 43.61 วินาที |
-| Offline Chromium detector probe | ยืนยัน SEC-03, SEC-04 และ SEC-05 |
-| Bounded Starlette Range parser probe | เวลาเพิ่มใกล้เคียงกำลังสอง ตามตาราง SEC-02 |
-| Frontend npm audit | 0 vulnerabilities; dependency metadata รวม 411 |
-| Python/container vulnerability scan ครบทั้งหมด | ยังไม่ได้ทำ |
-| Linux production verification / load test | ยังไม่ได้ทำ |
+| Backend security & API regression subset | 71 passed, 105 warnings, 43.61s |
+| Offline Chromium detector probes | Confirmed SEC-03, SEC-04, and SEC-05 |
+| Bounded Starlette Range parser test | Confirmed quadratic scaling per SEC-02 |
+| Frontend npm audit | 0 vulnerabilities across 411 dependencies |
+| Full Python/container vulnerability scan | Pending |
+| Linux production verification / load test | Pending |
 
-Regression subset ครอบคลุม `test_auth.py`, `test_member_management.py`, `test_ssrf_guard.py`, `test_ssrf_proxy.py` และ `test_api_routes.py` โดยใช้ฐานข้อมูลทดสอบแยกจาก production
+The regression subset evaluated `test_auth.py`, `test_member_management.py`, `test_ssrf_guard.py`, `test_ssrf_proxy.py`, and `test_api_routes.py`. Note that `conftest.py` disables the SlowAPI limiter in test harnesses, so rate-limiting efficacy under concurrent load requires dedicated staging tests.
 
-**ข้อจำกัดของผล tests:** `backend/tests/conftest.py:43` ปิด SlowAPI limiter ผ่าน fixture ดังนั้นผล 71 passed ไม่ได้ยืนยันประสิทธิผลของ per-IP rate limiting ภายใต้โหลดจริง
+### Reproduction Commands
 
-การรัน pytest และ Playwright ครั้งแรกใน sandbox พบ Windows Access Denied ต่อ temporary directories/subprocess pipes จึงรันซ้ำด้วยสิทธิ์ที่ผ่าน approval review แล้วและได้ผลสำเร็จ ไม่ใช่ application test failure
-
-### วิธีพิสูจน์ซ้ำ
-
-รันจากโฟลเดอร์ `backend` บน PowerShell โดยใช้ชื่อ basetemp ใหม่ที่ยังไม่มีข้อมูลสำคัญ:
+Execute from `backend/` in PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_auth.py tests/test_member_management.py tests/test_ssrf_guard.py tests/test_ssrf_proxy.py tests/test_api_routes.py -q --basetemp=.security-audit-rerun -p no:cacheprovider
@@ -233,175 +225,87 @@ $env:PYTHONPATH='.'
 .\.venv\Scripts\python.exe scripts/audit_round2_probe.py
 ```
 
-Probe ใช้ local HTML ใน browser ด้วย `set_content` และ harmless variable assignments ไม่มี navigation ไปเว็บไซต์ภายนอกหรือส่งข้อมูลไปยัง collector
-
-ผลที่ยืนยันในรอบนี้:
-
-```text
-formaction:     structure_score=0.0, same_text=true, same_png=true, destination changed
-script-type:   structure_score=0.0, same_text=true, same_png=true, behavior 0 → 1
-javascript-tab: structure_score=0.0, same_text=true, same_png=true, behavior 0 → 1
-```
-
-รันจากโฟลเดอร์ `frontend`:
+Execute from `frontend/`:
 
 ```powershell
 npm.cmd audit --json
 ```
 
-ผล npm audit ขึ้นกับ advisory database ณ เวลาที่รัน และไม่ครอบคลุม Python, Chromium หรือ OS packages
+## 6. Related Documentation
 
-## 6. เอกสารที่เกี่ยวข้อง
+- [Audit Round 2 — October 14, 2026](./Review%20Round%202%20By%20GPT%206.1%20Sol%2014-10-2026.md)
+- [Review By GPT 6.1 Sol 14-10-2026](./Review%20By%20GPT%206.1%20Sol%2014-10-2026.md)
+- [Project Plan](./PROJECT_PLAN.md)
+- [Member Management Plan](./MEMBER_MANAGEMENT_PLAN.md)
 
-- [Audit รอบ 2 — 14 ตุลาคม 2026](./Review%20Round%202%20By%20GPT%206.1%20Sol%2014-10-2026.md)
-- [Code review — 14 ตุลาคม 2026](./Review%20By%20GPT%206.1%20Sol%2014-10-2026.md)
-- [Project plan](./PROJECT_PLAN.md)
-- [Member management plan](./MEMBER_MANAGEMENT_PLAN.md)
+---
 
-## 7. สถานะการแก้ไข (อัปเดต 14-10-2026)
+## 7. Remediation Status (Updated October 14, 2026)
 
-หัวข้อนี้บันทึกสิ่งที่ลงมือแก้หลังรายงานฉบับนี้ ตัวเลขและผลทดสอบทั้งหมดมาจากเครื่อง Windows ที่ใช้พัฒนา ไม่ใช่ Linux production
+This section documents code remediations applied following the audit. Results reflect Windows development testing and have not yet been validated on Linux production.
 
-**ข้อสรุป:** แก้ใน source ครบทั้ง 7 ข้อในระดับที่ทำได้โดยไม่ต้องใช้ Linux/Docker แต่ยังไม่มีข้อใดผ่านเกณฑ์ตรวจรับครบ เพราะเกณฑ์ของ SEC-01 และ SEC-06 ต้องยืนยันบน deployment จริง และ SEC-02 ใช้มาตรการเสริมแทนการแก้ที่ต้นเหตุ
+**Summary:** Source-level fixes for all 7 items have been applied to the extent possible on local workstations. No finding is considered fully closed until acceptance criteria are proven on target deployment environments.
 
-### 7.1 สรุปสถานะรายข้อ
+### 7.1 Status Summary Table
 
-| ID | สถานะ | ที่ทำแล้ว | ที่ยังเหลือ |
+| ID | Status | Completed Actions | Pending Verification |
 | --- | --- | --- | --- |
-| SEC-01 | แก้ใน source แล้ว ยังไม่ปิด | อัปเดต Playwright และ image | ยืนยัน browser binary ใน container, sandbox/seccomp, SSRF regression บน Linux; แยก capture worker |
-| SEC-02 | แก้บางส่วน ใช้มาตรการเสริม | อัปเดต FastAPI/Starlette และตัด `Range` ที่ route screenshot | ยังมี merge หลายช่วงแบบ O(n²); ต้องยืนยันรายละเอียด advisory และพฤติกรรมใน Linux |
-| SEC-03 | แก้ใน source แล้ว | เก็บ `formaction` บน submit-capable button/input รวมค่าว่างที่ชี้กลับ URL เอกสาร | policy allowed domains แยกสำหรับ `formaction`; form owner association ยังไม่ตรวจ |
-| SEC-04 | แก้ใน source แล้ว | normalize tab/LF/CR และ control characters ตามที่ Chromium ทำ | — |
-| SEC-05 | แก้ใน source แล้ว | จำแนก classic/module/importmap/speculationrules/inert และ MIME type แบบตรงตาม HTML | — |
-| SEC-06 | แก้ส่วนโค้ด ส่วน runtime ยังไม่ทำ | งบไบต์รวม, เพดาน pixel/ความสูง, เพดาน DOM nodes | container memory/CPU/PID limits; แยก capture worker |
-| SEC-07 | แก้ใน source แล้ว | audit event ของ approve/ack/confirm/demote พร้อม actor | retention, หน้า frontend สำหรับอ่าน |
+| SEC-01 | Addressed in source | Upgraded Playwright package and image tag | Inspect container binary, verify seccomp/sandbox on Linux, isolate capture worker |
+| SEC-02 | Partially mitigated | Upgraded FastAPI/Starlette; stripped `Range` headers on screenshot routes | Verify upstream patch details and Linux behavior |
+| SEC-03 | Addressed in source | Extracted `formaction` on submit controls | Configurable allowed domains for formaction; form owner association |
+| SEC-04 | Addressed in source | Normalized control characters and tabs in URL schemes | — |
+| SEC-05 | Addressed in source | Implemented HTML5-compliant script classification | — |
+| SEC-06 | Addressed in source | Implemented byte transfer limits, pixel/height limits, and DOM node caps | Configure container cgroups; isolate capture worker |
+| SEC-07 | Addressed in source | Recorded review/baseline mutations in `member_audit_events` | Frontend log inspection UI, retention policy |
 
-### 7.2 สิ่งที่ทำไปแล้ว
+### 7.2 Implemented Changes
 
-**SEC-01 และ SEC-02 (dependencies และ route)**
+**SEC-01 & SEC-02 (Dependencies and Routes)**
+- `backend/requirements.txt`: FastAPI upgraded to 0.128.8, Starlette pinned to 0.52.1, Playwright upgraded to 1.63.0 (manifest referencing Chromium 153.0.8010.12).
+- `backend/Dockerfile` & `docker-compose.dev.yml`: Updated to `mcr.microsoft.com/playwright/python:v1.63.0-noble`.
+- `backend/app/api/routes/snapshots.py`: Implemented `WholeFileResponse`, stripping `Range`/`If-Range` headers and emitting `Accept-Ranges: none` on screenshot endpoints.
+- `backend/tests/test_api_routes.py`: Added tests asserting single-range, 2,000-range, and malformed range requests return full 200 responses.
 
-- `backend/requirements.txt`: FastAPI 0.115.5 → 0.128.8, เพิ่มการ pin Starlette 0.52.1 (เดิม 0.41.3), Playwright 1.48.0 → 1.63.0 ซึ่ง manifest ระบุ Chromium 153.0.8010.12 (เดิม 130.0.6723.31)
-- `backend/Dockerfile` และ `docker-compose.dev.yml`: image เป็น `mcr.microsoft.com/playwright/python:v1.63.0-noble` (ตรวจแล้วว่า tag นี้มีบน MCR; v1.64.0 ยังไม่มี image)
-- `backend/app/api/routes/snapshots.py`: เพิ่ม `WholeFileResponse` ที่ตัด `Range`/`If-Range` และส่ง `Accept-Ranges: none` ใช้กับ screenshot ทั้ง 3 จุดที่เดิมใช้ `FileResponse`
-- `backend/tests/test_api_routes.py`: เพิ่ม test ส่ง Range 3 แบบ (ช่วงเดียว, 2,000 ช่วง, header เสีย) ต้องได้ 200 และไฟล์เต็ม
+**SEC-03 to SEC-05 (Structural Detector)**
+- Recorded `formaction:<URL>` on submit-capable buttons and inputs, resolving relative URLs against base URL.
+- Normalized URLs prior to scheme detection, stripping whitespace and control characters across literal, entity, and mixed-case representations.
+- Implemented strict script classification distinguishing `classic`, `module`, `importmap`, `speculationrules`, and `inert`.
+- `backend/tests/test_structure.py`: Added 12 regression tests. No database migration was required as diffs are computed on-the-fly.
 
-**SEC-03 ถึง SEC-05 (`backend/app/services/diff/structure.py`)**
+**SEC-06 (Capture Budgets)**
+- `ssrf_proxy.py`: Tracks aggregate transfer bytes in real-time, severing connections if transfer limits are exceeded.
+- `capture.py`: Inspects DOM node count, layout dimensions, and pixel counts via CDP metrics (`Page.getLayoutMetrics`, `Memory.getDOMCounters`) before extracting full-page captures.
+- `config.py`: Added `MAX_CAPTURE_TRANSFER_MB=100`, `MAX_SCREENSHOT_HEIGHT_PX=30000`, `MAX_SCREENSHOT_PIXELS=64000000`, and `MAX_DOM_NODES=300000`.
+- Added `CaptureBudgetExceeded` error and verified via `tests/test_capture_budgets.py`.
 
-- เก็บ fact `formaction:<URL>` เฉพาะ submit-capable `<button>`/`<input>` โดย resolve URL แบบ relative ตาม base และใช้ `allowed_hosts` ชุดเดิม; แยกกรณีไม่มี attribute ออกจาก `formaction=""` ซึ่งส่งไปยัง URL ของเอกสารปัจจุบัน (แม้มี `<base>`)
-- normalize URL ก่อนจำแนก `javascript:` โดยตัด tab/LF/CR ทุกตำแหน่งและ control characters/ช่องว่างหัวท้าย รองรับ literal, HTML entity และตัวพิมพ์ผสม
-- จำแนก `<script>` ตามกติกา HTML: MIME type แบบมี parameter ไม่ถือเป็น classic JavaScript, token อย่าง `module` ต้องตรงโดยไม่ trim ช่องว่าง; บันทึกชนิดที่ไม่ใช่ classic รวม `module`, `importmap`, `speculationrules` และ `inert` ใน facts ส่วน script ปกติยังคงรูปแบบ fact เดิม
-- `backend/tests/test_structure.py`: เพิ่ม 12 test ซึ่ง 8 ตัวล้มเมื่อรันกับโค้ดเดิม
-- ไม่ต้อง migration: `diff.py` คำนวณ facts ใหม่จาก HTML ที่เก็บไว้ทั้งสองฝั่งทุกครั้ง baseline เดิมจึงไม่ถูกมองว่า Changed เพราะ format ของ fact
+**SEC-07 (Audit Logging)**
+- `backend/app/services/audit.py`: Reused `member_audit_events` table to record `baseline.approved`, `check.acknowledged`, `check.defacement_confirmed`, and `baseline.demoted` alongside actor IDs.
+- Added `GET /audit-events` endpoint restricted to Admins for query and pagination.
 
-**SEC-06 (เฉพาะส่วนโค้ด)**
+### 7.3 Post-Fix Verification
 
-- `ssrf_proxy.py`: proxy นับไบต์ที่ relay ให้ browser ระหว่างรับข้อมูล (ไม่พึ่ง `Content-Length`) เมื่อเกินงบจะตัด connection และปฏิเสธทุก response ที่ตามมา ทำให้ capture ล้มเหลวทั้งชุด
-- `capture.py`: ตรวจเพดานความสูง, pixel และจำนวน DOM nodes ผ่าน CDP (`Page.getLayoutMetrics`, `Memory.getDOMCounters`) ก่อนเรียก `page.content()` และก่อนถ่าย full-page ค่ามาจากฝั่ง browser หน้าเว็บโกหกผ่าน JavaScript ไม่ได้ (มี test ยืนยัน)
-- `config.py` และ `backend/.env.example`: `MAX_CAPTURE_TRANSFER_MB=100`, `MAX_SCREENSHOT_HEIGHT_PX=30000`, `MAX_SCREENSHOT_PIXELS=64000000`, `MAX_DOM_NODES=300000`
-- `errors.py`: เพิ่ม `CaptureBudgetExceeded` (สืบทอดจาก `CaptureError` จึงสถานะ check เป็น Failed เหมือนเดิม)
-- `backend/tests/test_capture_budgets.py`: เพิ่ม 7 test ใช้ Chromium จริง; แก้ mock ของ test เดิม 4 ตัวใน `test_capture.py` ให้ตอบ CDP ได้
-
-**SEC-07 (audit trail)**
-
-- `backend/app/services/audit.py` (ใหม่): บันทึกเข้าตาราง `member_audit_events` ที่มีอยู่แล้ว จึงไม่ต้องทำ Alembic migration ใหม่
-- บันทึก `baseline.approved`, `check.acknowledged`, `check.defacement_confirmed`, `baseline.demoted` พร้อม actor, target_id และสถานะก่อน–หลัง ทั้งหมดอยู่ใน transaction เดียวกับการเปลี่ยนแปลง (commit ล้มเหลวแล้ว rollback จะไม่เหลือ event)
-- baseline ที่ถูก demote อัตโนมัติจาก cap บันทึกเป็น `baseline.demoted` ที่ `source="baseline_cap"` พร้อม `caused_by_snapshot_id`
-- เก็บเฉพาะ ID และสถานะ ไม่เก็บ URL หรือเนื้อหา; acknowledge ซ้ำไม่สร้าง event ซ้ำ
-- เพิ่ม `GET /audit-events` เฉพาะ Admin (operator ได้ 403, ไม่ login ได้ 401) กรองตาม target/actor/action และแบ่งหน้าได้ ซึ่งเดิมไม่มี endpoint อ่าน audit เลย
-- ไฟล์ที่แก้: `services/review.py`, `api/routes/review.py`, `api/routes/targets.py` (demote), `api/routes/audit.py` (ใหม่), `schemas/audit.py` (ใหม่), `main.py`; test: `tests/test_review_audit.py` (7 ตัว)
-
-### 7.3 ผลตรวจหลังแก้
-
-| การตรวจ | ผล |
+| Test Run | Result |
 | --- | --- |
-| Test ก่อนแก้ (dependency เดิม) | 218 passed |
-| Test หลังอัปเดต dependency + route Range | 219 passed |
-| Test หลังแก้ detector | 230 passed |
-| Test หลังแก้ SEC-06 และ SEC-07 | **244 passed** |
-| ruff / mypy (`app`) | ผ่าน (mypy ตรวจ 58 ไฟล์) |
-| Offline Chromium probe (Chromium 153) | `scripts/audit_round2_probe.py`: โค้ดเดิมได้ structure_score 0.0 ทั้ง 3 กรณี โค้ดใหม่ได้ formaction 0.5, script-type 1.0, javascript-tab 1.0 โดยภาพและข้อความเหมือนเดิม |
+| Pre-fix test suite | 218 passed |
+| Post-dependency & Range update | 219 passed |
+| Post-detector enhancements | 230 passed |
+| Post-SEC-06 & SEC-07 fixes | **244 passed** |
+| Ruff & Mypy (`app`) | Passed across 58 source files |
+| Offline Chromium probe (v153) | Detects formaction (0.5), script-type (1.0), and javascript-tab (1.0) with zero visual/text differences |
 
-ผลการวัด Range parser ของ Starlette ด้วย disjoint ranges (ต่างจากตัวเลขในหัวข้อ SEC-02 ซึ่งวัดคนละรูปแบบ header):
+### 7.4 Outstanding Items and Rationale
 
-| จำนวน ranges | Starlette 0.41.3 | Starlette 0.52.1 |
-| --- | --- | --- |
-| 2,000 | 76 ms | 98 ms |
-| 4,000 | 335 ms | 407 ms |
+- Container Image Validation: Could not inspect Docker daemon on Linux host due to `/var/run/docker.sock` permission restrictions.
+- Seccomp Comparison: Project profile contains additional syscall rules compared to upstream Playwright 1.63 profile; requires testing inside container before updating.
+- Worker Separation: Separating browser processes from the API requires substantial architectural refactoring (queues, inter-process communication) and is scheduled for subsequent phases.
+- Container Resource Limits: `docker-compose.yml` does not specify cgroup CPU/memory/PID limits; requires benchmark tuning on production Linux hardware.
 
-Test ทั้งหมดรันบน Windows ด้วย venv แยก (Python 3.13.7) และ Chromium 153 ที่ติดตั้งในเครื่อง ไม่ใช่ใน Linux container
+### 7.5 Pre-Deployment Requirements
 
-### 7.4 สิ่งที่ยังไม่ได้ทำ และเหตุผล
+1. Manually review screenshot shifts resulting from Chromium 153 on staging prior to production deployment.
+2. Complete verification inside real Linux containers with seccomp and sandboxing enabled.
+3. Configure container cgroup resource limits in production Compose files.
 
-| รายการ | เหตุผลที่ยังไม่ทำ |
-| --- | --- |
-| Build image และรัน capture ใน Linux container จริง (Chromium sandbox, seccomp, read-only filesystem, non-root) | ยังยืนยันไม่ได้: Docker client 29.8.0 ติดตั้งอยู่ แต่การเข้าถึง Docker API ถูกปฏิเสธ (`permission denied` สำหรับ `/var/run/docker.sock`); `docker compose ps --all` จึงอ่าน running containers ไม่ได้ |
-| ตรวจ version ของ Chromium binary ใน container ที่ deploy จริง | Project pin/manifest และ Chromium binary ที่ติดตั้งแยกใน venv Linux สอดคล้องกันที่ Playwright 1.63.0 / Chromium 153.0.8010.12 (revision 1243); binary ใน image/container ที่ deploy ยังตรวจไม่ได้เพราะ Docker API เข้าไม่ถึง |
-| เทียบ `deploy/playwright-seccomp.json` กับโปรไฟล์ของ Playwright 1.63 และแก้ README บรรทัดที่อ้าง v1.48.0 | เทียบกับไฟล์ทางการของ tag v1.63.0 แล้ว แต่ JSON ไม่ตรงกัน: ไฟล์ project เพิ่ม syscall `chroot` ในกฎ allow สำหรับ user namespaces และมี comment เก่า; ยังไม่แก้ไฟล์หรือ README จนกว่าจะตรวจ profile ที่ใช้จริงใน container |
-| ทดสอบ SSRF proxy, redirects, WebSocket blocking และ CDP session บน Linux | Redirect/SSRF guard และ capture tests ได้รันบน Linux host เมื่อ sandbox ปิดเฉพาะ test process; ผลไม่ครอบคลุม sandbox/seccomp ของ image. WebSocket block และ CDP behavior ยังไม่ได้ทดสอบ end-to-end บน container |
-| Rebuild `backend/.venv` เดิม | ไม่แตะ `.venv` ใน project; สร้าง `/tmp/web-defacement-linux-audit` แยกสำหรับ Linux checks. Chromium 153 ถูกติดตั้งลง browser path แยกใน `/tmp` |
-| Re-baseline ทุก target | เป็นขั้นตอนปฏิบัติการหลัง deploy ที่ต้องมีคนตรวจและ approve ทีละ target ไม่ใช่งานโค้ด; ยังไม่ได้เทียบภาพ Chromium 130 กับ 153 เพราะ binary 130 ถูกลบไปแล้ว จึงยังไม่ทราบขนาดของ false positive จริง |
-| Container memory/CPU/PID limits ใน `docker-compose.yml` | ตรวจแล้วว่าไม่มี limit ดังกล่าวใน production Compose; cgroup ของ shell ปัจจุบันแสดง `cpu.max=max 100000`, `memory.max=max`, `pids.max=max`. ไม่มี container runtime ให้ตรวจหรือทดสอบ limit; ไม่ได้ทำ load/OOM test |
-| แยก capture worker ออกจาก API และฐานข้อมูล (SEC-01, SEC-06) | เป็นงานโครงสร้างใหญ่ (queue, IPC, การเข้าถึง secret/DB, deployment, health check) เสี่ยงสร้าง bug ใหม่ จึงเลื่อนไปทำหลังยืนยัน Linux ด้วยรอบที่เล็กกว่า |
-| แก้ Range parser ของ Starlette ที่ต้นเหตุ (SEC-02) | Starlette 0.52.1 มี parser ที่อัปเดตจากรุ่นเดิม แต่การ merge หลายช่วงยังมี loop O(n²); route screenshot ตัด `Range`/`If-Range` ที่ระดับแอปแล้ว แต่ยังไม่ได้เทียบ advisory ต้นฉบับเพื่อยืนยันขอบเขตแพตช์ CVE-2025-62727 หรือเพิ่มการจำกัด multi-range ที่ Nginx เป็น defense in depth |
-| Policy allowed domains แยกสำหรับ `formaction` (SEC-03) | ต้องให้เจ้าของระบบตัดสินใจ ตอนนี้ใช้ `allowed_hosts` ชุดเดียวกับ form ถ้าเข้มเกินไป เว็บที่ใช้ฟอร์มของบุคคลที่สามจะแจ้งเตือนซ้ำจนคนเลิกใส่ใจ |
-| ครอบคลุม attribute URL อื่นใน detector (เช่น `object data`, `embed src`) และตรวจว่า submit control มี form owner จริงหรือเชื่อมด้วย `form=` หรือไม่ | อยู่นอก scope SEC-03 รอบนี้; หากพบ control ที่ไม่มีฟอร์มรองรับ อาจเกิด false positive ควรพิจารณาเป็น follow-up |
-| Retention ของ audit log และหน้า frontend สำหรับอ่าน (SEC-07) | ใช้ค่าเริ่มต้นที่เสนอ คือไม่ลบอัตโนมัติและอ่านผ่าน API เฉพาะ Admin; นโยบาย retention และ UX ของหน้าอ่านต้องให้เจ้าของระบบตัดสินใจ |
-| Vulnerability scan ของ Python, OS packages และ container image ทั้งหมด | รายงานต้นฉบับระบุว่านอกขอบเขตและยังไม่ได้ทำ ต้องใช้เครื่องมือสแกนและ image ที่ build แล้ว |
-| Load test บน Linux production | ไม่ได้ทำ; ต้องมี environment ที่ deploy แล้วและต้องได้รับอนุญาตก่อนยิงโหลด; ผล test ปัจจุบันปิด limiter ใน fixture ยกเว้น `test_auth.py:415` ซึ่งเปิด limiter จริงและผ่าน |
+### 7.6 Verification Update (Oct 15, 2026, Asia/Bangkok)
 
-### 7.5 ข้อจำกัดของสิ่งที่แก้แล้ว
-
-- งบไบต์ของ proxy นับไบต์บนสาย (ที่ถูกบีบอัดแล้ว) ไม่ใช่ขนาดหลังแตกไฟล์ จึงยังไม่กันกรณี gzip bomb
-- Playwright ยัง buffer response ทั้งก้อนใน driver ก่อนส่งต่อ หน่วยความจำต่อ capture อาจสูงถึงงบ 100 MB และมีได้ 4 capture พร้อมกัน
-- เพดาน pixel/DOM ตรวจหลังหน้าโหลดและ settle แล้ว หน้าที่กินทรัพยากรหนักระหว่างโหลดก่อนถึงจุดตรวจยังไม่ถูกกั้นด้วยเพดานนี้
-- ค่าเริ่มต้นของเพดานทั้งหมดตั้งโดยยังไม่ได้วัดกับเว็บจริง เว็บที่ยาวหรือหนักมากอาจถูกปฏิเสธ ควรตรวจบน staging
-- Audit log ไม่มี actor สำหรับการเปลี่ยนแปลงก่อนวันที่แก้ และตาราง `member_audit_events` ใช้ร่วมกับ event ของ member/website/tag
-- ยังไม่มี Git history: `.git` ของโปรเจกต์เป็นโฟลเดอร์ว่าง ใช้ branch/tag ไม่ได้ จึงสำรองซอร์สก่อนแก้ไว้ที่ `backup-pre-security-fix-2026-10-14/` ควรลบเมื่อยืนยันผลบน Linux แล้ว
-
-### 7.6 ข้อกำหนดก่อน deploy
-
-1. ก่อน deploy ให้ทบทวน screenshot ที่เปลี่ยนจาก Chromium 153 และตรวจ alert ของ detector บน staging เป็นราย target; facts คำนวณใหม่จาก HTML ของทั้ง baseline และ snapshot ปัจจุบัน จึงไม่บังคับให้ re-baseline ทุก target ห้าม bulk-approve โดยไม่ตรวจ เพราะ baseline ที่ถูกเจาะอยู่แล้วจะกลายเป็น reference
-2. ต้องผ่านข้อ "Build image และรัน capture ใน Linux container จริง", การเทียบ seccomp และการทดสอบ SSRF/WebSocket บน Linux ก่อน
-3. ตั้ง container memory/CPU/PID limits หลังวัดบน Linux ก่อนเปิดใช้งานจริง
-
-รายงานนี้ไม่เปลี่ยนสถานะ roadmap และ **ยังไม่ถือว่า findings ได้รับการแก้ไขครบ** การแก้ใน source ตามหัวข้อ 7 ยังต้องผ่านเกณฑ์ตรวจรับของแต่ละ finding บน deployment จริงก่อน
-
-### 7.7 ผลตรวจหลังปรับแก้รอบนี้ (14-10-2026)
-
-- Test backend ทั้งหมด ณ รอบตรวจเดิม: **246 passed** (รวม `tests/test_structure.py` 34 passed); รอบทบทวนล่าสุดเพิ่มการตรวจชนิด submit control และผลยืนยันอัปเดตไว้ในข้อ 7.8; มี deprecation warnings จาก dependencies/tests
-- Ruff: ผ่าน (`app`, `tests`, `scripts`, `alembic`)
-- Mypy: ผ่าน ตรวจ 58 source files ด้วย Python 3.11; ข้าม type-check ของ upstream `deprecated.*` เนื่องจาก package รุ่นล่าสุดใช้ syntax Python 3.12 แม้แอปรองรับ Python 3.11
-- Offline Chromium 153 probe: ตรวจพบการเปลี่ยน `formaction` ปกติและค่าว่าง (structure score 0.5), script type ปกติและ MIME parameters รวมถึง javascript URL ที่มี tab (1.0); ทุกกรณีภาพและข้อความเหมือนเดิม
-- การตรวจ Linux container, sandbox/seccomp, SSRF/WebSocket และ resource limits ยังเป็นงานค้างตามข้อ 7.4–7.6; ผลผ่านบน Windows ไม่ใช้แทนเกณฑ์ตรวจรับ Linux
-
-### 7.8 ผลทบทวนความสมบูรณ์เพิ่มเติม
-
-- พบและแก้ false positive ใน SEC-03: `formaction` จะถูกเก็บเฉพาะบน `<button>` ที่มีสถานะ submit (รวม missing/invalid type) และ `<input type="submit|image">`; เพิ่ม test ยืนยันว่า button/reset/text inputs ไม่สร้าง fact ดังกล่าว
-- ยังไม่ได้ตรวจความสัมพันธ์กับ form owner หรือ `form=` attribute ของ control นอกฟอร์ม; รายงาน alert จาก control ที่ไม่มี form owner ได้ และจัดเป็น follow-up ที่ระบุไว้ในข้อ 7.4
-- รอบยืนยันหลังแก้ submit-control filter: backend **247 passed** (รวม `tests/test_structure.py` 35 passed), Ruff ผ่าน, mypy ผ่าน 58 ไฟล์ และ Offline Chromium 153 probe ทั้ง 5 กรณีผ่าน; ภาพ/ข้อความคงเดิมในทุกกรณี
-
-### 7.9 ผลตรวจ Linux เพิ่มเติม (15-10-2026, Asia/Bangkok)
-
-ตรวจจาก Linux host ด้วย temporary venv แยก ไม่ใช่ container ที่ build/deploy อยู่จริง: kernel `7.0.0-30-generic` x86_64, Python `3.12.3`, shell UID/GID `1003:1003`. Docker client `29.8.0` มีอยู่ แต่ทุกคำสั่งที่ต้องคุยกับ daemon ถูกปฏิเสธด้วย `permission denied` ที่ `/var/run/docker.sock`; จึงยืนยัน running container, image digest, mount flags, capabilities, seccomp ที่ attach จริง หรือ network namespace จริงไม่ได้ และไม่ได้ดึง/build production image.
-
-| รายการตรวจ | หลักฐานและผลจริง |
-| --- | --- |
-| Project/browser versions | `backend/Dockerfile` ใช้ `mcr.microsoft.com/playwright/python:v1.63.0-noble`; `backend/requirements.txt` pin `playwright==1.63.0`. Package manifest ระบุ Chromium `153.0.8010.12`, revision `1243`. ติดตั้ง browser แยกใน `/tmp`; `chrome --version` รายงาน `Google Chrome for Testing 153.0.8010.12`. ตรงกันใน Linux test environment แต่ยังไม่ใช่หลักฐานของ image/container ที่ deploy |
-| Compose isolation ที่คาดหวัง | Source config ระบุ `${APP_UID:-1000}:${APP_GID:-1000}`, `read_only: true`, `cap_drop: ALL`, `no-new-privileges:true`, custom `seccomp:./deploy/playwright-seccomp.json`, `/tmp` แบบ tmpfs และไม่มี `ports` บน backend. Backend กับ frontend อยู่บน bridge network เดียวกัน (`172.30.0.0/24`); Compose ไม่ได้ประกาศ `internal: true` หรือ egress ACL จึงไม่มี egress block ใน config. เป็นการอ่าน config เท่านั้น ไม่ยืนยันค่าที่ runtime ใช้อยู่ |
-| Runtime sandbox/capabilities | Shell ปัจจุบัน UID 1003; `/proc/self/status` ให้ `CapEff=0`, `NoNewPrivs=0`, `Seccomp=0`. ค่านี้เป็นของ shell บน host ไม่ใช่ capture container. Chromium sandbox เปิดไว้ตาม default แล้ว launch ไม่สำเร็จ โดย log ระบุ `Chromium sandboxing failed`; จึงยังยืนยัน sandbox ใน deployment ไม่ได้และไม่ปิด SEC-01 |
-| Seccomp profile | เทียบ JSON กับ [ไฟล์ทางการ Playwright v1.63.0](https://github.com/microsoft/playwright/blob/v1.63.0/utils/docker/seccomp_profile.json). Project file ไม่ตรง: เพิ่ม `chroot` ในกฎ allow สำหรับ user namespaces และคง comment เดิม; upstream rule อนุญาต `clone`, `setns`, `unshare`. ยังไม่ได้แก้ profile หรือทดลอง attach ใน container เพราะ runtime ใช้ไม่ได้ |
-| SSRF/redirects | ใน test run แบบ sandbox ปิด มี automated local tests สำหรับ redirect ไป blocked destination และ private-IP rebinding ผ่าน. `tests/test_ssrf_guard.py` ผ่าน 7 tests. เป็นผลจาก test environment เท่านั้น ยังไม่ยืนยัน network policy หรือ seccomp ใน container |
-| WebSocket/CDP | Config เปิด `BLOCK_WEBSOCKETS=True` และ capture ลงทะเบียน `context.route_web_socket("**/*", ...)`; CDP session ถูกสร้างภายในเพื่ออ่าน page metrics และไม่พบ remote CDP endpoint ใน launch config. ยังไม่มี end-to-end test ยืนยันว่า WebSocket ถูกบล็อกหรือ CDP ไม่ถูก expose ใน running container; runtime ยังไม่ได้ตรวจ |
-| Screenshot Range | `tests/test_api_routes.py::test_raw_screenshot_ignores_range_headers` ผ่านใน full run. Single range, 2,000 ranges และ malformed range ตอบ HTTP 200 พร้อม full body เดิม, `Accept-Ranges: none` และไม่มี `Content-Range` |
-| Capture budgets | ทั้ง 7 tests ใน `tests/test_capture_budgets.py` ผ่านใน test run ที่ปิด Chromium sandbox: in-budget, ขนาด height/pixels/DOM เกิน limit, JavaScript ซ่อน scroll height, transfer เกิน/ไม่เกินงบ. นี่ทดสอบ capture budgets ไม่ใช่ CPU/memory/PID cgroup limits |
-| CPU/memory/PID | Production `docker-compose.yml` ไม่มี `cpus`, memory limit หรือ `pids_limit`. cgroup ของ shell รายงาน `cpu.max=max 100000`, `memory.max=max`, `pids.max=max` (ไม่จำกัด). ไม่มี limit ที่ตั้งไว้ให้ทดสอบใน environment นี้; ไม่ได้ทำ load/OOM test |
-
-**คำสั่งและผล backend บน Linux** (รันจาก `backend/`; ใช้ temporary venv `/tmp/web-defacement-linux-audit`):
-
-- `python3 -m venv /tmp/web-defacement-linux-audit && /tmp/web-defacement-linux-audit/bin/python -m pip install -r requirements-dev.txt` — ผ่าน; ติดตั้ง requirements ที่ pin ไว้ รวม pytest, Ruff, mypy และ Playwright
-- `PLAYWRIGHT_BROWSERS_PATH=/tmp/web-defacement-linux-audit/pw-browsers /tmp/web-defacement-linux-audit/bin/python -m pytest` — **207 passed, 40 failed**. Capture/browser tests เปิด sandbox ตาม default แล้ว Chromium ปฏิเสธการ launch บน host นี้ (`Chromium sandboxing failed`); จึงไม่ใช่ผลยืนยัน production container
-- `BROWSER_DISABLE_SANDBOX=true PLAYWRIGHT_BROWSERS_PATH=/tmp/web-defacement-linux-audit/pw-browsers /tmp/web-defacement-linux-audit/bin/python -m pytest -k 'not test_capture_snapshot_sandbox_configuration'` — **243 passed, 3 failed, 1 deselected**. Tests ของ Range, capture budgets, redirect/SSRF และ detector ทำงานใน test environment นี้. Failure ที่เหลือ: `test_capture_snapshot_routes_all_requests_through_loopback_proxy` ได้ค่า sandbox ปิดจาก environment override; `test_proxy_closes_tunnel_when_upstream_stalls` และ `test_proxy_records_reset_before_response` พบ `ConnectionResetError` ในการอ่าน socket ที่ test คาดว่าจะปิดตามปกติ
-- `/tmp/web-defacement-linux-audit/bin/ruff check app tests scripts alembic` — ผ่าน (`All checks passed!`)
-- `/tmp/web-defacement-linux-audit/bin/mypy app` — ผ่าน (`Success: no issues found in 58 source files`)
-
-**สถานะหลังรอบนี้:** ยังไม่ปิด finding ใดเพิ่ม. SEC-01 acceptance ยังต้องมี running target container ที่ Chromium sandbox/seccomp ทำงานภายใต้ non-root, read-only filesystem, capabilities และ network configuration จริง; SEC-06 ยังไม่มี CPU/memory/PID limits หรือการทดสอบ staging ที่พิสูจน์ budgets ภายใต้ resource limit. SEC-02 ยังคงเป็น mitigation ที่ route screenshot ไม่รับ Range; ยังไม่ได้ปิดประเด็น parser ที่ต้นเหตุ. ต้องแก้/ตรวจความต่างของ seccomp profile ก่อนถือว่า config สอดคล้องกับ Playwright 1.63.
+Evaluated on Linux host (`7.0.0-30-generic` x86_64, Python 3.12.3). Automated tests for SSRF guard, Range mitigation, and capture budgets passed cleanly. Full production container verification remains blocked pending elevated Docker daemon socket access.

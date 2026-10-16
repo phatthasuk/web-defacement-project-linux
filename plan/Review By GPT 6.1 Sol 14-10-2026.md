@@ -1,185 +1,185 @@
 # Review By GPT 6.1 Sol 14-10-2026
 
-วันที่ตรวจ: 14 ตุลาคม 2026 (Asia/Bangkok)  
-โปรเจกต์: Web Defacement Monitoring System  
-สถานะ: รายการเสนอแก้ไขจาก audit — ยังไม่ได้แก้ source code
+Review Date: October 14, 2026 (Asia/Bangkok)  
+Project: Web Defacement Monitoring System  
+Status: Proposed remediation items from audit — source code not yet modified
 
-## 1. ขอบเขตและข้อจำกัด
+## 1. Scope and Limitations
 
-ตรวจโค้ด backend, เส้นทาง capture/baseline/review, authentication และ authorization, frontend ที่เกี่ยวข้อง และ configuration สำหรับ deployment พร้อมรันชุดทดสอบและ static checks บน Windows จากไฟล์ปัจจุบัน โฟลเดอร์นี้ไม่มี Git metadata จึงไม่ได้เปรียบเทียบกับ commit หรือ branch ใด
+Reviewed backend code, capture/baseline/review workflows, authentication and authorization, related frontend components, and deployment configuration, alongside running test suites and static checks on Windows using current files. This folder does not contain Git metadata, so no comparison against specific commits or branches was performed.
 
-ยังไม่ได้ทดสอบ deployment บน Linux production จริง และไม่ได้ตรวจ vulnerability ของ dependencies กับฐานข้อมูล advisory ภายนอก ผลนี้จึงไม่ใช่การรับรองความปลอดภัยทั้งหมดของระบบ
+Linux production deployment has not yet been tested in a live environment, and dependency vulnerabilities have not been verified against external vulnerability advisory databases. Consequently, these findings do not constitute a complete security certification of the system.
 
-เอกสารนี้เป็นรายการงานจาก review ให้ใช้ร่วมกับ `PROJECT_PLAN.md` และ `MEMBER_MANAGEMENT_PLAN.md` ไม่ได้เปลี่ยนสถานะ roadmap หรือประกาศว่าการแก้ไขเสร็จแล้ว
+This document serves as an actionable task list from the review to be used alongside `PROJECT_PLAN.md` and `MEMBER_MANAGEMENT_PLAN.md`. It does not alter roadmap status or declare remediation complete.
 
-## 2. รายการที่ต้องแก้ไข
+## 2. Action Items
 
-P1 = ควรแก้ก่อนเชื่อถือผล monitoring ใน production; P2 = ควรแก้ในรอบถัดไปเพื่อเพิ่มความถูกต้องและความมั่นใจ; P3 = ความสม่ำเสมอและคุณภาพของโค้ด/เอกสาร
+P1 = Must be resolved before trusting monitoring results in production; P2 = Should be resolved in the next cycle to enhance accuracy and confidence; P3 = Code/documentation consistency and quality.
 
-| ID | ระดับ | งาน | สถานะ |
+| ID | Priority | Task | Status |
 | --- | --- | --- | --- |
-| RV-01 | P1 | เปลี่ยน baseline แรกให้รอ operator อนุมัติ | ยังไม่แก้ |
-| RV-02 | P2 | เพิ่มการตรวจ event handler และ JavaScript URL ใน structural detector | ยังไม่แก้ |
-| RV-03 | P2 | ตรวจ navigation errors ซ้ำหลังรอหน้าและก่อนส่งคืน capture | ยังไม่แก้ |
-| RV-04 | P2 | เปรียบเทียบ origin ให้ครบ scheme, hostname และ port | ยังไม่แก้ |
-| RV-05 | P3 | ทำ Target response ให้สม่ำเสมอทุก endpoint | ยังไม่แก้ |
-| RV-06 | P2 | แก้ frontend test setup ให้รองรับ authentication context | ยังไม่แก้ |
-| RV-07 | P3 | แก้ Ruff findings ใน environment ของโปรเจกต์ | ยังไม่แก้ |
-| RV-08 | P3 | ปรับ test temporary path บน Windows และข้อมูล verification ใน README | ยังไม่แก้ |
+| RV-01 | P1 | Require operator approval for initial baseline | Pending |
+| RV-02 | P2 | Add event handler and JavaScript URL inspection to structural detector | Pending |
+| RV-03 | P2 | Re-check navigation errors after page wait and before returning capture | Pending |
+| RV-04 | P2 | Validate origin completely across scheme, hostname, and port | Pending |
+| RV-05 | P3 | Standardize Target response serialization across all endpoints | Pending |
+| RV-06 | P2 | Fix frontend test setup to provide authentication context | Pending |
+| RV-07 | P3 | Resolve Ruff findings in project environment | Pending |
+| RV-08 | P3 | Adjust test temporary paths on Windows and verification info in README | Pending |
 
-### RV-01 — Baseline แรกถูกเชื่อถืออัตโนมัติ
+### RV-01 — Initial Baseline Automatically Trusted
 
-**หลักฐาน:** `backend/app/services/checks.py:257` กำหนด `is_baseline=target.url_revision == 1` และบรรทัด 261 กำหนดสถานะ `OK` สำหรับ revision แรก
+**Evidence:** `backend/app/services/checks.py:257` sets `is_baseline=target.url_revision == 1`, and line 261 assigns status `OK` for the initial revision.
 
-**ผลกระทบ:** หากเว็บไซต์ถูก deface ก่อนเพิ่ม target ระบบจะเก็บเนื้อหานั้นเป็น baseline และรายงาน `OK` โดยไม่มีการอนุมัติ เป็นความเสี่ยงเชิงออกแบบของการเริ่ม monitoring แม้พฤติกรรมนี้ถูกเขียนไว้โดยตั้งใจ
+**Impact:** If a website is defaced prior to being registered as a target, the system stores the defaced content as a trusted baseline and reports `OK` without operator review. This represents an architectural risk upon initiating monitoring, even though this behavior was originally implemented deliberately.
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] เก็บ capture แรกเป็น candidate (`is_baseline=False`) และกำหนดสถานะ `Awaiting Baseline`
-- [ ] ปรับ approval ให้รองรับ revision แรกที่ยังไม่มี baseline แล้วเปลี่ยนเป็น `OK` หลังอนุมัติสำเร็จ
-- [ ] ปรับ scheduler ให้ใช้เงื่อนไขรอ candidate review กับทุก revision ไม่เฉพาะ `url_revision > 1`
-- [ ] ตรวจ UI ให้แสดง candidate และ action อนุมัติได้เมื่อยังไม่มี baseline/check result
-- [ ] รักษา candidate ไว้จน review และกำหนดพฤติกรรม manual recapture ให้ชัดเจน
+- [ ] Store initial capture as a candidate (`is_baseline=False`) and set status to `Awaiting Baseline`.
+- [ ] Update approval workflow to support the first revision lacking a baseline, transitioning to `OK` only upon successful approval.
+- [ ] Update scheduler to apply candidate review hold conditions to all revisions, not just `url_revision > 1`.
+- [ ] Verify UI displays candidate and approval actions when no baseline or check result exists yet.
+- [ ] Retain candidate until reviewed, defining clear behavior for manual recapture.
 
-**เกณฑ์ตรวจรับ:** Target ใหม่ที่ capture สำเร็จต้องไม่ขึ้น `OK` ก่อนอนุมัติ; scheduler ไม่สร้าง candidate ซ้ำทุก interval ระหว่างรอ review; หลังอนุมัติ การตรวจครั้งถัดไปเปรียบเทียบกับ baseline ได้; workflow หลังเปลี่ยน URL และสิทธิ์ Operator ที่ได้รับ assignment ยังทำงานถูกต้อง
+**Acceptance Criteria:** A newly added target successfully captured must not show `OK` before approval; scheduler must not generate duplicate candidates every interval while awaiting review; after approval, subsequent checks compare accurately against the baseline; URL change workflows and assigned Operator permissions continue functioning correctly.
 
-### RV-02 — Structural detector ไม่ตรวจ event handler
+### RV-02 — Structural Detector Omits Event Handlers
 
-**หลักฐาน:** `backend/app/services/diff/structure.py:104` เลือกเก็บ facts ของ elements บางประเภท แต่ไม่เก็บ event attributes ของ elements ทั่วไป การทดลองเพิ่ม `onclick="console.log(1)"` ในปุ่มที่มีข้อความเดิมให้ structural score เท่ากับ `0.0`
+**Evidence:** `backend/app/services/diff/structure.py:104` collects facts for specific element types but omits event attributes on general elements. An experiment adding `onclick="console.log(1)"` to a button with unmodified text yielded a structural score of `0.0`.
 
-**ผลกระทบ:** โค้ดที่รันเมื่อผู้ใช้โต้ตอบกับหน้าอาจถูกเพิ่มโดยไม่เปลี่ยนภาพหรือข้อความ ทำให้ detectors ทั้งสามไม่รายงานการเปลี่ยนแปลงในกรณีนี้
+**Impact:** Code triggered by user interactions can be injected without altering page visuals or text, resulting in all three detectors reporting no change.
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] เก็บ facts สำหรับ event-handler attributes เช่น `onclick`, `onerror`, `onload` โดย hash เนื้อหาแทนการใส่โค้ดเต็มใน summary
-- [ ] ตรวจ JavaScript URL ใน attributes ที่เกี่ยวข้อง เช่น `href="javascript:..."` และกำหนด normalization ให้ชัดเจน
-- [ ] เพิ่มกรณีทดสอบ addition, modification และ removal ของ event handler โดย text/pixel ไม่เปลี่ยน
-- [ ] ตรวจผลกระทบต่อ false positives และข้อมูลที่แสดงใน summary ก่อนเปิดใช้
+- [ ] Extract facts for event-handler attributes such as `onclick`, `onerror`, `onload`, hashing attribute values rather than embedding raw code in summaries.
+- [ ] Detect JavaScript URLs in relevant attributes (e.g., `href="javascript:..."`) with defined normalization.
+- [ ] Add unit test cases for addition, modification, and removal of event handlers where text/pixels remain identical.
+- [ ] Evaluate false-positive impact and summary presentation before enabling.
 
-**เกณฑ์ตรวจรับ:** เพิ่มหรือแก้ executable attribute แล้ว structure score ต้องมากกว่า `0`; ค่าเดิมต้องไม่สร้าง false change; allowlist ของ external domains ต้องไม่ทำให้ event handler ถูกละเลยโดยอัตโนมัติ
+**Acceptance Criteria:** Adding or modifying an executable attribute must yield a structural score > `0`; existing attributes must not trigger false positives; external domain allowlists must not automatically ignore event handlers.
 
-### RV-03 — Capture คืนผลสำเร็จหลัง late navigation ถูกบล็อก
+### RV-03 — Capture Returns Success Following Blocked Late Navigation
 
-**หลักฐาน:** `backend/app/services/capture/capture.py:388` ตรวจ guard errors หลัง `page.goto` แต่หลัง `wait_page_ready` ที่บรรทัด 407 ไม่มีการตรวจซ้ำ การทดลองแบบ mocked navigation ระหว่าง readiness ยืนยันว่า `route.abort()` ถูกเรียกหนึ่งครั้ง แต่ capture ยังคืน HTTP status `200`
+**Evidence:** `backend/app/services/capture/capture.py:388` checks guard errors following `page.goto`, but does not re-check after `wait_page_ready` at line 407. Mocked navigation experiments during readiness confirmed `route.abort()` was invoked once, yet capture returned HTTP status `200`.
 
-**ผลกระทบ:** Navigation ที่ถูกบล็อกหรือผิดพลาดหลังการโหลดแรกอาจถูกกลบด้วย artifacts/status ของหน้าเดิม ทำให้ผล check สื่อว่าจับหน้าได้สำเร็จ การทดลองนี้ยืนยันข้อผิดพลาดในการส่งต่อ error ไม่ได้ยืนยันการ bypass SSRF ที่ socket
+**Impact:** Navigation blocked or failing after initial document load may be masked by artifacts/status of the prior page, wrongly indicating a successful capture. (Note: this reflects an error propagation flaw, not a socket-level SSRF bypass).
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] รวมการตรวจ `blocked_error`, `availability_error` และ `capture_error` เป็น helper ที่ใช้ได้หลายจุด
-- [ ] ตรวจ error หลัง readiness และก่อนส่งคืนผล capture
-- [ ] ทำให้ final URL, HTTP status และ artifacts อ้างถึง navigation เดียวกัน หากมี navigation ระหว่างจับ artifacts ให้ retry หรือ reject อย่างชัดเจน
-- [ ] เพิ่ม regression tests สำหรับ late main-frame navigation ที่เกิด SSRF block, DNS failure และ upstream failure
-- [ ] ยืนยันว่า capture ที่ถูก reject ไม่เหลือ staging artifacts
+- [ ] Consolidate `blocked_error`, `availability_error`, and `capture_error` evaluations into a reusable helper.
+- [ ] Re-check errors following readiness and prior to returning capture results.
+- [ ] Ensure final URL, HTTP status, and artifacts reference the identical navigation; if navigation occurs during artifact extraction, explicitly retry or reject.
+- [ ] Add regression tests for late main-frame navigation triggering SSRF block, DNS failure, and upstream failure.
+- [ ] Ensure rejected captures leave behind zero staging artifacts.
 
-**เกณฑ์ตรวจรับ:** Late main-frame navigation ที่ถูกบล็อกต้องไม่คืนผลสำเร็จจากหน้าเดิม; errors ถูกจัดประเภทถูกต้อง; การบล็อก subresource/popup ไม่เปลี่ยนความหมายเป็น main-document failure โดยไม่ตั้งใจ
+**Acceptance Criteria:** Blocked late main-frame navigation must not return success using prior page artifacts; errors are classified accurately; subresource/popup blocks must not unintentionally cause main-document failure.
 
-### RV-04 — Origin validation ไม่เปรียบเทียบ port
+### RV-04 — Origin Validation Ignores Port
 
-**หลักฐาน:** `backend/app/main.py:135` ตัด port ออกจาก Host และเปรียบเทียบเพียง hostname/scheme การเรียก `_is_trusted_origin` ด้วย origin `https://monitor.example:9999` และ Host `monitor.example:3030` โดยไม่มี origin ใน allowlist คืน `True`
+**Evidence:** `backend/app/main.py:135` strips the port from Host and compares only hostname/scheme. Invoking `_is_trusted_origin` with origin `https://monitor.example:9999` and Host `monitor.example:3030` without matching allowlist entries returned `True`.
 
-**ผลกระทบ:** Origin บน hostname เดียวกันแต่คนละ port ถูกจัดเป็น trusted เกินขอบเขต same-origin ที่ควรเป็น ยังไม่ได้ยืนยันการโจมตีผ่าน CORS preflight หรือ synchronizer CSRF token จึงไม่ควรตีความว่าเป็นการ bypass mutation authorization ทั้งระบบ
+**Impact:** Origins sharing a hostname across different ports are treated as trusted, violating strict same-origin boundaries. (Note: While not yet verified as an exploitable bypass via CORS preflight or CSRF tokens, origin validation remains overly permissive).
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] เปรียบเทียบ scheme, hostname และ effective port ครบ โดย normalize default HTTP/HTTPS ports
-- [ ] รองรับ IPv6 host โดยไม่ใช้ `split(':')[0]`
-- [ ] รักษา external host/port ที่ถูกต้องจาก reverse proxy; ปัจจุบัน Nginx ส่ง `$host` ซึ่งไม่มี public port จึงต้องปรับ proxy headers ควบคู่กับ validation
-- [ ] ใช้ forwarding headers เฉพาะภายใต้ proxy trust policy และรักษาการ overwrite headers จาก client
-- [ ] เพิ่ม tests สำหรับ port ต่างกัน, default port, explicit allowlist, IPv6 และ production reverse proxy
+- [ ] Compare scheme, hostname, and effective port completely, normalizing default HTTP/HTTPS ports.
+- [ ] Support IPv6 hosts without naive `split(':')[0]`.
+- [ ] Preserve correct external host/port from reverse proxy; adjust proxy headers alongside validation since Nginx currently forwards `$host` without public port.
+- [ ] Trust forwarding headers only under defined proxy trust policy while preventing client header forgery.
+- [ ] Add tests for port mismatches, default ports, explicit allowlists, IPv6, and production reverse proxy configurations.
 
-**เกณฑ์ตรวจรับ:** Origin คนละ port ถูกปฏิเสธถ้าไม่ได้อยู่ใน allowlist; origin ที่ operator ใช้จริงผ่าน; CSRF token enforcement และ production login/logout ยังทำงาน
+**Acceptance Criteria:** Mismatched ports are rejected unless explicitly allowlisted; valid operator origins pass; CSRF token enforcement and production login/logout continue operating.
 
-### RV-05 — Target response ไม่สม่ำเสมอ
+### RV-05 — Inconsistent Target Response Serialization
 
-**หลักฐาน:** `backend/app/api/routes/targets.py:242` คืน ORM Target โดยตรงจาก PATCH ขณะที่ GET ใช้ `_target_read` ที่บรรทัด 293 ผล test `test_target_patch_rejects_null_required_fields_and_allows_omission` พบว่า GET คืน `assignees: []` แต่ PATCH body ว่างคืน `assignees: null`
+**Evidence:** `backend/app/api/routes/targets.py:242` returns ORM Target directly from PATCH, whereas GET uses `_target_read` at line 293. Testing `test_target_patch_rejects_null_required_fields_and_allows_omission` showed GET returns `assignees: []` while empty PATCH body returns `assignees: null`.
 
-**ผลกระทบ:** Response contract แตกต่างตาม endpoint และอาจทำให้ frontend สูญเสียข้อมูล assignees เมื่อใช้ mutation response อัปเดต cache
+**Impact:** Response contracts vary across endpoints, potentially causing frontend cache corruption regarding assignees following mutations.
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] ใช้ serializer ของ Target ที่สม่ำเสมอใน create/update/delete และ read endpoints ตามสิทธิ์ผู้ใช้
-- [ ] ตรวจ return type/response model ให้ตรงกับผล serialization
-- [ ] เพิ่ม assertion สำหรับ target ที่มี assignment จริง และป้องกันการเปิดเผย assignees ให้ role ที่ไม่ควรเห็น
+- [ ] Utilize consistent Target serialization across create/update/delete and read endpoints in accordance with user role permissions.
+- [ ] Align route return types and response models with serialization output.
+- [ ] Add assertions for targets with active assignments and prevent leaking assignees to unauthorized roles.
 
-**เกณฑ์ตรวจรับ:** PATCH body ว่างให้ข้อมูลเท่ากับ GET สำหรับผู้ใช้เดียวกัน; mutation response ไม่ล้าง assignees โดยไม่ตั้งใจ; backend test ที่ล้มผ่าน
+**Acceptance Criteria:** Empty PATCH body returns data identical to GET for the same user; mutation responses do not clear assignees; failing backend test passes.
 
-### RV-06 — Frontend test setup ขาด authentication context
+### RV-06 — Frontend Test Setup Missing Authentication Context
 
-**หลักฐาน:** Frontend tests ผ่าน 47 และไม่ผ่าน 25 จากทั้งหมด 72 tests ใน 11 files; 3 files ล้ม ได้แก่ `TargetListPage.test.tsx`, `TargetDetailPage.test.tsx` และ `TargetDetailPage.cache.test.tsx` หลายรายการแจ้ง `useAuth must be used within an AuthProvider` ตัวอย่าง setup อยู่ที่ `frontend/src/pages/TargetDetailPage.test.tsx:190`
+**Evidence:** Frontend test suite had 47 passed and 25 failed out of 72 tests across 11 files; 3 files failed (`TargetListPage.test.tsx`, `TargetDetailPage.test.tsx`, and `TargetDetailPage.cache.test.tsx`), reporting `useAuth must be used within an AuthProvider`. Example setup at `frontend/src/pages/TargetDetailPage.test.tsx:190`.
 
-**ผลกระทบ:** Tests ไม่ได้เข้าถึง assertions ของ page behavior จึงยังใช้ยืนยัน workflow/cache หลังเพิ่ม member management ไม่ได้ การล้มนี้ไม่ได้พิสูจน์ว่าหน้า production ขาด AuthProvider เพราะ app มี provider อยู่แล้ว
+**Impact:** Tests fail before reaching component behavior assertions, preventing verification of post-member-management workflows. (Note: production pages already wrap in AuthProvider).
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] สร้าง test render helper ที่ให้ authentication context และ QueryClient/Router ตามที่ component ต้องใช้
-- [ ] ใช้ role fixtures ของ Admin และ Operator ที่ตรงกับสถานการณ์ทดสอบ
-- [ ] ปรับ mocks/expectations ที่ไม่ตรงกับ hooks และ UI ปัจจุบันหลังแก้ context
-- [ ] ตรวจการล้าง cache เมื่อ logout/เปลี่ยนผู้ใช้ และการเปลี่ยนสิทธิ์/assignment
+- [ ] Create test render helper providing authentication context alongside QueryClient and Router.
+- [ ] Supply Admin and Operator role fixtures corresponding to test scenarios.
+- [ ] Update outdated mocks/expectations to match current hooks and UI.
+- [ ] Test cache eviction on logout/user switch and permission/assignment changes.
 
-**เกณฑ์ตรวจรับ:** Frontend suite ผ่านทั้งหมด; tests ตรวจพฤติกรรมจริงของแต่ละ role; ไม่มี unhandled context errors หรือการข้าม tests เพื่อทำให้ผลผ่าน
+**Acceptance Criteria:** Frontend test suite passes completely; tests verify actual role behaviors; no unhandled context errors or bypassed tests.
 
-### RV-07 — Ruff findings
+### RV-07 — Ruff Linter Findings
 
-**หลักฐาน:** Ruff ใน virtual environment ของโปรเจกต์พบ 5 errors จากการตรวจ `app tests scripts alembic`:
+**Evidence:** Ruff within project virtual environment reported 5 errors across `app tests scripts alembic`:
 
-| ไฟล์ | สิ่งที่ต้องแก้ |
+| File | Issue |
 | --- | --- |
 | `backend/alembic/env.py` | I001: import order |
 | `backend/alembic/versions/a5b6c7d8e9f0_tags.py` | I001: import order |
 | `backend/alembic/versions/b7c8d9e0f1a2_nested_tags.py` | I001: import order |
-| `backend/app/models/__init__.py` | I001: import order และ E501: line length |
+| `backend/app/models/__init__.py` | I001: import order and E501: line length |
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] จัด imports และแบ่ง `__all__` ตาม configuration โดยไม่เปลี่ยน migration semantics
-- [ ] รัน Ruff ด้วย environment/version เดียวกันใน local และ CI
+- [ ] Organize imports and split `__all__` per configuration without affecting migration semantics.
+- [ ] Run Ruff using identical environment and versions locally and in CI.
 
-**เกณฑ์ตรวจรับ:** Ruff ผ่าน; mypy ใน environment ของโปรเจกต์ยังผ่าน; model registration และ migration imports ยังทำงาน
+**Acceptance Criteria:** Ruff passes clean; mypy passes; model registration and migrations operate smoothly.
 
-### RV-08 — Windows test paths และ README verification
+### RV-08 — Windows Test Paths and README Verification
 
-**หลักฐาน:** Backend รอบเต็มได้ 199 passed / 8 failed จาก 207 tests; 7 capture failures เกิดขณะเขียน artifact ใน temporary paths ยาวบน Windows เมื่อรันเฉพาะ 7 รายการด้วย `--basetemp=.audit-t` ทั้งหมดผ่าน เหลือ failure ของ response contract ใน RV-05 ส่วน README ยังระบุจำนวน backend/frontend tests เป็น 123/61
+**Evidence:** Backend test suite full run had 199 passed / 8 failed out of 207 tests; 7 capture failures were caused by path length limits when writing artifacts to temporary paths on Windows. Re-running those 7 with `--basetemp=.audit-t` passed all 7, leaving only the contract failure in RV-05. Additionally, README outdated test counts indicated 123/61.
 
-**สิ่งที่ต้องแก้:**
+**Action Items:**
 
-- [ ] กำหนด temporary path สั้นสำหรับ Windows verification หรือปรับ fixture ให้ลดความยาว path
-- [ ] แยก environment failures ออกจาก application failures ในผลทดสอบ
-- [ ] ปรับ README ให้ใช้คำสั่งจาก environment ของโปรเจกต์ และแก้/นำจำนวน tests ที่ล้าสมัยออก
-- [ ] รัน verification บน Linux ตาม deployment target และบันทึกผลใหม่เมื่อ remediation เสร็จ
+- [ ] Specify short temporary path for Windows verification or shorten fixture temp directory paths.
+- [ ] Distinguish environment-specific failures from application bugs in test reporting.
+- [ ] Update README to reference project environment commands and correct/remove outdated test counts.
+- [ ] Execute Linux verification on target deployment environment and record fresh results post-remediation.
 
-**เกณฑ์ตรวจรับ:** Tests ไม่ล้มเพราะ temporary path; เอกสารระบุคำสั่งและผลตรวจตามจริง โดยไม่ประกาศว่า Linux production ผ่านจากผล Windows
+**Acceptance Criteria:** Tests do not fail due to Windows temporary path length; documentation accurately reflects verification commands and metrics.
 
-## 3. ผล verification ณ วันที่ review
+## 3. Verification Results as of Review Date
 
-| รายการ | ผลที่ยืนยันได้ |
+| Item | Verified Result |
 | --- | --- |
-| Backend pytest รอบเต็ม | 199 passed / 8 failed / 207 tests |
-| Retry เฉพาะ capture failures ด้วย short path | 7 passed / 11 deselected |
-| Backend failure ที่เหลือ | Target GET/PATCH response: `assignees []` กับ `null` |
+| Backend pytest (Full run) | 199 passed / 8 failed / 207 tests |
+| Retry capture failures with short path | 7 passed / 11 deselected |
+| Remaining backend failure | Target GET/PATCH response: `assignees []` vs `null` |
 | Frontend Vitest | 47 passed / 25 failed / 72 tests; 8 files passed / 3 failed |
-| Backend mypy ใน `.venv` | ผ่าน 55 source files |
-| Backend Ruff ใน `.venv` | 5 errors |
-| Frontend ESLint | ผ่าน |
-| Frontend production build | ผ่าน |
-| Linux deployment verification | ยังไม่ได้รัน |
+| Backend mypy in `.venv` | Passed across 55 source files |
+| Backend Ruff in `.venv` | 5 errors |
+| Frontend ESLint | Passed |
+| Frontend production build | Passed |
+| Linux deployment verification | Pending execution |
 
-ผล backend ข้างต้นเป็นรอบเต็มหนึ่งรอบและการ retry เฉพาะรายการ ไม่ใช่ผลรอบเต็มใหม่ที่ผ่าน 206 tests ระบบ Python นอก `.venv` มี dependency ไม่ครบ และ mypy ให้ผลต่างกัน จึงใช้ผลของ environment โปรเจกต์เป็นหลัก
+Note: Backend results above reflect an initial full run plus targeted retry, not a clean single run of 206 passing tests. Project virtual environment (`.venv`) is the authoritative environment.
 
-## 4. ลำดับดำเนินการและการตรวจรับรวม
+## 4. Execution Order and Overall Acceptance
 
-1. RV-01: ทำ baseline approval ให้ครอบคลุมการเริ่ม monitoring
-2. RV-02 และ RV-03: ปิดช่องว่างของ detector และความถูกต้องของ capture
-3. RV-04: แก้ origin validation พร้อม configuration ของ reverse proxy
-4. RV-05 และ RV-06: แก้ API contract และทำ functional tests ให้กลับมาครอบคลุม workflows
-5. RV-07 และ RV-08: ทำ static checks และ verification workflow ให้สม่ำเสมอ
+1. RV-01: Extend baseline approval to cover initial monitoring setup.
+2. RV-02 & RV-03: Close detector gaps and ensure capture validity.
+3. RV-04: Fix origin validation and reverse proxy configuration.
+4. RV-05 & RV-06: Fix API contracts and restore functional test coverage.
+5. RV-07 & RV-08: Standardize static checks and verification workflow.
 
-- [ ] เพิ่ม regression tests สำหรับ RV-01 ถึง RV-05 ตามเกณฑ์ของแต่ละรายการ
-- [ ] รัน backend suite รอบเต็มใน environment ของโปรเจกต์
-- [ ] รัน frontend suite, lint, type-check/production build และ backend Ruff/mypy
-- [ ] ตรวจ Linux deployment: HTTPS login, baseline approval, scheduled capture, error classification และสิทธิ์ Admin/Operator
-- [ ] บันทึกผลจริงและข้อจำกัดที่เหลือก่อนปรับ roadmap ว่างานเสร็จ
+- [ ] Add regression tests for RV-01 through RV-05 per criteria.
+- [ ] Run backend suite cleanly in project virtual environment.
+- [ ] Run frontend suite, lint, type-check/build, and backend Ruff/mypy.
+- [ ] Verify Linux deployment: HTTPS login, baseline approval, scheduled capture, error classification, and Admin/Operator authorization.
+- [ ] Document verified outcomes and remaining constraints before marking tasks complete.
 
-## 5. สิ่งที่มีอยู่แล้วและต้องรักษาไว้
+## 5. Existing Security Controls to Preserve
 
-จากโค้ดที่ตรวจพบการป้องกัน session/CSRF, authorization ของ Admin–Operator, SSRF proxy ที่ตรวจ connection-time IP และ artifact path containment การ remediation ต้องรักษาพฤติกรรมเหล่านี้ รวมถึงการเก็บ raw screenshot เพื่อใช้เป็นหลักฐาน และการไม่ซ่อน overlay ระหว่าง capture
+The inspected code includes robust session/CSRF protection, Admin–Operator authorization, connection-time IP validation via SSRF proxy, and artifact path containment. Remediation must preserve these controls, including raw screenshot retention for audit evidence and retaining overlays without suppression during capture.

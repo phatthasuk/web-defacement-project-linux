@@ -1,86 +1,84 @@
 # Capture Improvements Plan
 
-แผนดึง logic จาก prototype `python_project_website_checker/visual-checker` (เอนจินจับภาพ+เทียบ diff ตัวจริงที่ผ่านการใช้งานกับเว็บโรงพยาบาลหลายแห่ง) มาปรับใช้กับโปรเจกต์ปัจจุบัน
+A plan to port proven capture engine and visual diffing logic from the `python_project_website_checker/visual-checker` prototype (tested against real-world hospital websites) into the current project.
 
-**หลักการ:** port เป็น *algorithm/logic* เข้า service ที่มีอยู่ ไม่ใช่ merge โค้ดหรือยกสถาปัตยกรรม (event-bus JSONL, log-tail, filesystem `state/`, Flet UI) มาด้วย เพราะโปรเจกต์ปัจจุบันใช้ DB + REST + scheduling แทนแล้ว
+**Core Principle:** Port the *algorithms and logic* directly into existing services without importing architectural legacy components (JSONL event buses, log-tailing, filesystem-based `state/`, or Flet UI), as the current architecture already provides Database persistence, REST APIs, and automated scheduling.
 
-**ปัญหาที่แก้:** capture ปัจจุบัน ([backend/app/services/capture/capture.py](../backend/app/services/capture/capture.py)) แค่ `goto(wait_until="networkidle")` แล้ว screenshot ทันที ไม่มีการทำภาพให้นิ่ง → animation / carousel / lazy image / cookie banner ทำให้ pixel diff เด้งเป็น **false positive** (แจ้งเตือนว่าโดน deface ทั้งที่ไม่ได้โดน)
+**Problem Addressed:** The initial capture implementation ([backend/app/services/capture/capture.py](../backend/app/services/capture/capture.py)) simply ran `goto(wait_until="networkidle")` followed by an immediate screenshot without stabilizing page content. This caused animations, carousels, lazy-loaded images, and cookie banners to introduce pixel shifts, leading to frequent **false positives** (alerting on legitimate dynamic changes as defacements).
 
-> หมายเหตุ: ส่วน auto-rebaseline + decision state machine (เดิมคือข้อ 4) แยกไปเป็นแผนอนาคตเพราะ security-sensitive ดู [plan/future/auto-rebaseline.md](future/auto-rebaseline.md)
-
----
-
-## 1. ⭐ Page-stabilization pipeline (รวม cookie/overlay dismiss)
-
-**ที่มา:** `page_ready.py` (`wait_page_ready`) + `accept_cookie.py` + CSS/init-script ใน `runner.py`
-**ปลายทาง:** ยัดเข้า [capture.py](../backend/app/services/capture/capture.py) ก่อนบรรทัด `page.screenshot()`
-
-### เฟสรอหน้าให้พร้อม (แทน `networkidle` เดี่ยวๆ)
-- **รอเป็นเฟส** — DOMContentLoaded → network-quiet แบบ adaptive → body attached → patch CSS → กดปิด cookie → รอ content มองเห็น → readyState complete → รอ layout นิ่ง → extra wait
-- **Adaptive network-quiet** — นับ request in-flight เอง รอจน "เงียบต่อเนื่อง" 1,200ms (cap 15,000ms) แทนเชื่อ `networkidle` ที่พลาดกับเว็บยิง XHR ตลอด
-
-### ทำภาพให้นิ่ง (กัน false positive)
-- **Freeze animation/transition ทั้งหน้า** — `*,*::before,*::after{animation:none!important;transition:none!important}`
-- **หยุด carousel/slider/วิดีโอ** — `slick('slickPause')`, `carousel.pause()`, `video.pause()` + `autoplay=false` (slick/owl/bootstrap)
-- **ซ่อน preloader/spinner** + unhide element ที่ถูก `visibility:hidden` ตอนโหลด
-- **บังคับ lazy image โหลดจริง** — `loading:lazy→eager`, `img.decode()`, prefetch `background-image` (`fetch cache:'force-cache'`)
-- **รอทุกภาพที่มองเห็น `complete && naturalWidth>0`** ก่อนถ่าย (timeout 7s)
-- **รอ layout นิ่งจริง** — poll `getBoundingClientRect()` ของ `main` จนไม่ขยับต่อเนื่อง 400ms
-- **Neutralize scroll** — override `window.scrollTo/scrollBy` กัน JS เลื่อนหน้าเองระหว่างถ่าย
-- **`emulate_media(reduced_motion="reduce")`** + viewport ตายตัว → deterministic ทุกรอบ
-
-### Cookie/overlay dismiss (ย้ายมาจากเดิมข้อ 4a)
-- **กด "ยอมรับ cookie" อัตโนมัติก่อนถ่าย** — 2 ชั้น: (ก) `get_by_role("button", name=/ยอมรับ|accept|agree|.../)` รองรับไทย+อังกฤษ, (ข) selector เจ้าดัง (CookieYes `.cky-btn-accept`, OneTrust `#onetrust-accept-btn-handler`, Cookiebot)
-- **ค้นทั้ง main page + ทุก iframe** (banner หลายเจ้าอยู่ใน iframe)
-- **fallback ซ่อนด้วย CSS** (`HIDE_CSS`) ถ้ากดไม่สำเร็จ
-- **รอ banner หายจริง** (`offsetParent === null`) ก่อนไปเฟสถ่าย
-- **ผลิต flag `cookie_dismissed`/`promo_closed` ไว้เฉยๆ** — ข้อ 1 แค่ทำภาพให้สะอาด + คืน flag; การเอา flag ไปตัดสิน alert เก็บไว้แผนอนาคต
-
-### เสริม / ข้อควรระวัง
-- **PhaseRecorder** — เก็บเวลาแต่ละเฟส (ms) ไว้ debug ว่าเว็บไหนช้าตรงไหน (option)
-- ⚠️ **ต้องเข้ากับ SSRF guard เดิม** — capture.py ดัก `page.route("**/*")` อยู่; `add_style_tag` ปลอดภัย แต่ `fetch()` prefetch จะวิ่งผ่าน route → guard ต้องอนุญาต same-origin
+> Note: The auto-rebaseline and decision state machine component (formerly Item 4) has been separated due to security sensitivities; see [plan/archive/auto-rebaseline.md](auto-rebaseline.md).
 
 ---
 
-## 2. ⭐ Multi-baseline matching
+## 1. ⭐ Page-Stabilization Pipeline (Including Cookie/Overlay Dismissal)
 
-**ที่มา:** `image_diff.py` (`find_best_baseline`) + `baseline_store.py`
-**ปลายทาง:** [services/diff/diff.py](../backend/app/services/diff/diff.py) + model `Snapshot`/`Target`
+**Origin:** `page_ready.py` (`wait_page_ready`) + `accept_cookie.py` + CSS/init-scripts in `runner.py`.  
+**Destination:** Integrated into [capture.py](../backend/app/services/capture/capture.py) prior to `page.screenshot()`.
 
-- **เก็บ baseline ได้หลายรูปต่อ target** (ไม่ใช่ 1 รูปเดียว) — เว็บที่มีแบนเนอร์/โปรหมุนตามปกติมีหน้าตา "ถูกต้อง" ได้หลายแบบ
-- **เทียบ current กับทุก baseline แล้วเลือก diff ต่ำสุด** — ตัดสิน alert จาก `best_ratio = min(...)` ไม่ใช่ baseline เดียว → ลด false positive เว็บ dynamic
-- **จำกัดจำนวน baseline** (`_prune_old_baselines`, `MAX_BASELINES_PER_SITE=50`) — ลบเก่าสุดเมื่อเกิน กัน storage บวม
-- **ตั้งชื่อ baseline ด้วย timestamp** (`_ts_png` เช่น `2026-09-02T14-30-00.png`) — เรียงลำดับได้
-- **ทนไฟล์ภาพเสีย** — `LOAD_TRUNCATED_IMAGES=True` + `try/except (OSError, ValueError)` ข้าม baseline ที่ corrupt ไม่ crash ทั้งรอบ
-- **บันทึกว่าแมตช์ baseline ตัวไหน** (`matched_baseline`/`closest_baseline`) — เก็บลง CheckResult ให้ผู้ใช้เห็นว่าตัดสินจากฐานอันไหน
-- **โครงสร้าง:** ขยาย `is_baseline` (boolean เดี่ยว) → รองรับหลาย snapshot เป็น baseline ต่อ target
+### Multi-Phase Page Readiness (Replacing Standalone `networkidle`)
+- **Phased Waits:** DOMContentLoaded → adaptive network-quiet → body attached → CSS patches → cookie dismissal → visible content timeout → readyState complete → layout stabilization → final stabilization wait.
+- **Adaptive Network-Quiet:** Actively tracks in-flight requests, requiring a continuous quiet window of 1,200 ms (capped at 15,000 ms) instead of relying solely on `networkidle`, which fails on sites continuously issuing background XHR/telemetry.
+
+### Visual Stabilization (Preventing False Positives)
+- **Freeze Animations/Transitions Globally:** `*,*::before,*::after{animation:none!important;transition:none!important}`.
+- **Halt Carousels/Sliders/Videos:** `slick('slickPause')`, `carousel.pause()`, `video.pause()` + `autoplay=false` (supporting Slick, OwlCarousel, Bootstrap).
+- **Hide Preloaders/Spinners:** Hide loading overlays and force un-hiding of content styled with `visibility:hidden` during page loads.
+- **Force Lazy Image Decoding:** Switch `loading:lazy` to `eager`, call `img.decode()`, and prefetch CSS `background-image` declarations (`fetch cache:'force-cache'`).
+- **Wait on Visible Images:** Verify `complete && naturalWidth > 0` on visible images before capture (timeout 7s).
+- **Enforce Layout Stability:** Poll `getBoundingClientRect()` on `<main>` until dimensions remain stationary for 400 ms.
+- **Neutralize Scrolling:** Override `window.scrollTo` and `scrollBy` to prevent JavaScript from shifting the viewport during full-page captures.
+- **Deterministic Emulation:** Set `emulate_media(reduced_motion="reduce")` with a fixed viewport dimensions across all runs.
+
+### Cookie and Overlay Dismissal
+- **Automated "Accept" Dismissal:** Two-tier detection: (1) `get_by_role("button", name=/Thai text|accept|agree|.../)` supporting Thai and English, and (2) Vendor-specific selectors (CookieYes `.cky-btn-accept`, OneTrust `#onetrust-accept-btn-handler`, Cookiebot).
+- **Frame Traversal:** Search both top-level page and nested iframes (where many third-party consent dialogs reside).
+- **CSS Fallback:** Apply `HIDE_CSS` fallback hiding if buttons cannot be programmatically clicked.
+- **Visibility Verification:** Ensure banner elements disappear (`offsetParent === null`) before entering screenshot capture.
+- **State Flagging:** Expose `cookie_dismissed` / `promo_closed` metadata for observability.
+
+### Guardrails and SSRF Compatibility
+- **PhaseRecorder:** Track per-phase execution time (in milliseconds) for diagnostic observability.
+- ⚠️ **Maintain SSRF Guard Invariants:** All resource prefetching must respect existing `page.route("**/*")` intercepts and disallow private-range network access.
 
 ---
 
-## 3. Diff heatmap preview (3 ช่อง)
+## 2. ⭐ Multi-Baseline Matching
 
-**ที่มา:** `image_diff.py` (`_diff_score_and_preview`)
-**ปลายทาง:** [services/diff/diff.py](../backend/app/services/diff/diff.py) + [ScreenshotCompare.tsx](../frontend/src/components/ScreenshotCompare.tsx)
+**Origin:** `image_diff.py` (`find_best_baseline`) + `baseline_store.py`.  
+**Destination:** [services/diff/diff.py](../backend/app/services/diff/diff.py) + `Snapshot` / `Target` models.
 
-- **diff แบบ pixel + mask** — `ImageChops.difference` → grayscale → boost brightness×2 + contrast×2 → threshold (`MASK_LEVEL=16`) เป็น mask → กัน noise การบีบอัด/anti-alias เด้ง
-- **ratio = พิกเซลเปลี่ยน / พิกเซลทั้งหมด** (0..1) เทียบ threshold — วิธี mask นี้แม่นกว่า diff ดิบ
-- **ภาพ preview 3 ช่องต่อกัน** `[baseline | current | highlighted]` — ช่อง 3 ทาบจุดต่างสีแดง (`composite` + `blend 0.6`) → เห็นทันทีว่าต่างตรงไหน
-- **จัดการภาพคนละขนาด** (`_ensure_same_size`) — resize current ให้เท่า baseline (BILINEAR) ก่อนเทียบ
-- **early-exit** — `getbbox() is None` (เหมือนเป๊ะ) คืน 0.0 ทันที
-- **ปิด file handle ด้วย context manager** — กัน handle leak ตอน monitor ยาว
-- **UI:** เพิ่มโหมด "diff overlay" (แดง) ใน `ScreenshotCompare` ที่ตอนนี้โชว์แค่ baseline/current
+- **Multiple Approved Baselines per Target:** Sites featuring rotating hero banners or promotional cycles have multiple valid visual representations.
+- **Best-Match Comparison:** Evaluate current snapshots against all approved baselines, selecting the lowest diff score (`best_ratio = min(...)`). This substantially eliminates false positives on dynamic pages.
+- **Baseline Pruning:** Enforce a maximum baseline capacity (`MAX_BASELINES_PER_SITE=50`), demoting the oldest baselines upon reaching caps.
+- **Timestamped File Naming:** Format baseline artifacts chronologically (e.g., `2026-09-02T14-30-00.png`).
+- **Corrupt File Resilience:** Enable `LOAD_TRUNCATED_IMAGES=True` and catch `(OSError, ValueError)` so an unreadable image does not abort the entire evaluation run.
+- **Matched Baseline Attribution:** Persist `matched_baseline_id` inside `CheckResult` so operators can inspect which baseline was used for comparison.
 
 ---
 
-## ลำดับแนะนำ
+## 3. Diff Heatmap Previews (Three-Panel)
 
-| ข้อ | ทำเมื่อไหร่ | เหตุผล |
+**Origin:** `image_diff.py` (`_diff_score_and_preview`).  
+**Destination:** [services/diff/diff.py](../backend/app/services/diff/diff.py) + [ScreenshotCompare.tsx](../frontend/src/components/ScreenshotCompare.tsx).
+
+- **Pixel Diff with Noise Mask:** `ImageChops.difference` → grayscale → brightness boost (2x) + contrast boost (2x) → threshold mask (`MASK_LEVEL=16`) to absorb compression artifacts and antialiasing noise.
+- **Normalized Ratio:** Calculate changed pixels over total pixel count (0.0 to 1.0) against thresholds.
+- **Three-Panel Composite:** Generate a combined preview `[Baseline | Current | Highlighted Overlay]`, where differences are highlighted with a semi-transparent red overlay (`blend 0.6`).
+- **Dimension Normalization:** Automatically resize differing snapshot dimensions to match the baseline prior to calculation.
+- **Early Exit:** Short-circuit evaluation if bounding box diff (`getbbox()`) is `None` (0.0% diff).
+- **Resource Cleanup:** Enforce explicit context managers on image file handles to avoid resource leaks during continuous long-term monitoring.
+
+---
+
+## Recommended Execution Roadmap
+
+| Item | Phase | Rationale |
 |---|---|---|
-| 1. Page-stabilization + cookie dismiss | เฟสนี้ | อุดจุดอ่อนหลัก (false positive) เสี่ยงต่ำ |
-| 2. Multi-baseline matching | เฟสนี้/ถัดไป | ต้องแก้ schema แต่ตรงประเด็น |
-| 3. Diff heatmap preview | เฟสนี้/ถัดไป | UX ชัดขึ้น เสี่ยงต่ำ |
-| 4. Auto-rebaseline (แยกไฟล์) | อนาคต | security-sensitive — ดู future/auto-rebaseline.md |
+| 1. Page Stabilization + Cookie Dismissal | Immediate | Solves the primary cause of false positives; low operational risk. |
+| 2. Multi-Baseline Matching | Immediate / Next | Requires schema evolution but directly addresses dynamic content. |
+| 3. Diff Heatmap Previews | Immediate / Next | Improves triage UX; low operational risk. |
+| 4. Auto-Rebaseline (Separated) | Future | Security-sensitive; requires policy consensus. |
 
-## สิ่งที่ไม่ยกมา
-- Loop/runner, event-bus JSONL, log-tail, filesystem `state/` → DB + REST + scheduling ของโปรเจกต์ปัจจุบันแทนแล้ว
-- Flet UI ทุกตัว
+## Omitted Prototype Elements
+- Standalone execution loops, JSONL event streaming, log tailing, and disk-based `state/` directories (superseded by PostgreSQL/SQLite, FastAPI REST endpoints, and background scheduler).
+- All Flet UI components.

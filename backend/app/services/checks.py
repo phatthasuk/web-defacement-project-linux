@@ -58,6 +58,8 @@ class TargetCheckResult:
     error_code: str | None = None
     http_status: int | None = None
     retry_after_seconds: int | None = None
+    snapshot_id: str | None = None
+    check_result_id: str | None = None
 
 
 def parse_retry_after(value: str | None) -> int | None:
@@ -316,6 +318,7 @@ async def run_target_check(
                 is_baseline=False,
             )
             db.add(snapshot)
+            snapshot_id = snapshot.id
             next_status = STATUS_AWAITING_BASELINE
             transition_target(target, next_status)
             db.commit()
@@ -332,6 +335,7 @@ async def run_target_check(
                 snapshot=snapshot,
                 check_result=None,
                 target_id=target.id,
+                snapshot_id=snapshot_id,
             )
 
         # Compare against approved baselines using the staged files
@@ -428,6 +432,9 @@ async def run_target_check(
             )
             transition_target(target, STATUS_CHANGED)
             db.add(check_result)
+            db.flush()
+            snapshot_id = snapshot.id
+            check_result_id = check_result.id
             db.commit()
             artifacts_committed = True
             try:
@@ -443,6 +450,8 @@ async def run_target_check(
                 snapshot=snapshot,
                 check_result=check_result,
                 target_id=target.id,
+                snapshot_id=snapshot_id,
+                check_result_id=check_result_id,
             )
         else:
             # Unchanged check (Stage 1.2): discard staging artifacts, leaving 0 bytes on disk!
@@ -460,6 +469,9 @@ async def run_target_check(
             )
             transition_target(target, STATUS_OK)
             db.add(check_result)
+            db.flush()
+            snapshot_id = matched_baseline.id
+            check_result_id = check_result.id
             db.commit()
             db.refresh(check_result)
             return TargetCheckResult(
@@ -467,6 +479,8 @@ async def run_target_check(
                 snapshot=matched_baseline,
                 check_result=check_result,
                 target_id=target.id,
+                snapshot_id=snapshot_id,
+                check_result_id=check_result_id,
             )
     except Exception as exc:
         db.rollback()

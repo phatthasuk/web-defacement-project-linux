@@ -1,126 +1,118 @@
-# แผนแก้ไขเพิ่มเติมจากการ Review CR10
+# CR10 Follow-up Remediation Plan
 
-วันที่: 17 กันยายน 2026  
-สถานะ: เสนอแผน — ยังไม่ได้ดำเนินการแก้ไขโค้ด
+Date: September 17, 2026  
+Status: Proposed Plan — Code modifications pending
 
-อ้างอิง: [แผน CR10](Code-Review-and-Remediation-Plan-CR10-17-9-2026.md), [แผนหลัก](PROJECT_PLAN.md) และเอกสาร [Phase 1](../refinement/17-9-2026/Code-Review-Remediation-CR10-Phase1-17-9-2026.md), [Phase 2](../refinement/17-9-2026/Code-Review-Remediation-CR10-Phase2-17-9-2026.md), [Phase 3](../refinement/17-9-2026/Code-Review-Remediation-CR10-Phase3-17-9-2026.md)
+References: [CR10 Plan](Code-Review-and-Remediation-Plan-CR10-17-9-2026.md), [Main Project Plan](PROJECT_PLAN.md), and refinement documents [Phase 1](../refinement/17-9-2026/Code-Review-Remediation-CR10-Phase1-17-9-2026.md), [Phase 2](../refinement/17-9-2026/Code-Review-Remediation-CR10-Phase2-17-9-2026.md), and [Phase 3](../refinement/17-9-2026/Code-Review-Remediation-CR10-Phase3-17-9-2026.md).
 
-## ขอบเขตและข้อจำกัด
+## Scope and Invariants
 
-- เอกสารนี้บันทึกรายการแก้ไขจากการ review เท่านั้น การสร้างเอกสารไม่ได้รวมการดำเนินการแก้ไขโค้ด
-- รักษาฐานข้อมูลจริง ประวัติการตรวจ baseline และ monitoring targets เดิมทั้งหมด ห้าม reset หรือลบข้อมูลเพื่อให้เทสต์ผ่าน
-- รักษา single API worker, authentication, CSRF, SSRF protections และ detector thresholds เดิม
-- การทดสอบต้องใช้ฐานข้อมูลและ artifacts แยกจากข้อมูลจริง และไม่ติดต่อ monitoring targets จริง
-- การ review ตรวจโค้ดปัจจุบันเทียบเอกสาร ไม่สามารถยืนยัน diff ก่อน–หลังได้เนื่องจาก Git metadata ไม่สมบูรณ์ ไม่พบ `walkthrough.md` และไม่ได้รันชุดเทสต์เต็ม
+- This document records remediation items resulting from review; creating this plan does not imply code execution.
+- Maintain production database records, baseline histories, and configured monitoring targets without truncation or reset.
+- Preserve single API worker constraint, session/CSRF/SSRF defenses, and detector thresholds.
+- Test suites must utilize isolated SQLite databases and sandbox directory paths, never contacting live target endpoints.
+- Due to missing Git history and absence of `walkthrough.md`, review was conducted against existing file state.
 
-## 1. [P1] แก้การบันทึกผล Changed เมื่อเปิด Foreign Key
+## 1. [P1] Resolve Changed Status Persistence under Enabled Foreign Keys
 
-ไฟล์เกี่ยวข้อง: `backend/app/services/checks.py`, `backend/app/models/snapshot.py`, `backend/app/models/check_result.py`
+Affected files: `backend/app/services/checks.py`, `backend/app/models/snapshot.py`, `backend/app/models/check_result.py`
 
-**ข้อพบ:** เส้นทางตรวจพบความเปลี่ยนแปลงเพิ่ม Snapshot และ CheckResult ใน transaction เดียวกัน โดยไม่มี ORM relationship ที่กำหนดลำดับ insert การจำลองด้วยโมเดลจริงบน SQLite in-memory ที่เปิด foreign key พบ `FOREIGN KEY constraint failed` จากการ insert CheckResult ก่อน snapshot ที่อ้างถึง
+**Finding:** The check pipeline attempts to insert a Snapshot and a referencing CheckResult in the same database transaction without an explicit ORM flush or relationship ordering. In an in-memory SQLite database with foreign keys enabled, this yields `FOREIGN KEY constraint failed` when CheckResult is flushed prior to the referenced Snapshot.
 
-**งานที่ต้องทำ**
+**Action Items:**
 
-- flush Snapshot ก่อนเพิ่ม CheckResult ที่อ้างถึง หรือกำหนด ORM relationship ให้จัดลำดับ insert ถูกต้อง โดยรักษาความเป็น transaction เดียวกัน
-- rollback transaction ก่อนจัดการข้อผิดพลาดจาก flush/commit เพื่อไม่ใช้งาน session ที่อยู่ในสถานะ failed transaction
-- ตรวจเส้นทาง artifacts ที่ promote แล้วแต่ transaction ล้มเหลว และกำหนด cleanup ให้ไม่ทิ้งไฟล์ที่ไม่มี record อ้างอิง โดยไม่กระทบ artifacts ที่บันทึกสำเร็จ
+- Explicitly flush Snapshot before persisting referencing CheckResult rows, or establish ORM relationships that guarantee insertion order while retaining transaction atomicity.
+- Issue transaction rollbacks before handling errors from flush/commit to prevent reusing sessions in a failed state.
+- Handle orphaned promoted files if database transactions fail, cleaning unreferenced files without affecting committed artifacts.
 
-**เกณฑ์ตรวจรับ**
+**Acceptance Criteria:**
 
-- เมื่อมี baseline แล้วและตรวจพบการเปลี่ยนแปลง สามารถบันทึก Snapshot และ CheckResult พร้อมสถานะ Changed ได้ครบเมื่อเปิด foreign key
-- ไม่มี IntegrityError หรือ PendingRollbackError ในเส้นทางสำเร็จ
-- เมื่อจำลอง commit failure ระบบ rollback และจัดการสถานะ/ไฟล์ได้โดยไม่ทำลายข้อมูลเดิม
+- When an active baseline exists and alterations are detected, Snapshot and CheckResult are successfully inserted under enabled foreign keys with status `Changed`.
+- Zero IntegrityError or PendingRollbackError occurrences on standard success paths.
+- Simulated commit failures execute clean rollbacks and artifact cleanup without corrupting historical data.
 
-## 2. [P1] ปรับเทสต์ให้ใช้ Foreign Key เหมือนระบบจริง
+## 2. [P1] Align Test Fixtures with Production Foreign Key Enforcement
 
-ไฟล์เกี่ยวข้อง: `backend/tests/conftest.py`, `backend/tests/test_checks.py` และ fixtures ที่สร้าง SQLite engine แยก
+Affected files: `backend/tests/conftest.py`, `backend/tests/test_checks.py`, and standalone SQLite engine fixtures.
 
-**ข้อพบ:** engine ในเทสต์หลักไม่ได้เปิด foreign key ขณะที่ engine ของแอปเปิดแล้ว การตรวจค่า PRAGMA ของ app engine เพียงอย่างเดียวไม่ครอบคลุมพฤติกรรมการบันทึกข้อมูลใน fixtures
+**Finding:** The primary test SQLite engine does not enforce foreign keys, whereas application engines do. Validating `PRAGMA foreign_keys` solely on the app engine fails to detect constraint errors during test execution.
 
-**งานที่ต้องทำ**
+**Action Items:**
 
-- เปิด `PRAGMA foreign_keys=ON` ทุก connection ของ test engines ที่ใช้ตรวจพฤติกรรมฐานข้อมูล
-- เพิ่ม regression test สำหรับ baseline → ตรวจพบการเปลี่ยนแปลง → บันทึก Changed
-- เพิ่มเทสต์การอ้างถึง target/snapshot ที่ไม่มีอยู่ และการลบ record ที่ยังมี foreign key อ้างถึงตามข้อกำหนด CR10-06
-- ให้เทสต์ตรวจ PRAGMA ใช้ฐานข้อมูลแยก ไม่เชื่อมต่อฐานข้อมูลจริงผ่าน app engine
+- Enforce `PRAGMA foreign_keys=ON` across all test database connections.
+- Add regression tests verifying: Baseline present → Difference detected → `Changed` status written successfully.
+- Add test assertions validating that unresolvable foreign keys raise `IntegrityError` (per CR10-06).
+- Isolate PRAGMA checks to dedicated test databases without attaching live databases.
 
-**เกณฑ์ตรวจรับ**
+**Acceptance Criteria:**
 
-- regression test สามารถจับปัญหาข้อ 1 ก่อนแก้ และผ่านหลังแก้
-- การอ้างอิง record ที่ไม่มีอยู่ถูกปฏิเสธด้วย IntegrityError
-- ชุดเทสต์ฐานข้อมูลผ่านโดยเปิด foreign key และไม่อ่านเขียนฐานข้อมูลจริง
+- Regression tests fail on item 1 before remediation and pass post-fix.
+- Unreferenced foreign keys are rejected with IntegrityError.
+- Database test suites pass with foreign keys enabled on test-only storage.
 
-## 3. [P2] ครอบคลุม cleanup ตลอดช่วง capture
+## 3. [P2] End-to-End Staging Artifact Cleanup During Capture Cancellation
 
-ไฟล์เกี่ยวข้อง: `backend/app/services/capture/capture.py`, `backend/app/services/checks.py`, เทสต์ capture/checks/concurrency
+Affected files: `backend/app/services/capture/capture.py`, `backend/app/services/checks.py`, tests in capture/checks/concurrency.
 
-**ข้อพบ:** cleanup finally ใน run_target_check เริ่มหลัง capture คืนค่า หาก cancellation เกิดหลังเขียน staging แต่ระหว่าง await browser.close() จะยังไม่มี CaptureResult ส่งกลับให้ caller cleanup เทสต์ที่เพิ่มใน Phase 2 จำลองการยกเลิกหลัง capture คืนค่าแล้วเท่านั้น
+**Finding:** The `finally` cleanup block in `run_target_check` executes only after `capture_snapshot` returns. If coroutine cancellation occurs after staging files are written but during `await browser.close()`, no `CaptureResult` is returned to the caller, abandoning staging directories until periodic cleanup runs.
 
-**งานที่ต้องทำ**
+**Action Items:**
 
-- ให้ผู้สร้าง staging รับผิดชอบ cleanup เมื่อ capture ล้มเหลวหรือถูก cancel ก่อนส่งผลลัพธ์กลับ
-- ครอบคลุม timeout/cancellation ระหว่างปิด browser และออกจาก async context managers
-- รักษาการส่งต่อ CancelledError และการปล่อย in-flight reservation
-- เพิ่มเทสต์ยกเลิกงานหลังเขียน artifacts แต่ก่อน capture คืนค่า รวมถึงเทสต์หลัง capture คืนค่า
+- Mandate that the staging creator handles cleanup if execution aborts or is canceled prior to returning a completed result.
+- Cover cancellation during browser teardown and async context manager exits.
+- Preserve CancelledError propagation and guarantee in-flight reservation release.
+- Add tests simulating task cancellation post-write but pre-return.
 
-**เกณฑ์ตรวจรับ**
+**Acceptance Criteria:**
 
-- ไม่เหลือ staging ของงานที่ถูกยกเลิกทันทีหลัง coroutine จบ โดยไม่ต้องรอ periodic cleanup
-- reservation ถูกปล่อยและงานถัดไปไม่ถูกกีดกันด้วย reservation ค้าง
-- การ capture/promote สำเร็จยังเก็บ artifacts ที่ต้องใช้ได้ครบ
+- No orphaned staging directories remain immediately following task cancellation.
+- In-flight target reservations are promptly discarded without blocking subsequent checks.
+- Normal captures and promotions retain required artifacts cleanly.
 
-## 4. [P3] จัด configuration สำหรับ production ตามแผน
+## 4. [P3] Formalize Production Deployment Configurations
 
-ไฟล์เกี่ยวข้อง: `docker-compose.yml`, production frontend build/server configuration, development compose configuration, `README.md`
+Affected files: `docker-compose.yml`, frontend static build configurations, development compose configurations, `README.md`.
 
-**ข้อพบ:** compose ปัจจุบันยังรัน frontend ด้วย npm run dev และ backend ด้วย --reload --reload-dir app ซึ่งเป็นทางเลือก development ไม่ใช่ configuration สำหรับ production/Stage 2 ที่แผน CR10 ระบุ
+**Finding:** Docker Compose continues executing frontend via `npm run dev` and backend with `--reload --reload-dir app`, which represents development tooling rather than production Stage 2 deployment.
 
-**งานที่ต้องทำ**
+**Action Items:**
 
-- จัด frontend build stage และเสิร์ฟ dist ผ่าน production static server พร้อม caching headers ที่เหมาะสม
-- ถอด --reload จาก backend สำหรับ production/Stage 2 และคง --workers 1
-- แยก development configuration และอธิบายวิธีเลือกใช้งานใน README
-- ตรวจ API routing, frontend routes และ runtime configuration ในรูปแบบ deployment ที่เลือก
+- Implement a multi-stage Docker build for the frontend, serving compiled static assets via an optimized web server (e.g., Nginx) with proper caching headers.
+- Remove `--reload` from production backend runtime configurations while retaining `--workers 1`.
+- Provide isolated `docker-compose.dev.yml` and `docker-compose.yml` with clear usage documentation in README.
+- Verify reverse proxy routing, frontend client routing (HTML5 history mode), and API proxying.
 
-**เกณฑ์ตรวจรับ**
+**Acceptance Criteria:**
 
-- frontend deployment เสิร์ฟ precompiled/minified assets แทน Vite development server
-- ตรวจ caching headers, เปิดหน้าโดยตรง และการเรียก API ได้ตามปกติ
-- backend ไม่ restart จากการเขียน capture artifacts และใช้ single worker
-- production build ผ่าน พร้อมคำแนะนำ deployment ที่ตรงกับ configuration จริง
+- Production deployment serves minified static assets instead of the Vite dev server.
+- Backend processes do not restart upon writing local capture files.
+- Clean production builds pass with documentation matching actual Compose topology.
 
-## 5. [P2] แก้เอกสาร Phase 3 ให้ตรงกับแผน
+## 5. [P2] Synchronize Phase 3 Documentation with Plan Specifications
 
-ไฟล์เกี่ยวข้อง: เอกสาร refinement Phase 3, `UPDATE_SUMMARY.md`, `README.md`
+Affected files: Refinement Phase 3 docs, `UPDATE_SUMMARY.md`, `README.md`.
 
-**งานที่ต้องทำ**
+**Action Items:**
 
-- แก้การจับคู่หมายเลขให้ตรงกับแผนเดิม:
+- Reconcile tracking identifiers to match original specifications:
+  - CR10-08: Alembic migration alignment
+  - CR10-09: Triage guards and error banner
+  - CR10-10: Run Check trigger on Target Detail
+  - CR10-12: Production frontend deployment
+- Correct misnamed migration references to `d2b3c4e5f6a7_structural_detector.py`.
+- Document schema verification procedures accurately without re-stamping live databases.
+- Adjust "100% completed" claims to reflect verified delivered scope.
 
-| หมายเลข | งานตามแผน CR10 |
-|---|---|
-| CR10-08 | Alembic migration alignment |
-| CR10-09 | Triage guards และ error banner |
-| CR10-10 | ปุ่ม Run Check ใน Target Detail |
-| CR10-12 | Production frontend deployment |
+**Acceptance Criteria:**
 
-- บันทึก query cache invalidation เป็นงานประกอบ ไม่ใช้แทนรายการที่กำหนดในแผน
-- แก้ชื่อ migration ที่อ้างผิดเป็น `d2b3c4e5f6a7_structural_detector.py` และไม่อ้างว่า migration นี้เพิ่ม status index
-- บันทึกขั้นตอนตรวจ schema และ stamping ใน UPDATE_SUMMARY โดยการแก้เอกสารไม่ต้อง stamp ฐานข้อมูลจริงซ้ำ
-- ปรับข้อความ “100% completed” ให้ตรงกับรายการที่ทำและตรวจรับจริง แยกสิ่งที่ยังไม่ทำหรือยังไม่ได้ยืนยัน
+- All 12 items align accurately with verified implementation evidence.
+- Migration filenames match repository source files.
+- Documentation reflects current verification metrics without relying on stale test logs.
 
-**เกณฑ์ตรวจรับ**
+## 6. Verification and Acceptance Workflow
 
-- ทั้ง 12 รายการในแผนมีสถานะและหลักฐานตรงกับงานจริง ไม่มีรายการหายจากการเปลี่ยนหมายเลข
-- ชื่อไฟล์ migration และคำอธิบายตรงกับ source ที่มีอยู่
-- ไม่ใช้ผล build หรือผลเทสต์เดิมแทนหลักฐานตรวจรับหลังแก้ไข
-
-## 6. การตรวจรับรวมหลังแก้ไข
-
-1. แก้ข้อ 1 พร้อม regression tests ในข้อ 2 ก่อนรับรองเส้นทางตรวจจับ Changed
-2. ตรวจ cancellation/timeout และ cleanup ตามข้อ 3 ด้วย mocks และ artifacts แยก
-3. รัน backend tests, frontend tests, type checking, lint และ production build ที่เกี่ยวข้อง
-4. ตรวจ production configuration ตามข้อ 4 ในสภาพแวดล้อมแยกจากระบบจริง
-5. อัปเดตเอกสารตามข้อ 5 พร้อมผลจริง ข้อจำกัด และรายการที่ยังค้าง
-
-ผลตรวจรับต้องระบุคำสั่ง สภาพแวดล้อม และผลลัพธ์ โดยไม่เปิดเผย secrets และต้องรักษาฐานข้อมูลจริง ประวัติ และ baseline เดิมทั้งหมด
+1. Resolve Item 1 and verify with regression tests from Item 2.
+2. Verify cancellation cleanup via Item 3 using isolated mock runs.
+3. Execute backend suites, frontend tests, linting, and production builds.
+4. Verify production Compose configurations in a clean testing sandbox.
+5. Update project documentation with verified outputs and remaining constraints.

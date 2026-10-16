@@ -1,5 +1,6 @@
-import time
+from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.core.status import STATUS_AVAILABILITY_ISSUE, STATUS_CHECKING
+from app.core.time import utcnow
 from app.db.session import Base
 from app.models import Snapshot, Target
 from app.services.scheduler import CheckScheduler
@@ -56,27 +58,39 @@ async def test_scheduler_registers_and_triggers_due_target(tmp_path: Path):
     )
     scheduler = CheckScheduler(settings, session_factory=session_factory)
 
-    # First tick: registers target with initial jitter
+    # First tick: persists the initial deadline with jitter.
     await scheduler._tick()
-    assert target_id in scheduler._next_due_times
-    assert scheduler._next_due_times[target_id] > time.time()
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None and target.next_check_at is not None
+        assert target.next_check_at > utcnow()
 
-    # Manually expire the due time to simulate time elapsing
-    scheduler._next_due_times[target_id] = time.time() - 1
+    # Expire the persisted deadline to simulate time elapsing.
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None
+        target.next_check_at = utcnow() - timedelta(seconds=1)
+        db.commit()
 
-    # Second tick: triggers the check, retains task reference, and reschedules next due time
-    await scheduler._tick()
-    assert scheduler.active_tasks_count >= 1
-    assert scheduler._next_due_times[target_id] > time.time()
+    async def fake_capture(url, settings, out_dir):
+        raise RuntimeError("expected test capture failure")
 
-    # Drain on stop ensures no tasks or coroutines are abandoned (Opus 5 review 4.2)
-    await scheduler.stop()
+    # Second tick claims the due target and hands it to the attempt wrapper.
+    with patch("app.services.scheduler.capture_snapshot", fake_capture):
+        await scheduler._tick()
+        assert scheduler.active_tasks_count >= 1
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            assert target is not None and target.next_check_at is None
+            assert target.check_run_id is not None
+
+        # Drain on stop ensures no tasks or coroutines are abandoned (Opus 5 review 4.2)
+        await scheduler.stop()
     assert scheduler.active_tasks_count == 0
 
 
 @pytest.mark.asyncio
-async def test_scheduler_retries_in_flight_target_in_60s(tmp_path: Path):
-    """Review 6.3: Skipped check retries in 60s instead of waiting a full interval."""
+async def test_scheduler_skips_checking_target_without_claiming_it(tmp_path: Path):
     session_factory, _ = make_test_db(tmp_path)
     with session_factory() as db:
         target = Target(
@@ -95,13 +109,11 @@ async def test_scheduler_retries_in_flight_target_in_60s(tmp_path: Path):
         CHECK_INTERVAL_SECONDS=3600,
     )
     scheduler = CheckScheduler(settings, session_factory=session_factory)
-    scheduler._next_due_times[target_id] = time.time() - 10
-
-    # Tick skips target because it is Checking, and schedules retry in 60s (not 3600s)
-    now = time.time()
+    # A target currently marked Checking belongs to its active worker.
     await scheduler._tick()
-    assert scheduler._next_due_times[target_id] < now + 120.0
-    assert scheduler._next_due_times[target_id] >= now + 50.0
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None and target.next_check_at is None
 
     await scheduler.stop()
 
@@ -133,10 +145,16 @@ async def test_scheduler_holds_new_url_candidate_after_failed_retry(tmp_path: Pa
         target_id = target.id
 
     scheduler = CheckScheduler(Settings(DATA_DIR=str(tmp_path)), session_factory=session_factory)
-    scheduler._next_due_times[target_id] = time.time() - 1
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None
+        target.next_check_at = utcnow() - timedelta(seconds=1)
+        db.commit()
     await scheduler._tick()
     assert scheduler.active_tasks_count == 0
-    assert scheduler._next_due_times[target_id] > time.time()
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None and target.next_check_at > utcnow()
     await scheduler.stop()
 
 
@@ -161,10 +179,16 @@ async def test_scheduler_holds_first_revision_candidate_until_review(tmp_path: P
         target_id = target.id
 
     scheduler = CheckScheduler(Settings(DATA_DIR=str(tmp_path)), session_factory=session_factory)
-    scheduler._next_due_times[target_id] = time.time() - 1
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None
+        target.next_check_at = utcnow() - timedelta(seconds=1)
+        db.commit()
     await scheduler._tick()
     assert scheduler.active_tasks_count == 0
-    assert scheduler._next_due_times[target_id] > time.time()
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None and target.next_check_at > utcnow()
     await scheduler.stop()
 
 
@@ -180,9 +204,9 @@ async def test_scheduler_purges_inactive_targets(tmp_path: Path):
 
     settings = Settings(DATA_DIR=str(tmp_path))
     scheduler = CheckScheduler(settings, session_factory=session_factory)
-    scheduler._next_due_times[target_id] = time.time() + 100
-
     # Tick purges targets that are no longer active
     await scheduler._tick()
-    assert target_id not in scheduler._next_due_times
+    with session_factory() as db:
+        target = db.get(Target, target_id)
+        assert target is not None and target.next_check_at is None
     await scheduler.stop()

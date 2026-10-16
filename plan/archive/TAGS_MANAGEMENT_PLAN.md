@@ -1,57 +1,58 @@
-# แผนระบบ Tags สำหรับจัดกลุ่มเว็บไซต์
+# Tags System Plan for Website Categorization
 
-วันที่วางแผน: 8 ตุลาคม 2026 สถานะ: วางแผน ยังไม่ได้เริ่มพัฒนา
+Planning Date: October 8, 2026  
+Status: Planning Document (Archived Design Record)
 
-เพิ่ม Tags เพื่อจัดกลุ่มและกรองเว็บไซต์ที่ต้องตรวจสอบ มีหน้าจัดการ Tags แยกที่ `/tags` และเมนูเลือกหน้าอยู่ด้านขวาบนของ Header เมื่อกำหนด Tags ให้เว็บไซต์แล้ว ให้แสดงป้ายใต้ URL ในคอลัมน์ Target / URL ตามกรอบสีแดงในภาพอ้างอิง
+This document planned the introduction of Tags to organize, filter, and categorize monitored websites. It specified a dedicated tag management view at `/tags`, navigation links in the application header, and visual tag badges displayed beneath URLs in the Target / URL column.
 
-> หมายเหตุเอกสาร 12 ตุลาคม 2026: Tags ถูกพัฒนาแล้ว เอกสารนี้เก็บไว้เป็นประวัติการออกแบบ ข้อความสถานะและลำดับพัฒนาเดิมด้านล่างไม่ใช่สถานะปัจจุบัน แผน [Member Management](../MEMBER_MANAGEMENT_PLAN.md#tags-and-filtering) เป็นส่วนเสริม standalone ที่ใช้ Tags เดิมต่อและกำหนดสิทธิ์ Admin/Operator โดยมีลำดับพัฒนาและเกณฑ์ตรวจรับของตัวเอง ไม่ผูกกับ Stage ในแผนหลัก
+> Historical Note (October 12, 2026): The Tagging system has been implemented. This document is retained for architectural and design history. Development sequences and preliminary statuses reflect historical milestones. The standalone [Member Management](../MEMBER_MANAGEMENT_PLAN.md#tags-and-filtering) specification governs role-based access control (Admin/Operator) layered atop this tagging system.
 
-แผนเดิมนี้ขยายรายละเอียดส่วน Tags โดยคงหลักการหลาย Tags ต่อเว็บไซต์ และ Tags ไม่เปลี่ยนสิทธิ์เข้าถึงเว็บไซต์
+This design establishes many-to-many tag associations per website without altering operational access permissions.
 
-## ขอบเขตการใช้งาน
+## 1. Scope
 
-รุ่นแรกประกอบด้วยหน้าสร้างและแก้ไข Tags การลบ Tags การกำหนด Tags รายเว็บไซต์ และตัวกรองรายการเว็บไซต์ตาม Tags ผู้ใช้สามารถกรองกลุ่มแล้วกด Run Check ของเว็บไซต์ในกลุ่มผ่านกลไกตรวจสอบเดิมได้
+Initial deliverables include tag creation, editing, deletion, target-tag assignments, and tag-based filtering on the target dashboard. Operators can filter target subsets and trigger on-demand checks using existing execution workflows.
 
-การตรวจทั้งกลุ่มด้วยปุ่มเดียว การกำหนดรอบตรวจตาม Tags และการกำหนด Tags หลายเว็บไซต์พร้อมกันเป็นงานต่อยอด ระบบ Tags รุ่นแรกไม่เปลี่ยนรอบตรวจอัตโนมัติหรือขั้นตอนอนุมัติ Baseline
+Batch-triggering entire tag groups, tag-driven scheduling intervals, and bulk tag assignments represent future roadmap items. Initial tag capabilities do not modify baseline approval logic or scheduled monitoring intervals.
 
-## เมนูด้านขวาบนของ Header
+## 2. Header Navigation
 
-- ใช้ Header ส่วนกลางใน `frontend/src/App.tsx` โดยเพิ่มเมนู `Websites` และ `Tags` ในกลุ่มด้านขวา ก่อนข้อมูลผู้ใช้และ Logout
-- `Websites` ไป `/` และ `Tags` ไป `/tags` พร้อมสถานะบอกหน้าปัจจุบัน
-- เมนูใช้ร่วมกันในหน้ารายการเว็บไซต์ หน้ารายละเอียดเว็บไซต์ หน้ารายละเอียดผลตรวจ และหน้าจัดการ Tags
-- หน้าจอแคบให้จัดเมนูเป็นอีกแถวหรือเมนูย่อที่มีป้ายชื่อชัดเจน ไม่ให้เบียดชื่อระบบหรือ Logout
-- ใช้สีและรูปแบบ Slate dark theme ของแอปเดิม หน้าล็อกอินไม่แสดงเมนูนี้
+- Integrated into the global Header in `frontend/src/App.tsx`, adding `Websites` and `Tags` links to the right navigation cluster preceding user profile and Logout controls.
+- `Websites` links to `/` and `Tags` links to `/tags`, with active route indicators.
+- Persistent across Target List, Target Detail, Check Detail, and Tag Management views.
+- Mobile viewports adapt via collapsible menus or stacked navigation bars without crowding system titles or session controls.
+- Uses the application's Slate dark aesthetic; hidden on unauthenticated login views.
 
-## หน้าจัดการ Tags
+## 3. Tag Management Interface
 
-แยกเป็นหน้า `Tags Management` ที่ `/tags` มีฟอร์มเพิ่ม Tag และรายการ Tags ที่สร้างแล้ว รูปแบบสอดคล้องกับ Add New Monitor และ Monitored Targets
+A dedicated `Tags Management` view at `/tags` offering an inline creation form alongside an administrative list of configured tags, styled consistently with Add New Monitor and Monitored Targets cards.
 
-| ส่วน | พฤติกรรมที่เสนอ |
+| Component | Intended Behavior |
 | :--- | :--- |
-| Add Tag | กรอกชื่อ เลือกสีจากชุดสีที่กำหนด และแสดงตัวอย่าง Badge ก่อนบันทึก |
-| รายการ Tags | แสดง Badge ชื่อ จำนวนเว็บไซต์ที่ใช้งาน Tag และปุ่ม Edit / Delete |
-| ค้นหา | ค้นหาตามชื่อ Tag จากฝั่งเซิร์ฟเวอร์และแบ่งหน้า |
-| Edit Tag | แก้ชื่อและสี โดยทุกเว็บไซต์ที่อ้างอิง Tag เดียวกันแสดงค่าล่าสุด |
-| Delete Tag | ยืนยันโดยแสดงชื่อและจำนวนเว็บไซต์ที่จะถูกถอด Tag ลบเฉพาะ Tag และความสัมพันธ์ |
-| สถานะหน้า | รองรับ Loading, Empty, Error พร้อม Retry และแจ้งผลบันทึก |
+| Add Tag | Input tag name, select palette color, and display a live badge preview prior to submission. |
+| Tag List | Display tag badge, name, associated website count, and Edit / Delete action triggers. |
+| Search | Server-side name filtering with pagination. |
+| Edit Tag | Modify name and color key; updates propagate instantly across all referencing targets. |
+| Delete Tag | Confirmation dialog displaying name and count of affected associations; deletes tag and association records without modifying targets. |
+| View States | Supports Loading, Empty, and Error states with retry triggers and notification banners. |
 
-ใช้ชื่อภาษาอังกฤษใน UI ให้สอดคล้องกับแอปปัจจุบัน แต่อนุญาตชื่อ Tags ภาษาไทยและอังกฤษ เช่น `Hospital`, `Production`, `โรงพยาบาล`
+UI labels use English consistently, while tag names support UTF-8 (supporting Thai and English entries such as `Hospital`, `Production`, `Thai text`).
 
-จำนวนเว็บไซต์บนหน้าจัดการ Tags ให้นับเว็บไซต์ที่ active เป็นหลัก ข้อความยืนยันลบแสดงจำนวนความสัมพันธ์ทั้งหมด รวมเว็บไซต์ inactive เพื่ออธิบายผลกระทบครบถ้วน
+Usage counts display active targets, while deletion prompts report total associations (including inactive targets) to reflect complete impact.
 
-## การกำหนด Tags ให้เว็บไซต์
+## 4. Assigning Tags to Websites
 
-1. เพิ่มตัวเลือก Tags แบบเลือกได้หลายรายการในฟอร์ม Add New Monitor หลังช่อง URL โดยเลือกจาก Tags ที่สร้างไว้แล้ว
-2. เพิ่มตัวเลือกเดียวกันใน Edit Target Modal พร้อมแสดงค่าปัจจุบัน ผู้ใช้เพิ่มหรือถอด Tags แล้วกด Save
-3. แสดงช่องค้นหาเมื่อรายการ Tags มีจำนวนมาก สามารถล้างการเลือกทั้งหมดได้ และมีลิงก์ `Manage Tags` ไปหน้าจัดการ
-4. การสร้างเว็บไซต์ที่ไม่มี Tags ยังทำได้ตามเดิม เมื่อระบบโหลด Tags ไม่สำเร็จให้แสดง Retry และรักษาค่าที่เลือกไว้ในฟอร์มแก้ไข
-5. การแก้เฉพาะ Tags ส่งเฉพาะ `tag_ids` ไป Backend เพื่อให้เปลี่ยนกลุ่มได้ระหว่างตรวจเว็บไซต์ โดยไม่ส่ง URL ที่อาจล้าสมัยจากฟอร์ม
+1. Multi-select tag input added to the Add New Monitor form below the URL input.
+2. Identical multi-select incorporated into the Edit Target Modal, pre-populated with current assignments.
+3. Searchable dropdown for large tag volumes, supporting "Clear all" and a direct `Manage Tags` link.
+4. Adding targets without tags remains valid; failed tag queries display inline retry actions without corrupting form state.
+5. Updating tags submits `tag_ids` independently to allow categorization during active checks without re-submitting potentially stale URLs.
 
-หากมีการลบ Tag ระหว่างเปิดฟอร์ม ให้ Backend ปฏิเสธการบันทึกที่อ้างอิง ID นั้นทั้งรายการ แล้ว Frontend โหลดตัวเลือกใหม่และแจ้งให้ผู้ใช้ตรวจสอบการเลือกก่อนบันทึกอีกครั้ง
+If an assigned tag is concurrently deleted by another session, the backend transaction rejects the payload; the frontend reloads available tags and prompts the user to re-verify.
 
-## ตำแหน่งแสดง Tags บนรายการเว็บไซต์
+## 5. Visual Tag Badge Placement
 
-ภายในเซลล์ Target / URL ให้เรียงจากบนลงล่างดังนี้
+Within the Target / URL table cell, layout follows top-to-bottom:
 
 ```text
 Kasemrad Inter Hospital TH
@@ -59,119 +60,96 @@ https://kasemradinter.com/
 [ Hospital ] [ Production ] [ TH ]
 ```
 
-- วาง Badge ถัดจาก URL ลงมาอีกบรรทัด เว้นระยะประมาณ 6–8 px และใช้ `flex-wrap` ให้ Tags ขึ้นบรรทัดใหม่ได้
-- แสดงทุก Tag ของเว็บไซต์ในรุ่นแรก เรียงตามชื่อให้สม่ำเสมอ ไม่มีการซ่อนด้วยจำนวนคงที่
-- เว็บไซต์ที่ไม่มี Tags ไม่แสดงแถว Badge และไม่เพิ่มพื้นที่ว่าง
-- แสดง Error และ Notice ที่มีอยู่ถัดลงมาจาก Tags
-- Badge ขนาดเล็กมีชื่อที่อ่านได้บนพื้นหลังเข้ม ใช้สีเพื่อช่วยจำกลุ่ม โดยคง Status Badge ไว้ในคอลัมน์ Status ตามเดิม
-- ชื่อยาวจำกัดความกว้าง Badge และตัดด้วย ellipsis พร้อมวิธีอ่านชื่อเต็มผ่าน tooltip ที่รองรับคีย์บอร์ดและข้อความสำหรับโปรแกรมอ่านหน้าจอ
-- ปรับความสูงแถวตามเนื้อหา โดยไม่บังคับความสูงคงที่และไม่เพิ่มคอลัมน์ Tags แยก
-- ใช้ `TagBadge` ร่วมกันกับหน้าจัดการ Tags และหน้ารายละเอียดเว็บไซต์
+- Badges appear beneath the URL separated by 6–8 px spacing, wrapping responsively via `flex-wrap`.
+- Badges display in alphabetical order.
+- Targets without tags render no extra vertical margin.
+- Error messages and notices render below the badge cluster.
+- Badges maintain high legibility against dark slate backgrounds; status badges remain segregated in the Status column.
+- Long tag names truncate with ellipsis, accompanied by full-text accessible tooltips.
+- Table rows dynamically scale to content height rather than forcing fixed dimensions or introducing separate columns.
+- Reusable `TagBadge` component shared across Target List, Target Detail, and Tag Management.
 
-## ตัวกรองเว็บไซต์ตาม Tags
+## 6. Tag-Based Target Filtering
 
-เพิ่มแถบเลือก Tags เหนือตาราง Monitored Targets พร้อมโหมด `Match any` เป็นค่าเริ่มต้น และ `Match all` รวมถึงปุ่ม Clear filters
+Filter controls positioned above the Monitored Targets table, defaulting to `Match any` with a toggleable `Match all` option and a `Clear filters` button.
 
-| ตัวกรอง | ความหมาย |
+| Mode | Behavior |
 | :--- | :--- |
-| ไม่เลือก Tags | แสดงเว็บไซต์ทั้งหมดในขอบเขตสิทธิ์ปัจจุบัน |
-| Match any | เว็บไซต์มีอย่างน้อยหนึ่ง Tag ที่เลือก |
-| Match all | เว็บไซต์มีทุก Tag ที่เลือก |
+| No tags selected | Renders all targets accessible to the current session. |
+| Match any | Renders targets matching at least one selected tag (OR). |
+| Match all | Renders targets matching all selected tags (AND). |
 
-เมื่อเปลี่ยน Tags หรือโหมด ให้กลับหน้าแรก ใช้การกรองก่อนแบ่งหน้าจาก Backend และคำนวณ `total` จากเงื่อนไขเดียวกัน ตัวเลข Targets และข้อความ Showing ต้องสะท้อนผลที่กรองแล้ว ไม่มีการกรองเฉพาะ 50 รายการที่โหลดอยู่
+Modifying filter selections resets the view to Page 1. Filtering executes server-side prior to pagination, ensuring `total` counts and showing metrics reflect the filtered subset rather than filtering client-side records.
 
-เก็บค่าตัวกรองใน URL เช่น `/?tag_ids=<id1>&tag_ids=<id2>&tag_match=any` เพื่อคงกลุ่มเมื่อกลับจากหน้ารายละเอียดและแชร์ลิงก์ได้ หากไม่พบผล ให้แสดง `No websites match the selected tags` พร้อมปุ่มล้างตัวกรอง
+Filter states persist in query parameters (e.g. `/?tag_ids=<id1>&tag_ids=<id2>&tag_match=any`) to support navigation back from detail views and direct URL sharing. Empty results display `No websites match the selected tags` with an action to clear filters.
 
-ถ้า Tag ที่ใช้กรองถูกลบ ให้ถอดเฉพาะ ID ที่หายไป กลับหน้าแรก และแจ้งการเปลี่ยนตัวกรองก่อนแสดงผลใหม่
+If a filtered tag is deleted, the invalid ID is stripped, resetting pagination with an informative notification.
 
-## กฎข้อมูลและสิทธิ์
+## 7. Data Integrity and Permissions
 
-- หนึ่งเว็บไซต์มี Tags ได้หลายรายการ และหนึ่ง Tag ใช้กับหลายเว็บไซต์ได้
-- ข้อเสนอสำหรับรุ่นแรก: ชื่อ 1–50 ตัวอักษรหลัง trim และไม่เกิน 20 Tags ต่อเว็บไซต์
-- เก็บชื่อสำหรับแสดงผลแยกจาก `normalized_name` ซึ่งใช้ Unicode NFKC, trim และ casefold สำหรับตรวจชื่อซ้ำ เช่น `Hospital` และ ` hospital ` ถือเป็นชื่อเดียวกัน
-- บังคับชื่อไม่ซ้ำด้วย unique constraint ที่ฐานข้อมูล และคืน `409` เมื่อสร้างหรือแก้ไขชนชื่อเดิม รวมกรณีคำขอพร้อมกัน
-- ใช้ `color_key` จากชุดสีที่ Backend อนุญาต เช่น `cyan`, `blue`, `violet`, `emerald`, `amber`, `rose`, `slate` โดย Frontend map เป็นชุดคลาสคงที่
-- `tag_ids` ที่ส่งมาไม่ซ้ำกัน ต้องมีอยู่จริง และต้องผ่าน validation ทั้งชุดก่อนแก้ข้อมูล
-- PATCH ที่ไม่ส่ง `tag_ids` คง Tags เดิมไว้ ส่ง `[]` หมายถึงถอดทั้งหมด และส่ง `null` คืน `422`
-- การเปลี่ยนชื่อหรือสี Tag ไม่เปลี่ยน ID และไม่ต้องแก้ Tags ทีละเว็บไซต์
-- การลบ Tag ไม่ลบเว็บไซต์ ประวัติผลตรวจ Snapshots หรือสิทธิ์ที่มอบหมายไว้
-- การเปลี่ยน Tags ไม่เปลี่ยน `status`, `last_error`, `url_revision`, Baseline หรือผลตรวจ อัปเดต `updated_at` ตามกติกาการแก้ข้อมูลเว็บไซต์เดิม
+- Many-to-many relationship: targets can hold multiple tags; tags associate with multiple targets.
+- Tag name length: 1–50 characters (trimmed); upper bound of 20 tags per target.
+- Names normalized via Unicode NFKC, trimming, and casefolding (e.g., `Hospital` and ` hospital ` are treated as duplicates).
+- Uniqueness enforced via database unique constraints, returning `409 Conflict` on collisions.
+- Color palettes restricted to validated backend keys (`cyan`, `blue`, `violet`, `emerald`, `amber`, `rose`, `slate`), mapped to static CSS classes in the frontend.
+- Submitted `tag_ids` arrays must contain unique, valid identifiers validated atomically.
+- Omitting `tag_ids` on PATCH leaves existing tags unchanged; submitting `[]` strips all tags; submitting `null` returns `422 Unprocessable Entity`.
+- Updating tag names or colors preserves tag IDs without requiring individual target updates.
+- Deleting tags preserves target records, snapshots, and check histories.
+- Tag updates modify `updated_at` timestamps without affecting `status`, `last_error`, `url_revision`, or active baselines.
 
-ตามแผน Member Management ให้ Admin สร้าง แก้ ลบ และกำหนด Tags ได้ ส่วน Operator ใช้ตัวกรองและอ่าน Tags ของเว็บไซต์ที่ตนเข้าถึงได้ บังคับจาก Backend และจำกัด counts กับตัวเลือกตัวกรองให้อยู่ในขอบเขตสิทธิ์เดียวกัน
+Under Member Management, Admins create, edit, delete, and assign tags. Operators utilize tag filtering across assigned targets.
 
-โค้ดปัจจุบันตรวจเพียงผู้ใช้ที่ล็อกอิน และค่า role เริ่มต้นคือ `authenticated-user` จึงต้องจัดเตรียม dependency ตรวจ Admin และแนวทางแปลงบัญชีเดิมก่อนเปิดใช้การจัดการ Tags หากพัฒนา Tags ก่อน Member Management ให้รวมการตรวจ Admin ขั้นต่ำและกำหนดบัญชี Admin อย่างชัดเจนในงานนี้ ส่วนขอบเขตเว็บไซต์ของ Operator ให้ใช้ร่วมกับระบบ assignments เมื่อพัฒนาฟีเจอร์นั้น ห้ามถือว่าบัญชีเดิมทุกบัญชีเป็น Admin โดยอัตโนมัติ
+## 8. Data Model
 
-## แบบจำลองข้อมูล
-
-| ตาราง | ฟิลด์และข้อกำหนด |
+| Table | Columns and Constraints |
 | :--- | :--- |
-| `tags` | `id` UUID, `name`, `normalized_name` unique, `color_key`, `created_at`, `updated_at` |
-| `target_tags` | `target_id`, `tag_id` เป็น composite primary key และ Foreign Key ไป `targets` / `tags` |
+| `tags` | `id` (UUID PK), `name`, `normalized_name` (Unique), `color_key`, `created_at`, `updated_at` |
+| `target_tags` | `target_id`, `tag_id` (Composite PK, Foreign Keys to `targets` and `tags`) |
 
-เพิ่ม index ที่ `target_tags.tag_id` สำหรับค้นหาเว็บไซต์ตาม Tags ใช้ Foreign Key cascade เพื่อลบความสัมพันธ์เมื่อ Tag ถูกลบ การปิดใช้งานเว็บไซต์แบบ soft delete ตามระบบเดิมยังคงความสัมพันธ์ไว้
+Indexes placed on `target_tags.tag_id` for accelerated lookup. Foreign key cascades remove relationship rows upon tag deletion. Soft-deleted targets maintain tag associations.
 
-เพิ่ม Alembic migration ต่อจาก migration head ณ วันที่เริ่มพัฒนา รุ่นปัจจุบันที่ตรวจพบคือ `f4e5f6a7b8c9` เว็บไซต์เดิมเริ่มด้วย Tags ว่าง และไม่แก้ข้อมูลตรวจสอบเดิม การ downgrade ลบเฉพาะตาราง Tags และความสัมพันธ์ ตรวจ upgrade/downgrade บนฐานข้อมูลทดสอบและสำรองฐานข้อมูลก่อนใช้งานจริง
+Database migrations applied sequentially via Alembic. Downgrades drop tag tables and association records cleanly.
 
-## API ที่เสนอ
+## 9. Proposed API Endpoints
 
-| Method | Endpoint | หน้าที่ |
+| Method | Endpoint | Functionality |
 | :--- | :--- | :--- |
-| GET | `/tags?search=...&limit=...&offset=...` | รายการ Tags แบบแบ่งหน้า พร้อม counts ตามสิทธิ์ |
-| POST | `/tags` | สร้าง Tag ด้วย `name` และ `color_key` คืน `201` |
-| PATCH | `/tags/{tag_id}` | แก้ชื่อหรือสี คืน Tag ล่าสุด |
-| DELETE | `/tags/{tag_id}` | ลบ Tag และความสัมพันธ์ใน transaction เดียว คืน `204` |
-| POST | `/targets` | เพิ่ม `tag_ids` แบบ optional ค่าเริ่มต้น `[]` |
-| PATCH | `/targets/{target_id}` | เพิ่ม `tag_ids` สำหรับแทนชุด Tags ของเว็บไซต์ |
-| GET | `/targets` และ `/targets/page` | เพิ่ม repeated `tag_ids` และ `tag_match=any\|all` |
-| GET | `/targets/{target_id}` | เพิ่ม `tags` ในข้อมูลเว็บไซต์ |
+| GET | `/tags?search=...&limit=...&offset=...` | Paginated tag list with permission-scoped counts. |
+| POST | `/tags` | Create tag with `name` and `color_key` (`201 Created`). |
+| PATCH | `/tags/{tag_id}` | Update tag name or color. |
+| DELETE | `/tags/{tag_id}` | Delete tag and cascades associations (`204 No Content`). |
+| POST | `/targets` | Accepts optional `tag_ids` array (default `[]`). |
+| PATCH | `/targets/{target_id}` | Replaces target tag set via `tag_ids`. |
+| GET | `/targets` & `/targets/page` | Supports repeated `tag_ids` and `tag_match=any\|all`. |
+| GET | `/targets/{target_id}` | Includes assigned `tags` in target read schema. |
 
-ทุก response ที่ใช้ `TargetRead` ต้องมี `tags: [{id, name, color_key}]` และคืน `[]` เมื่อไม่มี Tags ใช้ Pydantic schema สำหรับ Tags แยกจาก schema เว็บไซต์เพื่อหลีกเลี่ยง circular import
+Responses utilizing `TargetRead` output `tags: [{id, name, color_key}]`. Tag schemas are declared separately from target schemas to avoid circular dependencies.
 
-สำหรับตัวเลือก Tags ให้ใช้ GET `/tags` โหลดเพิ่มตามหน้าและค้นหาจาก Backend ไม่ถือว่าหน้าแรกคือรายการทั้งหมด การส่ง ID ตัวกรองที่ไม่มีอยู่จริงคืน `422` แทนการข้ามเงื่อนไขเงียบ ๆ และ ID ของทรัพยากรที่ผู้ใช้ไม่มีสิทธิ์ให้ตอบตามนโยบาย scope ของระบบ
+Filter queries utilize `EXISTS` or subqueries to avoid duplicate row multiplication from joins. Relationships load eagerly via `selectinload` to prevent N+1 query overhead. Pagination preserves deterministic ordering (`created_at desc, id desc`).
 
-ใช้ EXISTS สำหรับ Match any และเงื่อนไขต่อ Tag หรือ grouped subquery สำหรับ Match all เพื่อไม่ให้ JOIN เพิ่มแถวเว็บไซต์ซ้ำ โหลด relationships แบบ `selectinload` ให้ serialization ทำงานได้และหลีกเลี่ยงการ query ทีละเว็บไซต์ รักษาลำดับ `created_at desc, id desc` ใน pagination
+## 10. Required Source Modifications
 
-นำ authentication, CSRF และรูปแบบ errors เดิมมาใช้ บันทึกผู้ดำเนินการ เวลา และข้อมูลก่อน/หลังการแก้ Tags ผ่านระบบ audit เมื่อส่วน audit ตาม roadmap พร้อมใช้งาน
+- Backend models: `models/tag.py`, `models/target_tag.py`, and relationships in `models/target.py`.
+- Backend schemas: `schemas/tag.py` and extensions to `schemas/target.py`.
+- Backend routes: `api/routes/tags.py`, updates to `api/routes/targets.py`, router registration in `main.py`.
+- Database: Alembic migration establishing `tags` and `target_tags`.
+- Frontend API & Types: `api/tags.ts`, `types/tag.ts`, updates to `api/targets.ts`, `types/target.ts`.
+- Frontend Hooks: `hooks/useTags.ts`, updates to `hooks/useTargets.ts`.
+- Frontend Components: `pages/TagsPage.tsx`, `components/TagBadge.tsx`, `components/TagMultiSelect.tsx`.
+- Frontend Integration: `App.tsx`, `TargetListPage.tsx`, `EditTargetModal.tsx`, `TargetDetailPage.tsx`.
 
-## ไฟล์ที่ต้องปรับเมื่อพัฒนา
+Query keys include sorted Tag IDs and match modes. Tag mutations invalidate tag lists, target lists, detail views, and counts.
 
-| ส่วน | งาน |
-| :--- | :--- |
-| Backend models | เพิ่ม `models/tag.py`, `models/target_tag.py` และ relationships ใน `models/target.py` |
-| Backend schemas | เพิ่ม `schemas/tag.py` และขยาย `schemas/target.py` |
-| Backend routes | เพิ่ม `api/routes/tags.py`, ขยาย `api/routes/targets.py` และลงทะเบียน router ใน `main.py` |
-| Backend registration | ลงทะเบียน models และ schemas ใน `__init__.py` รวม metadata ที่ Alembic โหลด |
-| Backend permissions | เพิ่มหรือใช้ dependency ตรวจ Admin ร่วมกับ Member Management |
-| Database | เพิ่ม Alembic migration สำหรับ Tags และความสัมพันธ์ |
-| Frontend API และ types | เพิ่ม `api/tags.ts`, `types/tag.ts` และขยาย `api/targets.ts`, `types/target.ts` |
-| Frontend hooks | เพิ่ม `hooks/useTags.ts` และขยาย `hooks/useTargets.ts` สำหรับตัวกรอง |
-| Frontend UI | เพิ่ม `pages/TagsPage.tsx`, `components/TagBadge.tsx`, `components/TagMultiSelect.tsx` และฟอร์มแก้ไข Tag |
-| Frontend integration | ปรับ `App.tsx`, `TargetListPage.tsx`, `EditTargetModal.tsx`, `TargetDetailPage.tsx` |
+## 11. Acceptance and Verification Criteria
 
-Query key ของเว็บไซต์ต้องรวม Tag IDs ที่เรียงลำดับและโหมด match หลังสร้าง แก้ ลบ หรือกำหนด Tags ให้ invalidate ทั้งรายการ Tags รายการเว็บไซต์ หน้ารายละเอียด และ counts ที่เกี่ยวข้อง อย่าให้ polling ทุก 4 วินาทีรีเซ็ตข้อมูลที่ผู้ใช้กำลังแก้ในฟอร์ม
-
-## ลำดับพัฒนา
-
-1. เตรียม migration, constraints, relationships และ dependency สิทธิ์ รวมแนวทางบัญชีเดิม
-2. ทำ Tags API และขยาย Target API พร้อม validation และตัวกรองก่อน pagination
-3. ทำหน้า `/tags` และเมนู Header ด้านขวาบน
-4. เพิ่ม multi-select ใน Add / Edit Target และ Badge ใต้ URL ตามภาพ
-5. ทำตัวกรอง any/all การเก็บค่าใน URL และ cache refresh ทุกหน้าที่เกี่ยวข้อง
-6. ตรวจ migration, permissions, API, UI และ build ก่อนนำไปใช้งาน
-
-## เกณฑ์รับงานและการตรวจสอบ
-
-- เข้า Tags Management ผ่านเมนูด้านขวาบนได้ และกลับ Websites ได้ทุกหน้าที่ล็อกอิน
-- เพิ่มและแก้ชื่อหรือสี Tags ได้ โดยเว็บไซต์ที่ใช้งานแสดงค่าล่าสุดหลังบันทึก
-- เลือกหลาย Tags ตอนสร้างหรือแก้เว็บไซต์ได้ และถอดทั้งหมดได้
-- แสดง Badge ใต้ URL ตามกรอบสีแดง ทดสอบชื่อไทย ชื่อยาว หลาย Tags และหน้าจอแคบ
-- ชื่อว่าง ชื่อซ้ำ สีที่ไม่รองรับ ID ที่หายไป และค่าที่เกินข้อจำกัดถูกปฏิเสธโดยไม่บันทึกบางส่วน
-- กรอง any/all ข้ามหลายหน้าได้ ไม่มีเว็บไซต์ซ้ำ และ `total` ตรงกับผลกรอง
-- เปลี่ยน Tag ขณะตรวจเว็บไซต์ได้ โดยผลตรวจและสถานะยังถูกอัปเดตตาม pipeline เดิม
-- ลบ Tag แล้วความสัมพันธ์หายไป เว็บไซต์ ผลตรวจ และ Snapshots ยังคงอยู่
-- API บังคับสิทธิ์ Admin สำหรับ mutations และปฏิเสธคำขอที่ไม่มี session หรือ CSRF ตามกติกาเดิม
-- เมื่อใช้ร่วมกับ assignments ให้ Operator เห็นเฉพาะ Tags และ counts ในขอบเขตตน รวมการเข้าผ่าน URL โดยตรง
-- การโหลดล้มเหลว การบันทึกล้มเหลว และการลบ Tag จากอีก session มีข้อความที่เข้าใจได้และไม่ทำข้อมูลในฟอร์มหาย
-- ทดสอบ upgrade จากฐานข้อมูลก่อนเพิ่ม Tags โดยข้อมูลเว็บไซต์เดิมครบและ `tags=[]` รวมทดสอบ downgrade บนสำเนาทดสอบ
-
-เพิ่ม Backend tests สำหรับชื่อซ้ำและคำขอพร้อมกัน การกำหนด Tags แบบ atomic, PATCH semantics, cascade, filters/pagination และ permissions เพิ่ม Frontend tests สำหรับเมนู หน้า Tags การเลือกหลายรายการ Badge และการคืนค่าตัวกรองจาก URL จากนั้นรัน Pytest, Ruff, Mypy และ Frontend test/lint/build ตามคำสั่งที่โปรเจกต์ใช้อยู่
+- Tag Management accessible from Header; seamless navigation between Views.
+- Adding and updating tag attributes updates referencing targets immediately.
+- Multi-select operates smoothly in Add and Edit modals; tags can be completely cleared.
+- Badges render responsively below URLs in table cells.
+- Duplicate names, invalid color keys, missing IDs, and length violations are rejected cleanly.
+- Filtering by `any` and `all` operates accurately across paginated boundaries.
+- Modifying tags during background checks does not disrupt check execution.
+- Tag deletion cleanly strips associations while preserving targets and snapshots.
+- API enforces Admin authorization for mutation routes and validates CSRF tokens.
+- Operators only see tags and counts within their assigned target scope.

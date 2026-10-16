@@ -1,30 +1,30 @@
-﻿# Website Defacement Monitoring System - Revised Project Plan
+# Website Defacement Monitoring System - Revised Project Plan
 
 ## 1. Executive Summary
 
-ระบบ Website Defacement Monitoring เป็นระบบตรวจจับการเปลี่ยนแปลงของเว็บไซต์โดยใช้วิธี deterministic diffing ไม่ใช้ AI โดยระบบจะเก็บ snapshot ของหน้าเว็บ เช่น HTML, rendered text, screenshot, metadata และเปรียบเทียบกับ baseline ที่ถือว่าเป็น known-good state
+The Website Defacement Monitoring System detects unexpected website alterations using deterministic, non-AI diffing methods. The system captures comprehensive snapshots of web pages (including rendered HTML, extracted text, full-page screenshots, and metadata) and compares them against approved baselines representing a known-good state.
 
-แนวทางหลักของระบบถูกต้องและเหมาะสำหรับ production แต่ควรปรับแผนให้เน้น false-positive control, baseline governance, retry verification, security threat model และ operational readiness ตั้งแต่ phase แรก ๆ เพราะประเด็นเหล่านี้เป็นตัวกำหนดว่าระบบจะใช้งานจริงได้หรือกลายเป็นระบบแจ้งเตือน noise จำนวนมาก
+The primary architectural direction is sound and well-suited for production. However, planning must emphasize false-positive controls, baseline governance, retry verification, security threat modeling, and operational readiness from the earliest phases. These factors dictate whether the system operates as a reliable alerting pipeline or degrades into an unmanageable source of false alarms.
 
 ## 2. Review Summary
 
-### จุดแข็งของแผนเดิม
+### Strengths of Initial Architecture
 
-- แยก architecture เป็น Scheduler, Snapshotter, Diff Engine, Alerting, Storage และ Dashboard ได้ชัดเจน
-- เลือกใช้ Playwright สำหรับ snapshot หลัง render ซึ่งเหมาะกับเว็บยุคใหม่และ SPA
-- ใช้ DOM diff, text diff, visual diff, hash diff และ security-signal rules ครอบคลุมหลายรูปแบบของ defacement
-- แยก object storage สำหรับ screenshot/raw HTML ออกจาก relational database ได้ถูกต้อง
-- มีแนวคิดเรื่อง baseline drift, dynamic content และ scaling headless browser ตั้งแต่ต้น
+- Clean component separation across Scheduler, Snapshotter, Diff Engine, Alerting, Storage, and Dashboard layers.
+- Selection of Playwright for post-rendering captures, ideal for modern Single Page Applications (SPAs).
+- Comprehensive multi-vector detection combining DOM, text, visual, hash, and security-signal rules.
+- Proper segregation of object storage (for screenshots and raw artifacts) from relational databases.
+- Early recognition of baseline drift, dynamic content challenges, and headless browser scaling.
 
-### ประเด็นที่ควรแก้ไข
+### Identified Areas for Improvement
 
-- ไฟล์ต้นฉบับมีปัญหา encoding ทำให้ diagram และสัญลักษณ์บางส่วนแสดงผิด เช่น dash, arrow และ box drawing characters
-- Normalization, ignore selectors และ visual masking ไม่ควรถูกเลื่อนไป Phase 7 เพราะเป็น core requirement สำหรับลด false positive
-- ควรเพิ่ม SSRF protection และ sandboxing เพราะระบบต้องเปิด URL ที่อาจมาจาก user input
-- ควรแยกสถานะ Down, Changed, Unstable และ Defacement Suspected ออกจากกัน
-- ควรมี double-check/retry verification ก่อนส่ง alert severity สูง
-- ควรกำหนด baseline update policy ชัดเจน เพื่อป้องกัน slow defacement หรือ malicious drift
-- ควรเพิ่ม data retention, storage lifecycle และ operational metrics
+- Address file encoding anomalies affecting diagrams and structural symbols.
+- Accelerate normalization, ignore selectors, and visual masking into early phases rather than deferring them to Phase 7, as they are essential for noise suppression.
+- Implement robust SSRF protection and container sandboxing for user-submitted URLs.
+- Delineate distinct operational states: `OK`, `Changed`, `Availability Issue`, `Unstable`, and `Defacement Suspected`.
+- Enforce secondary retry verification before dispatching high-severity alerts.
+- Establish strict baseline governance to guard against incremental, malicious drift.
+- Incorporate data retention schedules, artifact lifecycle policies, and operational metrics.
 
 ## 3. Revised High-Level Architecture
 
@@ -57,287 +57,259 @@ Verification Queue / Retry Check
 Alerting Engine + Dashboard
 ```
 
-หลักสำคัญของ architecture ฉบับปรับปรุงคือให้ Normalization/Masking และ Verification Queue เป็นส่วนหลักของ pipeline ไม่ใช่ feature เสริมท้ายโครงการ
+The core tenet of this revised architecture is embedding Normalization/Masking and the Verification Queue as first-class pipeline stages rather than supplementary add-ons.
 
 ## 4. Core Components
 
 ### 4.1 Target Management
 
-ผู้ใช้สามารถลงทะเบียน URL ที่ต้องการ monitor พร้อม config ราย target:
+Enables target URL registration with granular per-target configurations:
 
-- URL, name, owner/team
-- check interval
-- viewport size
-- sensitivity thresholds
-- detection modes: hash, DOM, text, visual, link/resource, security rules
-- ignore selectors และ ignore regions
-- allowlist external domains
-- authentication profile ถ้าเป็นหน้า login-gated
-- baseline approval policy
-- alert channels
+- URL, name, owner/team.
+- Check interval.
+- Viewport dimensions.
+- Sensitivity thresholds.
+- Detection modes: hash, DOM, text, visual, link/resource, and security rules.
+- Ignore selectors and visual ignore regions.
+- Allowed external domain lists.
+- Authentication profiles for login-gated targets.
+- Baseline approval policies.
+- Notification routing channels.
 
 ### 4.2 Scheduler / Job Queue
 
-ควรใช้ Celery + Redis หรือ Celery + RabbitMQ โดยมีความสามารถ:
+Utilizes Celery + Redis or Celery + RabbitMQ with capabilities:
 
-- schedule targets ตาม interval ที่ต่างกัน
-- jitter เพื่อลด thundering herd
-- retry with exponential backoff
-- separate queue สำหรับ normal checks, retry verification และ high-priority incidents
-- per-domain concurrency limit เพื่อไม่ยิง request ถี่เกินไป
+- Distinct scheduling intervals per target.
+- Jitter injection to eliminate thundering-herd spikes.
+- Exponential backoff retries.
+- Dedicated queues separating routine checks, retry verification, and high-priority incident triage.
+- Per-domain concurrency limits to prevent denial-of-service against monitored hosts.
 
 ### 4.3 Snapshotter
 
-ใช้ Playwright เพื่อเปิดหน้าเว็บและเก็บ artifact หลัง render:
+Leverages Playwright to capture post-render artifacts:
 
-- raw rendered HTML
-- visible text content
-- full-page screenshot
-- page title และ meta tags
-- HTTP status
-- response headers
-- redirect chain
-- favicon hash
-- external script/link/iframe domains
-- response time และ browser timing
+- Raw rendered HTML.
+- Visible text content.
+- Full-page screenshots.
+- Page title and meta tags.
+- HTTP status codes and response headers.
+- Redirect chains.
+- Favicon hashes.
+- External script, stylesheet, and iframe domains.
+- Page load and browser performance timings.
 
-ควรมี configurable wait strategy:
-
-- network idle
-- wait for selector
-- fixed delay
-- custom readiness selector ต่อ target
+Configurable wait strategies:
+- Network idle.
+- Selector presence.
+- Fixed delays.
+- Target-specific custom readiness selectors.
 
 ### 4.4 Normalization and Visual Masking
 
-ควรทำตั้งแต่ phase แรกที่เริ่ม diff จริง เพราะเป็นตัวลด false positive หลัก
+Integrated early in the diffing lifecycle to suppress false positives:
 
 HTML normalization:
-
-- remove volatile attributes เช่น CSRF token, nonce, session id
-- normalize timestamps
-- remove tracking query parameters
-- strip known ad widgets หรือ dynamic containers
-- canonicalize whitespace และ attribute ordering
+- Strip volatile attributes (CSRF tokens, nonces, session identifiers).
+- Normalize dynamic timestamps.
+- Strip tracking query parameters.
+- Exclude known advertisement containers and dynamic widgets.
+- Canonicalize whitespace and attribute ordering.
 
 Visual masking:
-
-- ซ่อน element จาก `ignore_selectors` ก่อน screenshot
-- หรือ mask region หลัง screenshot ด้วย bounding boxes
-- รองรับ dynamic widgets เช่น ad banner, carousel, timestamp, weather, stock ticker
+- Hide elements via `ignore_selectors` prior to screenshot capture.
+- Apply post-capture bounding box masks.
+- Support masks for dynamic banners, carousels, weather widgets, and financial tickers.
 
 ### 4.5 Diff / Comparator Engine
 
-แต่ละ detector ควรให้ผลลัพธ์เป็น score, evidence และ explanation
+Detectors emit scores, supporting evidence, and diagnostic explanations:
 
 | Detector | Method | Purpose |
 |---|---|---|
-| Hash diff | SHA-256 ของ normalized content | ตรวจเปลี่ยนแปลงแบบเร็ว |
-| DOM diff | normalized DOM tree comparison | ตรวจ injected elements, script, iframe |
-| Text diff | word/line diff | ตรวจข้อความ defacement |
-| Visual diff | pHash, SSIM, pixel diff | ตรวจ image/CSS/visual defacement |
-| Link/resource diff | set diff ของ links/scripts/iframes/forms | ตรวจ redirect, phishing, malicious resource |
-| Security-signal rules | rule-based heuristics | ตรวจสัญญาณเสี่ยงแบบ explainable |
+| Hash diff | Normalized content SHA-256 | High-speed change detection |
+| DOM diff | Normalized DOM tree comparison | Injected elements, scripts, iframes |
+| Text diff | Line/word diff algorithms | Textual defacement messages |
+| Visual diff | pHash, SSIM, pixel comparison | Image, CSS, and styling defacements |
+| Link/resource diff | Set diff of links/scripts/iframes | Open redirects, phishing, injected hosts |
+| Security-signal rules | Rule-based heuristics | Explainable threat detection |
 
 ### 4.6 Security-Signal Rules
 
-ควรเพิ่ม rule ต่อไปนี้ใน severity model:
+High-priority evaluation rules:
 
-- new external script domain outside allowlist
-- new iframe outside allowlist
-- CSP header removed or weakened
-- new inline script block
-- Subresource Integrity attribute removed
-- suspicious `eval`, `atob`, long base64 blob หรือ obfuscated JavaScript
-- unexpected meta refresh
-- unexpected form action domain
-- redirect chain changed to untrusted domain
-- favicon changed together with title/text change
-- HTTP 200 เปลี่ยนเป็น 403/500/timeout ให้จัดเป็น availability issue ก่อน ไม่ถือว่า defaced ทันที
+- Newly introduced external script domains outside allowlists.
+- Injected iframes outside allowlists.
+- Removal or weakening of Content Security Policy (CSP) headers.
+- Insertion of new inline script blocks.
+- Stripping of Subresource Integrity (SRI) attributes.
+- Detection of `eval`, `atob`, large base64 blobs, or obfuscated JavaScript.
+- Unexpected `<meta http-equiv="refresh">` tags.
+- Modified `<form action>` domains.
+- Redirect chains terminating on untrusted domains.
+- Simultaneous changes to favicon and title/text.
+- HTTP 200 transitioning to 403/500/timeout classified initially as an Availability Issue rather than defacement.
 
 ## 5. Status Model
 
-ควรแยกสถานะของ target ให้ชัดเจน:
+Clear differentiation of target states:
 
-- `OK`: ไม่พบการเปลี่ยนแปลงสำคัญ
-- `Changed`: พบการเปลี่ยนแปลง แต่ยังไม่เข้าเงื่อนไข defacement
-- `Availability Issue`: timeout, DNS error, 4xx/5xx หรือ asset load failure
-- `Unstable`: ผลตรวจไม่เสถียร เช่น retry แล้วผลไม่ตรงกัน
-- `Verification Pending`: พบความเสี่ยงและกำลังตรวจซ้ำ
-- `Defacement Suspected`: ตรวจซ้ำแล้วยังพบความเสี่ยง
-- `Acknowledged`: ผู้ใช้รับทราบแล้ว
-- `Resolved`: baseline หรือ website ถูกแก้กลับแล้ว
+- `OK`: No significant changes detected.
+- `Changed`: Detected changes below defacement severity thresholds.
+- `Availability Issue`: Timeouts, DNS resolution errors, 4xx/5xx responses, or asset failures.
+- `Unstable`: Inconsistent check results across consecutive retries.
+- `Verification Pending`: Elevated change score awaiting secondary verification.
+- `Defacement Suspected`: Confirmed change exceeding thresholds upon re-check.
+- `Acknowledged`: Operator triaged and acknowledged.
+- `Resolved`: Baseline updated or site restored to known-good state.
 
 ## 6. Baseline Policy
 
-Baseline update ต้องมีกฎชัดเจน:
+Structured governance rules:
 
-- Low severity: อนุญาต auto-update baseline ได้ ถ้าผ่าน rule ที่กำหนด
-- Medium severity: ต้องมี human review ก่อน update baseline
-- High severity: freeze baseline และส่ง alert ทันทีหลัง verification
-- Repeated low-risk changes: ใช้ learning window เพื่อระบุ normal variance
-- Manual override: admin สามารถ mark snapshot เป็น known-good ได้
+- Low severity: Automated baseline updates permitted under strict allowlists.
+- Medium severity: Mandatory operator review before baseline adoption.
+- High severity: Baselines locked immediately; instant alert dispatch.
+- Repeated low-risk changes: Learning windows to capture normal content variance.
+- Manual override: Administrators can designate any snapshot as known-good.
 
-เหตุผลคือถ้า auto-update baseline มากเกินไป ระบบอาจพลาด slow defacement หรือ malicious change ที่ค่อย ๆ แทรกทีละน้อย
+Unrestricted auto-rebaselining risks absorbing stealthy, incremental defacements into trusted baselines.
 
 ## 7. Retry and Verification Policy
 
-ก่อนส่ง alert severity สูง ควรมี verification step:
+Secondary verification prior to high-severity alerts:
 
-- retry หลัง 1-2 นาที
-- ใช้ worker คนละตัวหรือ browser instance คนละตัว
-- ถ้าเป็นไปได้ ใช้ network path หรือ region คนละชุด
-- ยืนยัน alert เฉพาะเมื่อ diff ยังเกิน threshold
-- ถ้า retry ให้ผลต่างกัน ให้ mark เป็น `Unstable` แทน `Defacement Suspected`
+- Re-check scheduled within 1–2 minutes.
+- Evaluated via an independent browser instance or separate worker process.
+- Executed across alternate network paths or egress IPs where feasible.
+- Confirm alerts only if diff scores consistently breach thresholds across runs.
+- Discrepancies mark the target as `Unstable` rather than `Defacement Suspected`.
 
-นโยบายนี้ลด false positive จาก CDN, asset loading, browser timeout, transient network issue และ CMS slowness
+This prevents spurious alerts triggered by CDN propagation lags, transient network errors, or temporary CMS rendering delays.
 
 ## 8. Security and Threat Model
 
-เพราะระบบนี้ต้อง fetch URL ที่อาจมาจากผู้ใช้ จึงต้องป้องกัน SSRF และ browser abuse:
+Safeguards for fetching arbitrary, user-specified URLs:
 
-- อนุญาตเฉพาะ `http` และ `https`
-- block private IP ranges เช่น `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-- block link-local และ cloud metadata address เช่น `169.254.169.254`
-- validate DNS resolution ก่อน fetch และระหว่าง redirect
-- จำกัด redirect count
-- จำกัด response size
-- จำกัด page load timeout
-- run browser workers ใน sandboxed container
-- ไม่ให้ browser access internal network โดยไม่จำเป็น
-- encrypt credentials, cookies และ Playwright storage state
-- audit log การเข้าถึง snapshot, credential และ baseline approval
+- Restrict schemes strictly to `http` and `https`.
+- Block private IP ranges (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
+- Block link-local and cloud metadata addresses (`169.254.169.254`).
+- Validate DNS resolution at socket connection to eliminate rebinding gaps.
+- Enforce maximum redirect hop limits.
+- Enforce upper bounds on response transfer size.
+- Impose strict page navigation timeouts.
+- Execute browser instances within unprivileged, sandboxed containers.
+- Encrypt stored credentials, cookies, and session states.
+- Maintain tamper-evident audit logs for baseline approvals and administrative actions.
 
 ## 9. Storage and Retention
 
-### Recommended storage split
+### Storage Partitioning
+- PostgreSQL: Targets, user accounts, configurations, check results, diff metadata, alert states.
+- S3 / MinIO: PNG screenshots, raw rendered HTML, text dumps, visual diff masks.
+- Partitioned storage / time-series metrics: Historical check records and latency metrics.
 
-- PostgreSQL: targets, users, configs, check results, diff metadata, alert state
-- S3/MinIO: screenshots, raw HTML, rendered text, large diff artifacts
-- Time-series store หรือ PostgreSQL partitioning: metrics และ check history
+### Retention Policy
+- Retain full screenshots and raw HTML for 30–90 days.
+- Retain metadata and alert history long-term (1–2 years).
+- Archive incident-related snapshots indefinitely.
+- Apply object storage lifecycle rules to minimize ongoing storage overhead.
+- Enable gzip/brotli compression on HTML and text artifacts.
 
-### Retention policy
-
-- เก็บ full screenshot/raw HTML 30-90 วัน
-- เก็บ metadata และ alert history นานกว่า เช่น 1-2 ปี
-- เก็บ incident snapshots ถาวรหรือจนกว่าจะ archive
-- ใช้ S3 lifecycle policy เพื่อลด storage cost
-- compression สำหรับ HTML/text artifacts
-
-## 10. Proposed Tech Stack
+## 10. Proposed Technology Stack
 
 | Layer | Technology | Rationale |
 |---|---|---|
-| Browser automation | Playwright Python async API | reliable rendering, screenshot, DOM extraction |
-| Backend API | FastAPI | async-friendly, OpenAPI support |
-| Queue | Celery + Redis/RabbitMQ | retries, scheduling, horizontal scale |
-| Database | PostgreSQL | structured target/config/diff metadata |
-| Object storage | S3 or MinIO | large artifacts outside DB |
-| Visual diff | Pillow, imagehash, scikit-image | pHash, SSIM, pixel comparison |
-| DOM/text diff | lxml, difflib, diff-match-patch | deterministic diffing |
-| Frontend | React or htmx | dashboard and diff viewers |
-| Auth | session auth or JWT | team/user access |
-| Notifications | SMTP, Slack, Discord, webhook, SMS | alert delivery |
-| Observability | Prometheus, Grafana, Loki/ELK | monitor the monitor |
-| Deployment | Docker Compose for dev, Kubernetes for scale | consistent Playwright environment |
+| Browser Automation | Playwright Python async | High-fidelity rendering, screenshotting, DOM access |
+| Backend API | FastAPI | Asynchronous performance, native OpenAPI documentation |
+| Distributed Queue | Celery + Redis / RabbitMQ | Scheduling, retries, worker scaling |
+| Database | PostgreSQL | Structured relational integrity and JSON querying |
+| Object Storage | S3 or MinIO | Efficient storage for heavy image and HTML artifacts |
+| Visual Diffing | Pillow, imagehash, scikit-image | pHash, SSIM, and masked pixel comparison |
+| DOM / Text Diffing | lxml, difflib, diff-match-patch | Deterministic tree and textual diffing |
+| Web Dashboard | React or htmx | Responsive UI and side-by-side artifact comparison |
+| Notifications | SMTP, Slack, Discord, Webhooks, SMS | Multi-channel alerting |
+| Observability | Prometheus, Grafana, Loki / ELK | Operational telemetry |
+| Containerization | Docker Compose / Kubernetes | Reproducible Playwright execution environments |
 
 ## 11. Operational Metrics
 
-ควร monitor metric ต่อไปนี้:
+Key monitored indicators:
 
-- checks per minute
-- queue depth
-- average render time
-- browser crash count
-- timeout rate
-- diff processing latency
-- alert count by severity
-- retry confirmation rate
-- false positive rate
-- storage growth rate
-- per-domain failure rate
-- worker memory usage
+- Checks executed per minute.
+- Queue depth and worker latency.
+- Mean render and capture duration.
+- Browser crash and unhandled exception rates.
+- Navigation timeout frequency.
+- Diff processing latency.
+- Alert volume categorized by severity.
+- Retry confirmation vs. instability rates.
+- Measured false-positive rates.
+- Artifact storage consumption growth.
+- Per-domain availability failure rates.
+- Worker container memory and CPU utilization.
 
-สำหรับ Playwright workers ควรกำหนด:
-
-- `worker_max_tasks_per_child`
-- max browser contexts per worker
-- browser restart every N jobs
-- memory limit per container
-- graceful shutdown เพื่อไม่ทิ้ง partial snapshots
+Playwright worker hygiene:
+- Periodic worker process recycling (`worker_max_tasks_per_child`).
+- Bounded browser context limits.
+- Container memory caps to mitigate memory leaks.
+- Graceful shutdown handling preventing partial artifact writes.
 
 ## 12. Revised Build Phases
 
 ### Phase 1: Core Snapshot Loop
-
-- single target
-- Playwright capture HTML, text, screenshot และ metadata
-- store artifacts to local disk หรือ object storage
-- hash diff แบบง่าย
-- basic status: OK, Changed, Availability Issue
+- Single target monitoring.
+- Playwright capture of HTML, text, screenshots, and metadata.
+- Storage of artifacts to local filesystem / object storage.
+- Basic hash comparison.
+- Baseline status classifications: `OK`, `Changed`, `Availability Issue`.
 
 ### Phase 2: Normalization and Noise Control
-
-- HTML normalization
-- ignore selectors
-- visual masking
-- viewport config
-- basic allowlist for external domains
-- initial baseline policy
+- HTML normalization pipeline.
+- Ignore selectors and visual masking.
+- Viewport standardization.
+- External domain allowlists.
+- Baseline approval governance.
 
 ### Phase 3: Multi-Detector Diffing
-
-- text diff
-- DOM diff
-- visual diff with pHash/SSIM
-- link/resource diff
-- structured diff result JSON
+- Text and DOM diff engines.
+- Visual diffing with pHash and SSIM.
+- Link and external resource diffing.
+- Structured diff result schemas.
 
 ### Phase 4: Scheduler and Multi-Target Support
-
-- Celery + Redis/RabbitMQ
-- Postgres-backed targets
-- worker pool
-- retries with backoff
-- per-domain concurrency limit
+- Celery / distributed task workers.
+- PostgreSQL target management.
+- Dynamic check intervals with jitter.
+- Per-domain concurrency limits.
 
 ### Phase 5: Rules Engine and Verification Queue
-
-- weighted severity scoring
-- security-signal checks
-- double-check/retry verification
-- status model refinement
-- baseline approval workflow
+- Weighted severity scoring.
+- Security-signal rule evaluations.
+- Automated retry verification pipeline.
+- Comprehensive status model.
+- Baseline approval workflow.
 
 ### Phase 6: Alerting
+- Notification dispatch (Email, Slack, Webhooks).
+- Alert deduplication and throttling.
+- Rich payloads with embedded diffs and evidence summaries.
 
-- email/webhook/Slack/Discord integrations
-- alert deduplication
-- escalation policy
-- include screenshot diff, HTML diff, severity and evidence
-
-### Phase 7: Dashboard
-
-- target list and current status
-- timeline per site
-- visual diff viewer
-- HTML/text diff viewer
-- alert acknowledgment
-- baseline approval UI
-- target config management
+### Phase 7: Web Dashboard
+- Target list and real-time status indicators.
+- Historical check timelines.
+- Side-by-side visual and text diff viewers.
+- Incident acknowledgment and baseline approval UI.
+- Target configuration management.
 
 ### Phase 8: Hardening and Scale
-
-- SSRF protection
-- credential encryption
-- container sandboxing
-- object storage lifecycle
-- observability dashboards
-- load testing
-- worker memory recycling
+- SSRF guard and DNS validation.
+- Credential encryption at rest.
+- Container isolation and sandboxing.
+- Storage retention lifecycle rules.
+- Production load testing and worker recycling.
 
 ## 13. Final Recommendation
 
-โครงการนี้มีพื้นฐานที่ดีและควรเดินหน้าต่อได้ แต่ควรปรับจากแผนเดิมให้ treat false-positive suppression, verification retry, baseline governance และ SSRF protection เป็น core requirements ตั้งแต่ต้น ไม่ใช่งาน hardening ตอนท้าย
-
-ลำดับการทำงานที่เหมาะสมคือสร้าง snapshot loop ให้ได้ก่อน จากนั้นรีบใส่ normalization/masking แล้วค่อยเพิ่ม diff detectors และ rules engine การทำตามลำดับนี้จะทำให้ระบบทดสอบง่ายขึ้น ลด alert noise และช่วยให้ผลลัพธ์มีความน่าเชื่อถือเมื่อใช้กับเว็บไซต์จริง
+The architectural foundations are solid. By establishing noise reduction, verification retries, baseline governance, and SSRF prevention as core requirements from Phase 1 rather than late-stage enhancements, the project will achieve high alerting fidelity, low operational noise, and enterprise-grade reliability in production.

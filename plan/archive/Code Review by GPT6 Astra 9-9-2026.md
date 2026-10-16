@@ -1,288 +1,288 @@
 # Code Review by GPT6 Astra 9-9-2026
 
-วันที่: 9 กันยายน 2026  
-โครงการ: Website Defacement Monitoring System  
-สถานะ ณ 10 กันยายน 2026: **แก้โค้ด CR09-01 ถึง CR09-07 ครบตามขอบเขตระบบและผ่านการตรวจบน Windows แล้ว** การตรวจ isolated Linux runtime และ effective Chromium sandbox ยังเปิดอยู่เพราะ Docker daemon ไม่ทำงานในเครื่องตรวจ
+Date: September 9, 2026  
+Project: Website Defacement Monitoring System  
+Status as of September 10, 2026: **Code remediation for CR09-01 through CR09-07 is fully completed within system scope and verified on Windows.** Verification of isolated Linux runtime and effective Chromium sandbox remains open because Docker daemon was not running on the inspection machine.
 
-แผนดำเนินการต่อ: [Code Review Completion Plan — CR09 — 10-9-2026](Code-Review-Completion-Plan-CR09-10-9-2026.md)  
-ผลดำเนินการล่าสุด: [Code Review Completion CR09 — 10-9-2026](../refinement/10-9-2026/Code-Review-Completion-CR09-10-9-2026.md)  
-บันทึกการแก้ไขรอบก่อน: [`refinement/10-9-2026/Code-Review-Remediation-CR09-01-to-CR09-07-10-9-2026.md`](../refinement/10-9-2026/Code-Review-Remediation-CR09-01-to-CR09-07-10-9-2026.md) เป็นประวัติการ implementation รอบแรกและถูกแทนสถานะล่าสุดด้วยบันทึกด้านบน
+Follow-up Plan: [Code Review Completion Plan — CR09 — 10-9-2026](Code-Review-Completion-Plan-CR09-10-9-2026.md)  
+Latest Execution Results: [Code Review Completion CR09 — 10-9-2026](../refinement/10-9-2026/Code-Review-Completion-CR09-10-9-2026.md)  
+Previous Remediation Record: [`refinement/10-9-2026/Code-Review-Remediation-CR09-01-to-CR09-07-10-9-2026.md`](../refinement/10-9-2026/Code-Review-Remediation-CR09-01-to-CR09-07-10-9-2026.md) serves as the first-round implementation history and has been superseded in latest status by the record above.
 
-## 1. วัตถุประสงค์และขอบเขต
+## 1. Objectives and Scope
 
-แผนนี้รวบรวมข้อค้นพบ 7 ข้อจากการตรวจ backend, frontend และ Docker configuration พร้อมแนวทางแก้ไข กรณีทดสอบ และเกณฑ์รับงาน โดยรวมคำชี้แจงของผู้ใช้ว่าการเปิด Chromium sandbox เคยทำให้ระบบบน Linux มีปัญหา
+This plan compiles 7 findings from the review of backend, frontend, and Docker configuration, accompanied by remediation guidelines, test cases, and acceptance criteria. It incorporates user clarifications indicating that enabling the Chromium sandbox previously caused system failures on Linux.
 
-ผู้ใช้อนุมัติให้ดำเนินการตามแผนแล้วในวันที่ 10 กันยายน 2026 งานรอบนี้แก้ source code และชุดทดสอบ พร้อมตรวจบน Windows โดยไม่เปลี่ยน production configuration, deployment, database, snapshot history, baseline หรือ thresholds
+The user approved proceeding according to this plan on September 10, 2026. This cycle focuses on remediating source code and test suites with verification on Windows, without altering production configuration, deployment, database, snapshot history, baseline sets, or thresholds.
 
-เอกสารนี้เป็นแผนประกอบ [PROJECT_PLAN.md](PROJECT_PLAN.md) ไม่เปลี่ยนสถานะ Stage 2 ไม่รีเซ็ต soak test และไม่แทนที่ master plan ส่วนข้อค้นพบที่ใช้รหัส CR09 ด้านล่างเป็นคนละชุดกับ CR-01 ถึง CR-06 ของวันที่ 8 กันยายน
+This document serves as a companion plan to [PROJECT_PLAN.md](PROJECT_PLAN.md); it does not alter Stage 2 status, does not reset the soak test, and does not replace the master plan. The findings using the CR09 prefix below constitute a separate set from CR-01 through CR-06 of September 8.
 
-## 2. หลักฐานและข้อจำกัดของการรีวิว
+## 2. Evidence and Review Limitations
 
-รายการในหัวข้อนี้เป็นหลักฐานของการรีวิววันที่ 9 กันยายน ก่อน remediation ส่วนสถานะโค้ดและผลตรวจซ้ำวันที่ 10 กันยายนอยู่ในแผนดำเนินการต่อที่ลิงก์ด้านบน
+The items in this section constitute evidence gathered during the September 9 review prior to remediation. The code status and re-verification results as of September 10 are documented in the follow-up plan linked above.
 
-- ตรวจ source code และชุดทดสอบที่มีอยู่ รวมถึงบันทึก remediation วันที่ 8 กันยายน
-- ยืนยันด้วย mock ว่าเมื่อตั้ง `BROWSER_DISABLE_SANDBOX=False` แล้ว launch เกิด error `Target closed` โค้ดลองเปิด browser ด้วยค่า sandbox `True → False`
-- จำลองด้วยฐานข้อมูล SQLite ในหน่วยความจำและควบคุมจังหวะ diff: demote baseline ระหว่างตรวจสำเร็จ แต่ผลตรวจยังเป็น `OK` และอ้าง baseline ที่ถูก demote
-- จำลองกรณีไม่มี HTML สำหรับ structural comparison: score เป็น `0.0` และ summary ระบุว่าไม่พบการเปลี่ยนแปลงทั้งสาม detector
-- จำลอง DNS resolution failure: ได้ `SsrfBlockedError` และ `is_availability_error()` คืน `False`
-- ข้อ SSRF อ้างอิงตำแหน่ง routing ในโค้ดและข้อจำกัดที่ระบุในเอกสาร Playwright รวมถึงเอกสารของ package ที่ติดตั้ง ยังไม่ได้ทดสอบส่ง request ไปยังเครือข่ายภายในจริง
-- TypeScript ผ่านทั้ง `tsconfig.app.json` และ `tsconfig.node.json`; ESLint ไม่มี error มี 1 warning ใน `useAuth.tsx`
-- Ruff พบ `I001` เรื่อง import ordering ใน `backend/scripts/create_user.py` จำนวน 1 จุด ยังไม่ได้แก้ไข
-- Pytest รันทั้งชุดไม่สำเร็จ เนื่องจากสิทธิ์เข้าถึง temporary directory บน Windows ไม่ใช่หลักฐานว่า application tests ไม่ผ่าน
-- Vitest เริ่มทำงานไม่ได้ เนื่องจากขาด native dependency `@rolldown/binding-win32-x64-msvc` ยังไม่ได้ติดตั้งหรือเปลี่ยน lockfile
-- ยังไม่ได้ตรวจ runtime, logs หรือ isolation ของเครื่อง Linux ปัจจุบันโดยตรง ข้อมูลเหตุขัดข้องบน Linux มาจากบันทึกโครงการ
+- Inspected existing source code and test suites, including the September 8 remediation records.
+- Confirmed via mocking that when `BROWSER_DISABLE_SANDBOX=False` was set, a `Target closed` launch error triggered fallback code that attempted to launch the browser with sandbox `True → False`.
+- Simulated using an in-memory SQLite database with controlled diff timing: baseline demotion during an ongoing check succeeded, yet the check result returned `OK` and referenced the demoted baseline.
+- Simulated the case where HTML was unavailable for structural comparison: the score evaluated to `0.0`, and the summary stated that no changes were detected across all three detectors.
+- Simulated DNS resolution failure: raised `SsrfBlockedError`, and `is_availability_error()` returned `False`.
+- SSRF findings reference routing locations in code and limitations documented in Playwright documentation and installed packages; actual requests to real internal networks were not performed.
+- TypeScript passed for both `tsconfig.app.json` and `tsconfig.node.json`; ESLint showed 0 errors and 1 warning in `useAuth.tsx`.
+- Ruff detected 1 instance of `I001` regarding import ordering in `backend/scripts/create_user.py`, which had not yet been fixed.
+- Pytest full suite run failed due to temporary directory access permissions on Windows; this was not evidence of application test logic failure.
+- Vitest failed to start due to missing native dependency `@rolldown/binding-win32-x64-msvc`; it had not been installed nor had lockfiles been modified.
+- Runtime, logs, or isolation on the actual Linux environment have not yet been directly inspected; information regarding Linux failures was derived from project records.
 
-## 3. สรุปข้อค้นพบ
+## 3. Summary of Findings
 
-P1: ควรจัดการก่อนขยายการใช้งาน เนื่องจากกระทบความปลอดภัยของ capture หรือความน่าเชื่อถือของผล `OK`  
-P2: ควรแก้ในรอบ remediation เพื่อให้สถานะ ข้อมูล และการใช้งานถูกต้อง
+P1: Must be addressed before expanding usage, as it impacts capture security or the trustworthiness of `OK` results.  
+P2: Should be addressed during the remediation round to ensure state, data integrity, and operational correctness.
 
-| ID | ระดับ | ข้อค้นพบ | ผลลัพธ์ที่ต้องได้ |
+| ID | Severity | Finding | Required Outcome |
 | --- | --- | --- | --- |
-| CR09-01 | P1 | SSRF guard ไม่ครอบคลุม redirect และ popup | ปลายทางที่ถูกห้ามต้องไม่ได้รับ request รวมถึงเส้นทาง redirect และ popup |
-| CR09-02 | P1 | Sandbox fallback ฝืน configuration | การเปิดหรือปิด sandbox ต้องตรงกับค่าที่กำหนด และ Linux ต้องผ่านการตรวจ runtime ก่อนเปลี่ยนโหมด |
-| CR09-03 | P1 | Structural comparison ใช้งานไม่ได้แต่ให้คะแนนเหมือนไม่เปลี่ยนแปลง | การตรวจไม่ครบต้องไม่ถูกแปลเป็นผล `OK` |
-| CR09-04 | P2 | Demote baseline ระหว่าง check ได้ | ชุด baseline ต้องคงที่ตลอดงานตรวจ |
-| CR09-05 | P2 | Target Detail แสดงคู่ภาพไม่ตรงกับ latest check | ภาพ ข้อความ และคะแนนต้องอ้างผลตรวจเดียวกัน |
-| CR09-06 | P2 | Logout ล้มเหลวแต่ UI แสดงว่าออกจากระบบแล้ว | UI ต้องแสดงผล logout ตามการยืนยันจาก server |
-| CR09-07 | P2 | DNS failure ถูกจัดเป็น SSRF violation | DNS failure ระหว่าง capture เป็น `Availability Issue`; blocked address ยังคงเป็น security failure |
+| CR09-01 | P1 | SSRF guard does not cover redirects and popups | Prohibited destinations must not receive requests, including redirect paths and popups |
+| CR09-02 | P1 | Sandbox fallback overrides configuration | Enabling or disabling the sandbox must strictly adhere to configured values; Linux must pass runtime checks before changing modes |
+| CR09-03 | P1 | Structural comparison is unusable but scores as if unchanged | Incomplete/unverifiable checks must not be interpreted as an `OK` result |
+| CR09-04 | P2 | Baselines can be demoted during an ongoing check | Active baseline set must remain invariant throughout the check operation |
+| CR09-05 | P2 | Target Detail displays snapshot pair mismatched with latest check | Images, diff text, and scores must reference the exact same check result |
+| CR09-06 | P2 | Logout fails on server but UI displays logged-out state | UI must only reflect logout upon server confirmation |
+| CR09-07 | P2 | DNS failure is classified as an SSRF violation | DNS failure during capture must be treated as `Availability Issue`; blocked address remains a security failure |
 
-## 4. หลักการร่วม
+## 4. Shared Principles
 
-1. คง single API worker ตามสถาปัตยกรรมปัจจุบัน ไม่เพิ่ม Redis หรือระบบ queue โดยไม่มีความจำเป็นในขอบเขตนี้
-2. ไม่ลบฐานข้อมูล ประวัติผลตรวจ snapshots หรือ baselines เพื่อแก้ข้อผิดพลาด
-3. ไม่รับ live page เป็น baseline ใหม่อัตโนมัติเพื่อชดเชย baseline ที่อ่านไม่ได้ และคงข้อห้าม demote baseline สุดท้าย
-4. คง authentication, CSRF, service-worker blocking และ WebSocket blocking ระหว่าง remediation
-5. ไม่เปลี่ยน detector thresholds เพียงเพื่อให้ tests ผ่านหรือปิดบังผลตรวจไม่ครบ
-6. Regression tests ใช้ fixtures, mocks, ฐานข้อมูลทดสอบ และปลายทางทดสอบที่ควบคุมได้ ไม่ใช้ข้อมูล production
-7. การแก้ให้ capture ทำงานได้และการยืนยัน isolation ต้องมีหลักฐานแยกกัน การ launch สำเร็จอย่างเดียวไม่ได้ยืนยัน sandbox
-8. ไม่เปิด sandbox บน Linux ปัจจุบันทันทีโดยยังไม่ทดสอบ และไม่เพิ่ม automatic downgrade เมื่อผู้ดูแลตั้งค่าให้เปิด
+1. Preserve the single API worker architecture as currently designed; do not introduce Redis or queuing systems without necessity within this scope.
+2. Do not delete databases, check result histories, snapshots, or baselines to resolve errors.
+3. Do not automatically adopt the live page as a new baseline to compensate for unreadable baselines; maintain the rule prohibiting demotion of the final baseline.
+4. Maintain authentication, CSRF protection, service-worker blocking, and WebSocket blocking during remediation.
+5. Do not alter detector thresholds simply to make tests pass or to mask incomplete checks.
+6. Regression tests must use fixtures, mocks, test databases, and controlled mock endpoints, never production data.
+7. Enabling capture execution and confirming container isolation require separate evidence; successful launch alone does not verify a functioning sandbox.
+8. Do not enable sandbox on the current Linux deployment immediately without testing, and do not introduce automatic downgrade when administrators configure it to be enabled.
 
-## 5. CR09-01 — ปิดช่องว่าง SSRF ใน redirect และ popup
+## 5. CR09-01 — Close SSRF Gaps in Redirects and Popups
 
-### ตำแหน่งและสาเหตุ
+### Location and Root Cause
 
-- `backend/app/services/capture/capture.py`: `guard_navigation()`, `route.continue_()`, `page.route()` และการตรวจ redirect count หลัง `page.goto()`
-- `backend/app/core/ssrf_guard.py`: URL validation, DNS resolution และ IP policy
-- `docker-compose.yml`: network isolation ของ capture runtime
+- `backend/app/services/capture/capture.py`: `guard_navigation()`, `route.continue_()`, `page.route()`, and redirect count verification following `page.goto()`.
+- `backend/app/core/ssrf_guard.py`: URL validation, DNS resolution, and IP policy.
+- `docker-compose.yml`: network isolation of the capture runtime.
 
-`page.route()` ไม่ intercept คำขอแรกของ popup และ handler ถูกเรียกเฉพาะ URL แรกเมื่อ response เป็น redirect การตรวจ redirect count หลัง navigation เสร็จไม่ป้องกัน request ที่ส่งไปแล้ว นอกจากนี้การ pin IP ปัจจุบันครอบคลุมเฉพาะ hostname เริ่มต้น
+`page.route()` does not intercept the initial request of a popup, and the handler is only invoked for the initial URL when the response is a redirect. Checking the redirect count after navigation completes does not prevent requests that have already been transmitted. Furthermore, existing IP pinning only covers the initial hostname.
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. สร้าง regression fixtures สำหรับ redirect และ popup โดยมี request counter ที่ปลายทางต้องห้าม เพื่อยืนยันว่า request ไม่ได้ไปถึงปลายทางจริง
-2. ย้ายการควบคุม HTTP requests ไปที่ browser context เพื่อครอบคลุมหน้าใหม่และ popup ตั้งแต่ request แรก และตรวจขอบเขต WebSocket blocking ให้ครอบคลุมหน้าใหม่ด้วย
-3. ออกแบบการควบคุม redirect ก่อนเปิด connection ของแต่ละ hop ห้ามถือว่าการย้ายไป `context.route()` เพียงอย่างเดียวแก้ redirect ได้ครบ
-4. ประเมินกลไก redirect mediation ที่ไม่ติดตาม redirect อัตโนมัติ หรือ egress proxy ที่ตรวจทุก connection โดยทดสอบผลต่อ cookies, resource loading, scripts และความเที่ยงตรงของภาพก่อนเลือกวิธี
-5. ตรวจ scheme และ resolved IP ของทุกปลายทางที่เกี่ยวข้อง คุม DNS rebinding ที่จุด connection สำหรับ hostname อื่นด้วย ไม่อาศัย cache ว่า hostname เคยปลอดภัยอย่างเดียว
-6. กำหนด egress policy ของ capture ให้ปฏิเสธ loopback/private/link-local และปลายทางต้องห้ามตาม policy จริงของระบบ ไม่อ้างว่าปิดช่อง SSRF ครบหากมีเพียง application checks ที่ยังข้ามได้
-7. คง service-worker blocking และแยกจำนวน redirect ของ main frame ออกจาก navigation ของ iframe
+1. Create regression fixtures for redirects and popups with request counters at prohibited endpoints to verify that requests never reach the destination.
+2. Move HTTP request interception to browser context level to cover new pages and popups starting from their very first request, and verify that WebSocket blocking also covers new pages.
+3. Design pre-connection redirect interception for each hop; never assume that moving to `context.route()` alone fully resolves redirect risks.
+4. Evaluate redirect mediation mechanisms that do not follow redirects automatically or an egress proxy that inspects every connection, evaluating impacts on cookies, resource loading, scripts, and image fidelity before selecting an approach.
+5. Validate scheme and resolved IP for every relevant destination; control DNS rebinding at connection time for subsequent hostnames rather than relying solely on cached safety assertions.
+6. Configure capture egress policy to deny loopback/private/link-local and prohibited destinations according to true system policy; do not claim SSRF closure if only bypassable application checks exist.
+7. Maintain service-worker blocking and separate the main frame redirect count from iframe navigations.
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- Direct request, HTTP redirect chain, popup และ subresource redirect ไปยังปลายทางต้องห้ามต้องถูกหยุดก่อนปลายทางรับ request
-- Redirect limit ถูกบังคับก่อนตาม hop ที่เกินกำหนด
-- Redirect ระหว่างปลายทางที่อนุญาตยังจับภาพได้ และ iframe ปกติไม่กิน main-frame redirect quota
-- ทดสอบ DNS rebinding ด้วย resolver/proxy จำลองโดยไม่เข้าถึงบริการภายในจริง
-- รายงานข้อจำกัดที่ยังเหลือของ protocol และ network paths อย่างชัดเจนก่อนปิดประเด็น
+- Direct requests, HTTP redirect chains, popups, and subresource redirects targeting prohibited destinations must be halted before the destination receives the request.
+- Redirect limits must be enforced prior to exceeding the designated hop quota.
+- Redirects between allowed destinations must capture successfully, and normal iframes must not consume main-frame redirect quotas.
+- Verify DNS rebinding with mock resolvers/proxies without accessing actual internal services.
+- Explicitly report remaining protocol and network path limitations prior to closing the issue.
 
-## 6. CR09-02 — กำหนด sandbox policy ให้ชัดเจนโดยรักษาการทำงานบน Linux
+## 6. CR09-02 — Explicitly Define Sandbox Policy While Maintaining Linux Operation
 
-### บริบทที่ต้องรักษา
+### Context to Preserve
 
-ตาม [บันทึก Docker remediation วันที่ 8 กันยายน](../refinement/8-9-2026/Docker-Deployment-Remediation-and-Stage2-Restart-8-9-2026.md) เคยเกิด `Chromium sandboxing failed!` บน Ubuntu/Docker และเพิ่ม fallback เพื่อให้ capture กลับมาทำงาน บันทึกระบุ root execution และข้อจำกัด seccomp/user namespaces เป็นสาเหตุ แต่ยังต้องตรวจ logs และ runtime ปัจจุบันเพื่อยืนยันรายละเอียด
+According to the [Docker remediation record from September 8](../refinement/8-9-2026/Docker-Deployment-Remediation-and-Stage2-Restart-8-9-2026.md), `Chromium sandboxing failed!` previously occurred on Ubuntu/Docker, leading to the introduction of a fallback to restore capture functionality. The record attributed root execution and seccomp/user namespace restrictions as root causes, but inspecting current runtime and logs remains necessary to confirm details.
 
-Compose ใน workspace กำหนด `BROWSER_DISABLE_SANDBOX=true` โดยตรงใน `environment` ซึ่งมีลำดับสูงกว่าค่าจาก `env_file` จึงอาจปิด sandbox ตั้งแต่ launch แรกแม้ `backend/.env` กำหนด `false`
+Compose in the workspace defines `BROWSER_DISABLE_SANDBOX=true` directly under `environment`, which takes precedence over values from `env_file`. Consequently, it may disable the sandbox on initial launch even if `backend/.env` specifies `false`.
 
-`seccomp:unconfined` เป็นการยกเลิก seccomp filtering ไม่ใช่การเปิด Chromium sandbox ส่วน `ipc: host` มีผลต่อ shared memory/IPC ไม่ใช่หลักฐานว่า sandbox เปิดแล้ว การใช้ configuration เหล่านี้ต้องอธิบายตามผลจริง
+`seccomp:unconfined` disables seccomp filtering rather than enabling the Chromium sandbox, while `ipc: host` impacts shared memory/IPC and does not constitute evidence that the sandbox is active. The use of these configurations must be justified based on verified effects.
 
-### ตำแหน่ง
+### Locations
 
-- `backend/app/services/capture/capture.py`: exception handler ที่ retry ด้วย `chromium_sandbox=False`
-- `backend/app/core/config.py`: `BROWSER_DISABLE_SANDBOX`
-- `backend/.env.example`, `docker-compose.yml` และเอกสาร deployment
-- `backend/tests/test_capture.py`: tests ของ launch configuration
+- `backend/app/services/capture/capture.py`: exception handler that retries with `chromium_sandbox=False`.
+- `backend/app/core/config.py`: `BROWSER_DISABLE_SANDBOX`.
+- `backend/.env.example`, `docker-compose.yml`, and deployment documentation.
+- `backend/tests/test_capture.py`: tests for launch configuration.
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. ตรวจแบบ read-only บน Linux: effective configuration โดยไม่เผย secrets, UID/GID ของ browser, image/package/browser versions, seccomp mode, user-namespace restrictions และ logs ของ launch failure
-2. แยกสาเหตุ root execution, namespace/seccomp/AppArmor restriction, dependencies และ resource exhaustion ตามหลักฐาน ห้ามใช้คำว่า `closed` เพียงอย่างเดียวตัดสินว่าเป็น sandbox failure
-3. กำหนดพฤติกรรมของแอปตามตารางด้านล่างและยกเลิกการ downgrade อัตโนมัติเมื่อ configuration ต้องการ sandbox
-4. ทำให้แหล่ง configuration ชัดเจน เอกสารต้องระบุ Compose precedence และวิธีตรวจค่าที่ container ใช้จริง การแก้ `.env` อย่างเดียวอาจไม่เปลี่ยนค่าที่มี override
-5. สำหรับ Linux ที่ยังรองรับ sandbox ไม่ได้ ให้คงการปิดแบบ explicit เป็นโหมดชั่วคราวที่ระบุข้อจำกัดจริง ประเมิน non-root, filesystem permissions, writable mounts และ egress isolation ของโหมดนี้ ห้ามระบุว่าเทียบเท่าการมี browser sandbox
-6. เตรียม runtime สำหรับ sandbox แยกจากระบบที่กำลังใช้งาน: ผู้ใช้ที่ไม่ใช่ root, seccomp profile ที่รองรับ syscalls สำหรับ user namespaces และสิทธิ์ data directories ที่จำเป็น
-7. เนื่องจาก Compose ปัจจุบันติดตั้ง dependencies ตอน startup ต้องเตรียม dependencies ใน image หรือขั้นตอนที่เหมาะสมก่อนเปลี่ยน runtime user ไม่เปลี่ยน `user` แล้วคาดว่า startup เดิมจะทำงานโดยอัตโนมัติ
-8. ไม่ใช้ `SYS_ADMIN` หรือ `seccomp:unconfined` เป็นคำตอบถาวรโดยไม่มีการประเมินสิทธิ์ ทดสอบ runtime ที่จำกัดสิทธิ์และเปิด sandbox ได้จริงก่อนเสนอเปลี่ยน production
-9. หลังผ่าน isolated smoke test จึงเสนอ deployment พร้อมผลทดสอบและ rollback ไปยัง configuration ที่บันทึกไว้ โดยไม่ลบข้อมูลหรือ reset baselines
+1. Conduct read-only inspection on Linux: effective configuration without exposing secrets, browser UID/GID, image/package/browser versions, seccomp mode, user-namespace restrictions, and launch failure logs.
+2. Separate root execution, namespace/seccomp/AppArmor restrictions, missing dependencies, and resource exhaustion based on evidence. Do not judge a failure as sandbox-related solely based on the word `closed`.
+3. Standardize application behavior according to the table below and remove automatic downgrade when configuration demands a sandbox.
+4. Clarify configuration sources; documentation must state Compose precedence and methods for inspecting actual container runtime values. Editing `.env` alone may not change values overridden in Compose.
+5. For Linux systems unable to support a sandbox, maintain explicit disabled mode as a temporary state detailing actual limitations. Assess non-root, filesystem permissions, writable mounts, and egress isolation for this mode; do not claim it is equivalent to having a browser sandbox.
+6. Prepare a sandbox-capable runtime isolated from the active environment: non-root user, seccomp profile supporting required user namespace syscalls, and necessary permissions on data directories.
+7. Because current Compose installs dependencies on startup, prepare dependencies in the image or an appropriate pipeline before switching runtime users; do not change `user` and expect legacy startup scripts to function automatically.
+8. Do not adopt `SYS_ADMIN` or `seccomp:unconfined` as permanent solutions without privilege evaluation. Validate a least-privilege runtime that genuinely supports sandbox before proposing production changes.
+9. Following an isolated smoke test pass, propose deployment alongside test results and rollback steps back to recorded configurations, without deleting data or resetting baselines.
 
-| Configuration | พฤติกรรมเป้าหมาย |
+| Configuration | Target Behavior |
 | --- | --- |
-| `BROWSER_DISABLE_SANDBOX=False` และ runtime รองรับ | เปิดด้วย `chromium_sandbox=True` |
-| `BROWSER_DISABLE_SANDBOX=False` แต่ launch ล้มเหลว | รายงาน failure พร้อมสาเหตุ ไม่ลองใหม่แบบปิด sandbox |
-| `BROWSER_DISABLE_SANDBOX=True` | เปิดแบบไม่มี sandbox ตามค่าที่กำหนด พร้อม warning ที่ชัดเจน |
+| `BROWSER_DISABLE_SANDBOX=False` and runtime supports it | Launch with `chromium_sandbox=True` |
+| `BROWSER_DISABLE_SANDBOX=False` but launch fails | Report failure with cause; do not retry with sandbox disabled |
+| `BROWSER_DISABLE_SANDBOX=True` | Launch without sandbox per configuration, logging an explicit warning |
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- Mock tests ครอบคลุมทั้งสองค่า และ errors ที่มี `sandboxing`, `closed` และ error อื่น ไม่พบ retry แบบปิด sandbox เมื่อกำหนดให้เปิด
-- ทดสอบ configuration precedence และบันทึก effective mode โดยไม่เปิดเผยค่าลับ
-- Linux smoke test ยืนยันทั้ง launch/capture และหลักฐาน sandbox ของ runtime จริง ไม่อาศัย mock options อย่างเดียว
-- ไม่เปลี่ยนโหมด Linux ที่กำลังใช้งานจนกว่าขั้นตอนตรวจสอบและ rollback จะพร้อม
-- แยกสถานะงานเป็น “แก้ automatic fallback แล้ว” และ “Linux runtime รองรับ sandbox แล้ว” ห้ามปิดสองงานพร้อมกันจากหลักฐานเพียงอย่างเดียว
+- Mock tests cover both configuration values, along with errors containing `sandboxing`, `closed`, and other errors; no retries with sandbox disabled occur when sandbox is configured as enabled.
+- Configuration precedence is verified, and effective mode is logged without exposing secret credentials.
+- Linux smoke test confirms both launch/capture and sandbox verification in actual runtime, not relying solely on mock options.
+- Active Linux mode remains untouched until inspection and rollback procedures are ready.
+- Differentiate task status between "Automatic fallback removed" and "Linux runtime supports sandbox"; never close both tasks simultaneously based on partial evidence.
 
-## 7. CR09-03 — แยก structural comparison ที่ตรวจไม่ได้ออกจากผลไม่มีการเปลี่ยนแปลง
+## 7. CR09-03 — Separate Unverifiable Structural Comparisons from No-Change Results
 
-### ตำแหน่งและสาเหตุ
+### Location and Root Cause
 
-- `backend/app/services/diff/diff.py`: `compare_html_files()` คืน score ศูนย์เมื่อ path หายหรืออ่านไม่ได้; `summarize_diff()` กลบข้อความ unavailable
-- `backend/app/services/checks.py`: การจัดอันดับ baseline และการตัดสิน `OK`
+- `backend/app/services/diff/diff.py`: `compare_html_files()` returns zero score when paths are missing or unreadable; `summarize_diff()` masks unavailable status.
+- `backend/app/services/checks.py`: baseline ranking and `OK` determination logic.
 
-baseline ที่ HTML ใช้งานไม่ได้อาจได้รับคะแนนดีกว่า baseline ที่ตรวจครบและพบ script injection ทำให้เลือก baseline ที่ตรวจไม่ครบเป็นผล `OK`
+A baseline whose HTML is unreadable could score better than a baseline that was fully evaluated and detected script injection, causing the incomplete baseline to be selected and return `OK`.
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. กำหนด unavailable/error ให้แยกจาก numeric score ห้ามใช้ `0` แทนการตรวจไม่สำเร็จ
-2. แนวทางเริ่มต้นให้ check จบเป็น `Failed` พร้อม `last_error` ที่ระบุ artifact/baseline ที่มีปัญหาเมื่อ structural comparison ของ candidate ที่ต้องตรวจไม่ครบ ไม่เพิ่ม target status ใหม่โดยไม่จำเป็น
-3. ไม่ส่ง comparison ที่ไม่ครบเข้า `select_best_baseline()` ในรูป zero score และไม่สรุป `OK` จาก text/visual เพียงสอง detector
-4. รักษาความแตกต่างระหว่าง content change กับ detector failure; ถ้าต้องการบันทึก partial findings เพิ่มในอนาคตต้องออกแบบ API/UI ให้ชัดเจนก่อน
-5. ตรวจ legacy snapshots ที่ไม่มี HTML แล้วเสนอการกู้คืนจาก backup หรือ baseline ใหม่ที่ผู้ดูแลตรวจและอนุมัติ ห้าม auto-rebaseline
-6. ตรวจ cleanup ของ staging และ transaction เมื่อ diff ล้มเหลว โดยไม่ลบ baseline หรือ history
+1. Differentiate unavailable/error conditions from numeric scores; never use `0` to represent failed comparisons.
+2. As a baseline rule, mark checks as `Failed` with `last_error` indicating the problematic artifact/baseline when structural comparison of required candidates cannot be completed. Avoid adding unnecessary target statuses.
+3. Do not feed incomplete comparisons into `select_best_baseline()` as zero scores, and do not conclude `OK` based solely on text and visual detectors.
+4. Maintain clear distinctions between content change and detector failure; if recording partial findings is desired in the future, explicitly design the API/UI beforehand.
+5. Inspect legacy snapshots lacking HTML and propose recovery from backups or establish a new baseline reviewed and approved by administrators. Never auto-rebaseline.
+6. Verify cleanup of staging artifacts and transactions upon diff failures without deleting baselines or history.
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- Missing path, missing file และ permission error ไม่ให้ผล `OK` หรือ summary ที่อ้างว่าตรวจโครงสร้างสำเร็จ
-- Multi-baseline test ที่ baseline หนึ่งอ่านไม่ได้และอีก baseline ตรวจพบ injection ต้องไม่ให้ baseline ที่อ่านไม่ได้ชนะด้วย score ศูนย์
-- รายงาน error ให้ผู้ดูแลแก้ artifact ได้ และตรวจซ้ำสำเร็จเมื่อ artifact กลับมาพร้อม
-- กรณี HTML ครบและไม่มีการเปลี่ยนแปลงยังให้ `OK`; structural injection ยังให้ `Changed`
+- Missing paths, missing files, and permission errors do not result in `OK` or summaries asserting structural comparison success.
+- Multi-baseline tests where one baseline is unreadable and another detects injection must not allow the unreadable baseline to win with a zero score.
+- Errors are clearly reported so administrators can fix artifacts, and re-checks succeed once artifacts are restored.
+- Cases where HTML is intact and unchanged continue to yield `OK`; structural injection continues to yield `Changed`.
 
-## 8. CR09-04 — ป้องกัน baseline mutation ระหว่างตรวจ
+## 8. CR09-04 — Prevent Baseline Mutation During Checks
 
-### ตำแหน่ง
+### Location
 
 - `backend/app/api/routes/targets.py`: `demote_target_baseline()`
 - `backend/app/services/review.py`: `approve_baseline()`
 - `backend/app/services/concurrency.py`: `is_target_in_flight()`
-- Frontend baseline actions และ `BaselineManagerModal.tsx`
+- Frontend baseline actions and `BaselineManagerModal.tsx`
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. ใช้ guard ร่วมสำหรับ baseline approval และ demotion โดยตรวจทั้ง `STATUS_CHECKING` และ process-local in-flight state รวมถึงงานที่รอ semaphore
-2. ตอบ conflict ที่สื่อความหมาย เช่น HTTP 409 เมื่อ baseline mutation ชนงานตรวจ
-3. คง last-baseline guard, target ownership validation และ retention cap เดิม
-4. ให้ UI แสดงเหตุผลเมื่อแก้ baseline ไม่ได้และจัดการ conflict จาก server; UI disabling อย่างเดียวไม่ใช่ concurrency protection
-5. หากมีการเพิ่ม await ระหว่าง guard กับ commit ในอนาคต ต้องใช้ lock/atomic coordination ที่ป้องกัน race ได้จริง คงขอบเขต single worker ของแผนนี้
+1. Use a unified guard for baseline approval and demotion, validating both `STATUS_CHECKING` and process-local in-flight state (including tasks awaiting semaphore acquisition).
+2. Return meaningful conflict responses, such as HTTP 409, when baseline mutation collides with an ongoing check.
+3. Maintain last-baseline guard, target ownership validation, and existing retention caps.
+4. Ensure the UI clearly displays error reasons when baseline modifications cannot proceed and handles server conflicts gracefully; UI button disabling alone does not constitute concurrency protection.
+5. If future changes introduce `await` between guard checks and commits, utilize robust locks or atomic coordination to prevent race conditions within the single-worker architecture.
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- งานที่รอ semaphore หรือกำลัง diff ปฏิเสธทั้ง approve และ demote
-- ทำ regression ตามลำดับที่จำลองได้ในการรีวิว: เริ่ม diff → ขอ demote → ตรวจ conflict → ปล่อย diff และตรวจ baseline references
-- เมื่อ check จบแล้ว mutation ทำงานได้ตามปกติ รวมถึงเงื่อนไข baseline สุดท้าย
+- Tasks awaiting semaphores or currently executing diffs reject both approval and demotion attempts.
+- Regression tests replicate the sequence identified in the review: initiate diff → request demotion → verify conflict response → release diff and inspect baseline references.
+- Once a check completes, mutations operate normally, subject to last-baseline retention rules.
 
-## 9. CR09-05 — ผูก Target Detail กับคู่ snapshot ของผลตรวจเดียวกัน
+## 9. CR09-05 — Bind Target Detail to Snapshot Pair of the Same Check Result
 
-### ตำแหน่งและสาเหตุ
+### Location and Root Cause
 
-- `frontend/src/pages/TargetDetailPage.tsx`: ใช้ `snapshots[0]` และ standalone baseline endpoint แสดงภาพ/ข้อความ ขณะที่คะแนนมาจาก `checks[0]`
-- `frontend/src/hooks/useTargetDetail.ts` และ `frontend/src/api/snapshots.ts`
+- `frontend/src/pages/TargetDetailPage.tsx`: utilizes `snapshots[0]` and standalone baseline endpoint for rendering images/text, while scores originate from `checks[0]`.
+- `frontend/src/hooks/useTargetDetail.ts` and `frontend/src/api/snapshots.ts`.
 
-Snapshot ล่าสุดที่จัดเก็บอาจเป็นภาพตอน `Changed` แม้ check ล่าสุดเป็น `OK` เพราะรอบ `OK` ทิ้ง capture และอ้าง baseline เดิม นอกจากนี้ standalone baseline อาจไม่ใช่ baseline ที่ check เลือกจากหลายชุด
+The latest stored snapshot may correspond to a `Changed` capture even if the latest check evaluated to `OK`, because `OK` rounds discard new captures and reference existing baselines. Furthermore, the standalone baseline may not be the specific baseline selected by the multi-baseline check.
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. เมื่อมี latest check ให้ใช้ `baseline_snapshot_id` และ `current_snapshot_id` ของ check นั้นสำหรับทั้ง screenshot และ text comparison
-2. ดึง snapshot metadata ตาม ID เมื่อจำเป็น ไม่พึ่งว่ารายการ snapshots หน้าแรกจะมีรายการที่ต้องใช้
-3. กรณีตรวจครั้งแรกที่ยังไม่มี CheckResult ให้แสดง baseline พร้อมข้อความว่าเป็น initial baseline
-4. กรณี `OK` ที่ใช้ baseline แทน current artifact ให้ระบุชัดว่าไม่ได้เก็บภาพรอบล่าสุด ห้ามอ้างว่า baseline เป็นภาพสดของรอบนั้น
-5. กรณีรอบล่าสุดล้มเหลวและไม่มี CheckResult ใหม่ ให้ระบุว่าภาพและคะแนนเป็นผลเปรียบเทียบสำเร็จครั้งก่อน พร้อมสถานะ failure ปัจจุบัน
-6. ตรวจปุ่ม approve ให้ผู้ใช้ทราบว่าอนุมัติ snapshot ใด หากยังมีการแสดง latest stored snapshot แยกต่างหาก ต้องไม่ผูกปุ่มกับภาพคนละรายการโดยไม่ชี้แจง
-7. รักษา polling/invalidation และ artifact error states เดิม
+1. When a latest check exists, use `baseline_snapshot_id` and `current_snapshot_id` from that check for both screenshot display and text comparison.
+2. Fetch snapshot metadata by ID when required; do not rely on the assumption that the first page of snapshots contains the required records.
+3. For initial checks that do not yet have a CheckResult, display the baseline with an explicit label indicating it is the initial baseline.
+4. In `OK` cases where the baseline is displayed in place of a current capture, clearly indicate that an image was not retained for the latest check; do not misrepresent the baseline as a live capture from that cycle.
+5. When the latest check failed and no new CheckResult exists, indicate that displayed images and scores reflect the previous successful check alongside current failure status.
+6. Ensure approve buttons clearly inform users which snapshot is being approved; if latest stored snapshots are shown separately, never bind approval actions to mismatched images without explanation.
+7. Preserve existing polling/invalidation and artifact error handling states.
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- ลำดับ baseline A → changed B → กลับเป็น A: latest check เป็น `OK` และไม่แสดง B เป็นภาพของผลล่าสุด
-- Multi-baseline: คู่ภาพ/ข้อความตรงกับ baseline ที่ backend เลือกจริง
-- Initial baseline, failed check, missing artifact และการเปลี่ยน target ไม่แสดงข้อมูลปะปน
-- คะแนน summary และคู่ snapshot ของ comparison เดียวกันสอดคล้องกันทั้งหมด
+- Sequence of baseline A → changed B → revert to A: latest check evaluates to `OK` and does not display B as the image of the latest result.
+- Multi-baseline: snapshot image and diff text correspond precisely to the baseline selected by the backend.
+- Initial baseline, failed checks, missing artifacts, and switching targets do not mix data.
+- Summary scores and snapshot pairs for the same comparison remain completely consistent.
 
-## 10. CR09-06 — แสดงผล logout ให้ตรงกับ server
+## 10. CR09-06 — Align Logout Display with Server Confirmation
 
-### ตำแหน่งและสาเหตุ
+### Location and Root Cause
 
-- `frontend/src/hooks/useAuth.tsx`: `logout()` จับ error แล้วล้าง auth state ต่อ
-- `frontend/src/App.tsx`: ปุ่ม logout และพื้นที่แสดงผล
-- `backend/app/api/routes/auth.py`: ใช้เป็น contract อ้างอิงของ logout
+- `frontend/src/hooks/useAuth.tsx`: `logout()` catches errors and proceeds to clear client auth state anyway.
+- `frontend/src/App.tsx`: logout button and render area.
+- `backend/app/api/routes/auth.py`: reference contract for logout.
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. ล้าง auth state และ query cache เมื่อ server ยืนยัน logout สำเร็จ
-2. เมื่อ network error, HTTP 5xx หรือ CSRF rejection ให้แสดง error/retry และไม่อ้างว่า session ถูกยกเลิกแล้ว
-3. คง CSRF token สำหรับ retry ที่เหมาะสม และมีสถานะ pending ป้องกันการกดซ้ำ
-4. แยกกรณี session หมดอายุหรือถูกเพิกถอนแล้วตาม API contract ไม่ถือว่า error ทุกชนิดแปลว่า logout สำเร็จ
-5. ทดสอบกรณี server revoke สำเร็จแต่ response สูญหาย: retry ต้องสามารถกลับสู่สถานะ logged out ได้โดยไม่ติดค้าง
+1. Clear auth state and query cache only after the server confirms successful logout.
+2. Upon network errors, HTTP 5xx, or CSRF rejections, display an error with retry options; do not claim that the session has been terminated.
+3. Retain CSRF tokens for legitimate retry attempts, and introduce a pending state to prevent duplicate submissions.
+4. Distinguish expired or already revoked sessions according to API contracts; do not treat all error varieties as successful logouts.
+5. Test scenarios where server revocation succeeds but the response packet is dropped: retries must reach a logged-out state without hanging.
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- Success: session ถูกเพิกถอนตาม backend contract และ UI ออกจากระบบ
-- Network/5xx/403: UI แสดงผลผิดพลาดและให้ retry โดยไม่แสดงว่างานสำเร็จ
-- Retry หลัง response สูญหายสำเร็จ; reload หลัง logout สำเร็จไม่คืน session เดิม
+- Success: session is revoked per backend contract and UI transitions to logged-out state.
+- Network/5xx/403: UI displays error message and offers retry without claiming operation completed.
+- Retries following dropped responses succeed; refreshing after successful logout does not restore the previous session.
 
-## 11. CR09-07 — แยก DNS availability failure จาก SSRF policy rejection
+## 11. CR09-07 — Separate DNS Availability Failure from SSRF Policy Rejection
 
-### ตำแหน่ง
+### Location
 
 - `backend/app/core/ssrf_guard.py`: `resolve_host_ips()`
-- `backend/app/core/errors.py`, `backend/app/services/checks.py`: exception taxonomy และ `is_availability_error()`
-- `backend/app/services/capture/capture.py`: request routing error handling
-- Target create/update routes และ exception handlers ที่เกี่ยวข้อง
+- `backend/app/core/errors.py`, `backend/app/services/checks.py`: exception taxonomy and `is_availability_error()`
+- `backend/app/services/capture/capture.py`: request routing error handling.
+- Target create/update routes and associated exception handlers.
 
-### ขั้นตอนดำเนินการ
+### Remediation Steps
 
-1. แยก exception สำหรับ DNS resolution failure ออกจาก `SsrfBlockedError` โดยเก็บสาเหตุเดิมไว้
-2. ระหว่าง capture ให้ DNS failure เป็น `Availability Issue`; resolved private/loopback/link-local IP และ scheme ที่ห้ามยังเป็น security rejection
-3. ปรับ routing ให้ abort request และส่งต่อ error ตามประเภทอย่างควบคุมได้ ไม่ปล่อย exception ใหม่ทำให้ request ค้าง
-4. แยกผลต่อ main-document navigation กับ optional subresource: main document failure ต้องสะท้อน availability; optional resource failure ต้องไม่กลายเป็น security violation โดยอัตโนมัติ
-5. กำหนด API response ของ target create/update เมื่อ resolve ไม่ได้ให้ชัดเจน เช่น validation error ที่บอกว่า DNS resolve ไม่สำเร็จ ไม่หลุดเป็น HTTP 500 และไม่บันทึก URL update ที่ไม่ผ่าน validation
+1. Separate exceptions for DNS resolution failure from `SsrfBlockedError`, preserving original error causes.
+2. During capture, categorize DNS resolution failures as `Availability Issue`; resolved private/loopback/link-local IPs and forbidden schemes remain security rejections.
+3. Refine request routing to abort requests and propagate typed errors cleanly without unhandled exceptions leaving requests hanging.
+4. Distinguish effects on main-document navigation from optional subresources: main document failures must reflect availability; optional subresource failures must not automatically trigger security violations.
+5. Standardize API responses for target creation/updates when host resolution fails (e.g., validation error stating DNS resolution failure); prevent unhandled HTTP 500s and reject URL updates that fail validation.
 
-### เกณฑ์รับงาน
+### Acceptance Criteria
 
-- Mock `socket.gaierror` ระหว่าง main capture ให้ `Availability Issue`
-- DNS คืน private address ยังคงถูก SSRF guard ปฏิเสธ
-- Target create/update กรณี DNS failure ได้ response ที่กำหนดและไม่มี partial update
-- Request handler ไม่ค้างเมื่อ DNS error และยังรักษา check timeout/concurrency cleanup
+- Mocked `socket.gaierror` during main capture yields `Availability Issue`.
+- DNS returning private IP addresses remains blocked by SSRF guard.
+- Target create/update on DNS failure returns defined validation responses without partial database updates.
+- Request handlers do not hang on DNS errors and maintain check timeout and concurrency cleanup.
 
-## 12. ลำดับดำเนินการและการตรวจรับ
+## 12. Execution Sequence and Acceptance
 
-1. **เตรียมหลักฐาน:** บันทึก source revision/configuration ที่ใช้ทดสอบ แยก environment failures ของ Pytest/Vitest และตรวจ Linux sandbox runtime แบบ read-only
-2. **แก้ P1:** ดำเนิน CR09-01, CR09-02 และ CR09-03 พร้อม regression tests ที่ยืนยัน failure mode; CR09-02 แยก policy fix ออกจากการเปลี่ยน runtime Linux
-3. **แก้ความสอดคล้อง:** CR09-04 และ CR09-05 ตามด้วย CR09-06 และ CR09-07
-4. **ตรวจรวม:** รัน backend tests, frontend tests, Ruff, Mypy, TypeScript, ESLint และ production build ใน environment ทดสอบที่ dependencies พร้อม บันทึกคำสั่ง version และผลจริง ไม่อ้างผล pass จากเอกสารเก่า
-5. **ตรวจ Linux:** ทดสอบ capture/redirect/egress/sandbox ด้วย fixtures ที่ควบคุมได้ใน runtime แยกก่อนเสนอ deployment
-6. **ส่งมอบ remediation:** สรุปไฟล์ที่เปลี่ยน ผลทดสอบ ข้อจำกัดที่เหลือ และ deployment/rollback steps ที่เป็นรูปธรรมเมื่อได้รับคำสั่งให้ดำเนินการ
+1. **Evidence Preparation:** Record source revision and test configurations; separate Pytest/Vitest environment failures; perform read-only inspection of Linux sandbox runtime.
+2. **Resolve P1:** Implement CR09-01, CR09-02, and CR09-03 accompanied by regression tests confirming failure modes; for CR09-02, separate policy fixes from Linux runtime modifications.
+3. **Resolve Consistency:** Implement CR09-04 and CR09-05, followed by CR09-06 and CR09-07.
+4. **Integration Verification:** Execute backend tests, frontend tests, Ruff, Mypy, TypeScript, ESLint, and production build in environments with complete dependencies; document commands, versions, and actual results without relying on historical passes.
+5. **Linux Verification:** Test capture/redirect/egress/sandbox using controlled fixtures in an isolated runtime prior to proposing deployment.
+6. **Remediation Delivery:** Summarize modified files, test outputs, remaining limitations, and concrete deployment/rollback steps upon instruction to execute.
 
-### รายการตรวจรับรวม
+### Acceptance Checklist
 
-- [x] CR09-01: redirect/popup ถูกควบคุมก่อนเชื่อมต่อปลายทางต้องห้าม
-- [x] CR09-02: ไม่มี automatic sandbox downgrade; มีหลักฐาน effective configuration
-- [x] CR09-02 Linux: ระบุงาน runtime ที่ยังเปิดค้างและ explicit disabled mode ตามสภาพจริง โดยไม่อ้างว่าเปิด sandbox แล้ว
-- [x] CR09-03: detector unavailable ไม่ได้ผล `OK`
-- [x] CR09-04: ชุด baseline เปลี่ยนไม่ได้ระหว่างงานตรวจ
-- [x] CR09-05: คู่ภาพ/ข้อความตรงกับ check ที่แสดงคะแนน
-- [x] CR09-06: logout failure ไม่แสดงเป็น success
-- [x] CR09-07: DNS failure และ SSRF policy rejection แยกกัน
-- [x] Regression suite และ static checks มีผลจริงพร้อมอธิบาย failures/warnings
-- [x] ไม่ลบ history, ไม่ auto-rebaseline และไม่เปลี่ยน thresholds เพื่อกลบปัญหา
-- [x] ยังไม่เปลี่ยน deployment หรือ soak-test state หากไม่มีคำสั่งในขอบเขตนั้น
+- [x] CR09-01: redirects and popups are intercepted before connecting to prohibited destinations.
+- [x] CR09-02: automatic sandbox downgrade removed; effective configuration verified.
+- [x] CR09-02 Linux: runtime tasks remaining open and explicit disabled mode documented accurately without falsely claiming active sandbox.
+- [x] CR09-03: detector unavailable does not yield `OK`.
+- [x] CR09-04: baseline set cannot be modified during active check.
+- [x] CR09-05: snapshot pair and diff text match the check displaying scores.
+- [x] CR09-06: logout failure does not display as success.
+- [x] CR09-07: DNS failure and SSRF policy rejection are cleanly separated.
+- [x] Regression suite and static checks have documented results with explanations for any failures/warnings.
+- [x] No history deletion, no auto-rebaselining, and no threshold modifications to mask problems.
+- [x] Deployment and soak-test states remain unchanged pending instructions within that scope.
 
-## 13. เอกสารอ้างอิง
+## 13. Reference Documents
 
 - [Master project plan](PROJECT_PLAN.md)
-- [Code review วันที่ 8 กันยายน — เอกสารประวัติ](archive/Code%20Review%20by%20GPT-6%20Astra.md)
-- [CR-01 ถึง CR-06 remediation วันที่ 8 กันยายน](../refinement/8-9-2026/Code-Review-Remediation-CR01-to-CR06-8-9-2026.md)
-- [CR09-01 ถึง CR09-07 remediation วันที่ 10 กันยายน](../refinement/10-9-2026/Code-Review-Remediation-CR09-01-to-CR09-07-10-9-2026.md)
-- [CR09 completion และผลตรวจรับล่าสุดวันที่ 10 กันยายน](../refinement/10-9-2026/Code-Review-Completion-CR09-10-9-2026.md)
-- [Docker deployment remediation และ sandbox failure](../refinement/8-9-2026/Docker-Deployment-Remediation-and-Stage2-Restart-8-9-2026.md)
-- [Playwright page.route: redirect และ popup limitations](https://playwright.dev/python/docs/api/class-page#page-route)
-- [Playwright Docker: non-root และ seccomp สำหรับ crawling](https://playwright.dev/python/docs/docker#crawling-and-scraping)
+- [Code review of September 8 — Historical record](archive/Code%20Review%20by%20GPT-6%20Astra.md)
+- [CR-01 through CR-06 remediation of September 8](../refinement/8-9-2026/Code-Review-Remediation-CR01-to-CR06-8-9-2026.md)
+- [CR09-01 through CR09-07 remediation of September 10](../refinement/10-9-2026/Code-Review-Remediation-CR09-01-to-CR09-07-10-9-2026.md)
+- [CR09 completion and latest acceptance results of September 10](../refinement/10-9-2026/Code-Review-Completion-CR09-10-9-2026.md)
+- [Docker deployment remediation and sandbox failure](../refinement/8-9-2026/Docker-Deployment-Remediation-and-Stage2-Restart-8-9-2026.md)
+- [Playwright page.route: redirect and popup limitations](https://playwright.dev/python/docs/api/class-page#page-route)
+- [Playwright Docker: non-root and seccomp for crawling](https://playwright.dev/python/docs/docker#crawling-and-scraping)
 - [Docker Compose environment-variable precedence](https://docs.docker.com/compose/how-tos/environment-variables/envvars-precedence/)
 - [Docker seccomp profiles](https://docs.docker.com/engine/security/seccomp/)
 
-หมายเหตุ: เอกสารออนไลน์อาจอ้างอิง Playwright รุ่นใหม่กว่าที่โครงการ pin ไว้ ต้องตรวจ API และพฤติกรรมกับ package/browser version ที่ใช้จริงก่อน implementation
+Note: Online documentation may reference newer Playwright versions than what is pinned in this project. API signatures and behaviors must be verified against actual package and browser versions before implementation.

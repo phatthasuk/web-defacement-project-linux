@@ -1,206 +1,171 @@
-# แผนแก้ไขเพิ่มเติม CR10 หลังการ Review รอบที่สอง
+# CR10 Second Follow-up Remediation Plan
 
-วันที่: 17 กันยายน 2026  
-สถานะ: ดำเนินการด้านโค้ดและ automated verification แล้ว — ตรวจ runtime เมื่อ deploy บน Linux  
-ขอบเขต: Production security, test isolation, capture cleanup และความถูกต้องของเอกสาร
+Date: September 17, 2026  
+Status: Source code and automated verification implemented — Runtime validation pending on Linux target  
+Scope: Production security, test isolation, capture cleanup, and documentation consistency
 
-เอกสารอ้างอิง:
+References:
+- [Main CR10 Plan](Code-Review-and-Remediation-Plan-CR10-17-9-2026.md)
+- [First Follow-up Plan](CR10-Follow-up-Remediation-Plan-17-9-2026.md)
+- [Follow-up Execution Log](../refinement/17-9-2026/Code-Review-Remediation-CR10-FollowUp-17-9-2026.md)
+- [Project Plan](PROJECT_PLAN.md)
 
-- [แผน CR10 หลัก](Code-Review-and-Remediation-Plan-CR10-17-9-2026.md)
-- [แผน Follow-up รอบแรก](CR10-Follow-up-Remediation-Plan-17-9-2026.md)
-- [บันทึกการดำเนินการ Follow-up](../refinement/17-9-2026/Code-Review-Remediation-CR10-FollowUp-17-9-2026.md)
-- [แผนโครงการ](PROJECT_PLAN.md)
+## 1. Objectives
 
-## 1. วัตถุประสงค์
+This plan addresses secondary review findings following the first CR10 follow-up. It focuses on enforcing production security policies, strictly isolating test runs from production databases, guaranteeing cleanup across the entire capture coroutine lifecycle, and aligning documentation statuses with verified evidence.
 
-แผนนี้จัดการประเด็นที่พบจากการ review ซ้ำหลังดำเนินการ CR10 Follow-up รอบแรก โดยเน้นให้ production configuration บังคับใช้นโยบายความปลอดภัยจริง แยกการทดสอบออกจากฐานข้อมูล production ครอบคลุม cleanup ตลอดอายุของ capture coroutine และทำให้สถานะในเอกสารตรงกับหลักฐานที่ตรวจรับได้
+Execution results are documented in [`Code-Review-Remediation-CR10-SecondFollowUp-17-9-2026.md`](../refinement/17-9-2026/Code-Review-Remediation-CR10-SecondFollowUp-17-9-2026.md). Tasks 3.1–3.5 have been implemented at the source/configuration level. Docker runtime testing on Windows was omitted as Linux is the target deployment environment; image, TLS, authenticated routing, and sandbox smoke checks are designated for Linux deployment stages.
 
-ผลการดำเนินการและข้อจำกัดล่าสุดบันทึกไว้ใน
-[`Code-Review-Remediation-CR10-SecondFollowUp-17-9-2026.md`](../refinement/17-9-2026/Code-Review-Remediation-CR10-SecondFollowUp-17-9-2026.md)
-โดยข้อ 3.1–3.5 ดำเนินการด้าน source/configuration แล้ว การทดสอบ Docker runtime
-บน Windows ถูกยกเว้นเนื่องจากระบบเป้าหมายคือ Linux ส่วน image, TLS,
-routed-authentication และ sandbox smoke checks ให้ดำเนินการในขั้นตอน deploy บน Linux
+## 2. Invariants to Maintain
 
-## 2. ข้อกำหนดที่ต้องรักษา
+- Never delete, reset, re-stamp, or modify data in `backend/data/app.db` during development or automated testing.
+- Preserve all existing monitoring targets, snapshots, baselines, and historical check results.
+- Maintain the single API worker (`--workers 1`), SSRF guard, CSRF validation, authentication, and detector thresholds.
+- Regression tests must utilize isolated databases, directories, and mock network fixtures.
+- Never contact live target endpoints from automated test runs.
+- Do not mark production as ready or verified until relevant runtime integration checks pass on Linux.
 
-- ห้ามลบ reset stamp ซ้ำ หรือเปลี่ยนข้อมูลใน `backend/data/app.db` ระหว่างการพัฒนาและทดสอบ
-- ต้องรักษา monitoring targets, snapshots, baselines และ check history เดิมทั้งหมด
-- ต้องรักษา single API worker (`--workers 1`), SSRF guard, CSRF verification, authentication และ detector thresholds เดิม
-- Regression tests ต้องใช้ฐานข้อมูล ไดเรกทอรี และ network fixtures ที่แยกจาก production
-- ห้ามติดต่อ monitoring targets จริงจากชุดทดสอบ
-- ห้ามระบุว่า production พร้อมใช้งานหรือ verified จนกว่า runtime integration checks ที่เกี่ยวข้องจะผ่าน
+## 3. Action Items
 
-## 3. รายการแก้ไข
+### 3.1 [P1] Enforce Production Environment and Secure Session Cookies
 
-### 3.1 [P1] บังคับใช้ Production Environment และ Secure Session Cookies
-
-ไฟล์เกี่ยวข้อง:
-
+Affected files:
 - `docker-compose.yml`
 - `backend/.env.example`
 - `backend/app/core/config.py`
 - `backend/app/main.py`
 - `README.md`
-- TLS/reverse-proxy configuration ที่เลือกใช้
+- Reverse proxy / TLS configurations
 
-**ข้อพบ**
+**Finding:** `docker-compose.yml` was labeled for production but omitted explicit `ENVIRONMENT=production` and `SESSION_COOKIE_SECURE=true`. Defaults remained in development mode with unencrypted cookies, bypassing the production startup security guard.
 
-`docker-compose.yml` ระบุว่าเป็น production environment แต่ไม่ได้กำหนด `ENVIRONMENT=production` และ `SESSION_COOKIE_SECURE=true` ค่าเริ่มต้นจึงยังเป็น development และ cookie แบบไม่ secure ทำให้ production startup guard ไม่ถูกเรียกใช้ตามเจตนา
+**Action Items:**
+1. Explicitly specify `ENVIRONMENT=production` in production deployment configurations.
+2. Enforce `SESSION_COOKIE_SECURE=true` in production mode.
+3. Configure HTTPS/TLS endpoints via reverse proxy or ingress before enabling secure cookies.
+4. Set CORS trusted origins matching operational HTTPS domains.
+5. Clarify development vs. production configuration defaults.
+6. Update README detailing URLs, TLS certificates, cookies, and startup prerequisites.
 
-**งานที่ต้องทำ**
+**Acceptance Criteria:**
+- Production backend refuses startup if secure cookies are disabled.
+- Web dashboard operates over HTTPS with login, `/auth/me`, API mutations, and logout routing cleanly via same-origin `/api`.
+- Session cookies exhibit `Secure`, `HttpOnly`, `SameSite`, and `Path` attributes.
+- HTTP traffic redirects to HTTPS or is disabled per deployment design.
 
-1. กำหนด `ENVIRONMENT=production` ใน production deployment อย่างชัดเจน
-2. เปิด `SESSION_COOKIE_SECURE=true` สำหรับ production
-3. เพิ่ม HTTPS/TLS endpoint ก่อนเปิด secure cookie โดยเลือก reverse proxy หรือ ingress ที่เหมาะกับสภาพแวดล้อมจริง
-4. กำหนด trusted origins ให้ตรงกับ HTTPS origin ที่ผู้ปฏิบัติงานใช้จริง
-5. แยก development defaults ออกจาก production defaults ให้ชัดเจน
-6. ปรับ README ให้ระบุ URL, certificate, cookie และ startup requirements ตาม configuration จริง
+### 3.2 [P1] Enable Browser Sandbox or Apply Compensating Isolation Controls
 
-**เกณฑ์ตรวจรับ**
-
-- Production backend ปฏิเสธการเริ่มทำงานเมื่อ secure cookie ถูกปิด
-- Dashboard เปิดผ่าน HTTPS และ login, `/auth/me`, mutation และ logout ทำงานผ่าน same-origin `/api`
-- Session cookie มี `Secure`, `HttpOnly`, `SameSite` และ `Path` ตาม configuration
-- HTTP endpoint redirect ไป HTTPS หรือไม่เปิดให้เข้าถึงตาม deployment design
-- Development workflow ยังใช้งานได้ผ่าน configuration แยก
-
-### 3.2 [P1] เปิด Browser Sandbox หรือเพิ่มมาตรการ Isolation ที่เพียงพอ
-
-ไฟล์เกี่ยวข้อง:
-
+Affected files:
 - `docker-compose.yml`
-- backend container image/build configuration
+- Backend Dockerfile & image configs
 - `backend/app/services/capture/capture.py`
-- deployment documentation
+- Deployment documentation
 
-**ข้อพบ**
+**Finding:** Production Compose configured `BROWSER_DISABLE_SANDBOX=true` and `seccomp:unconfined` without enforcing non-root users, read-only root filesystems, or network isolation. Because captured pages may contain malicious payloads, this configuration presents severe exposure without compensating controls.
 
-Production Compose กำหนด `BROWSER_DISABLE_SANDBOX=true` และ `seccomp:unconfined` แต่ไม่ได้กำหนด non-root user, read-only filesystem หรือ network isolation ตามมาตรการชดเชยที่ source code ระบุไว้ เว็บที่ถูก capture อาจเป็นเนื้อหาที่เป็นอันตราย จึงไม่ควรใช้งาน configuration นี้ใน production โดยไม่มี isolation เพิ่มเติม
+**Action Items:**
+1. Prioritize enabling the Chromium sandbox in production.
+2. Execute processes as an unprivileged non-root user and drop unnecessary Linux capabilities.
+3. Eliminate `seccomp:unconfined`, adopting strict profiles.
+4. Mount root filesystems as read-only, permitting writes strictly to dedicated temporary/artifact volumes.
+5. Restrict container network reachability so browser processes cannot directly access internal networks outside the monitored proxy.
+6. Verify Playwright captures complete reliably under these constraints.
 
-**งานที่ต้องทำ**
+**Acceptance Criteria:**
+- Chromium operates sandboxed or under comprehensive, tested compensating isolation controls.
+- Containers run unprivileged without excess capabilities.
+- Unrestricted host or internal network access from browser processes is prevented.
+- Capture, SSRF, and smoke checks pass in the production container image.
 
-1. พยายามเปิด Chromium sandbox ใน production เป็นตัวเลือกหลัก
-2. ใช้ non-root user และลด Linux capabilities เท่าที่ runtime รองรับ
-3. หลีกเลี่ยง `seccomp:unconfined`; หากจำเป็นต้องใช้ ให้บันทึกเหตุผลและเพิ่มมาตรการชดเชยที่ตรวจสอบได้
-4. จำกัด filesystem access โดยใช้ read-only root filesystem และ writable mounts เฉพาะตำแหน่งที่ต้องเขียน
-5. จำกัด network reachability ของ capture runtime ไม่ให้เข้าถึง internal networks นอกเส้นทางที่ SSRF proxy ควบคุม
-6. ตรวจว่า Playwright/Chromium ยัง capture ได้ภายใต้ข้อจำกัดใหม่
+### 3.3 [P1] Decouple Foreign-Key Test Harness from Production Storage
 
-**เกณฑ์ตรวจรับ**
-
-- Chromium เปิดด้วย sandbox หรือมีชุดมาตรการชดเชยที่ระบุและทดสอบครบ
-- Container ไม่รันด้วยสิทธิ์เกินความจำเป็น
-- ไม่มี unrestricted host/internal network access จาก browser process
-- Capture tests, SSRF proxy tests และ smoke capture ผ่านใน production container
-- การเขียน artifacts และ SQLite ทำได้เฉพาะ writable paths ที่กำหนด
-
-### 3.3 [P1] แยก Foreign-Key Test ออกจาก Production Database
-
-ไฟล์เกี่ยวข้อง:
-
+Affected files:
 - `backend/tests/test_checks.py`
 - `backend/tests/conftest.py`
-- test database fixtures
-- `backend/app/db/session.py` หากต้องแยก helper สำหรับติดตั้ง PRAGMA
+- Test database fixtures
+- `backend/app/db/session.py`
 
-**ข้อพบ**
+**Finding:** `test_sqlite_foreign_keys_pragma` directly connected to `app.db.session.engine`, which defaults to `backend/data/app.db`. Connecting triggered connection event listeners executing `PRAGMA journal_mode=WAL`, violating test database isolation.
 
-`test_sqlite_foreign_keys_pragma` เชื่อมต่อ `app.db.session.engine` ซึ่งใช้ `DATABASE_URL` ของแอปและอาจชี้ไป `backend/data/app.db` เมื่อ connection เปิดขึ้น event listener ยังสั่ง `PRAGMA journal_mode=WAL` จึงขัดกับข้อกำหนด test isolation
+**Action Items:**
+1. Refactor PRAGMA tests to instantiate SQLite engines in temporary directories or in-memory.
+2. Utilize identical PRAGMA initialization logic to test actual implementation behavior without connecting to the production engine.
+3. Forbid imports or connections to `SessionLocal`/`engine` pointing to production storage inside tests.
+4. Add assertion guards rejecting `DATABASE_URL` resolving to `backend/data/app.db` during test runs.
+5. Add regression tests validating foreign key rejections and restricted deletions.
 
-**งานที่ต้องทำ**
+**Acceptance Criteria:**
+- Executing backend pytest never touches, opens, or locks `backend/data/app.db`, `app.db-wal`, or `app.db-shm`.
+- All test engines simulating production SQLite enforce `PRAGMA foreign_keys=1`.
+- Invalid foreign keys and parent deletion attempts fail with `IntegrityError`.
+- Test suites pass cleanly even if production database storage is absent or read-only.
 
-1. เปลี่ยนเทสต์ PRAGMA ให้สร้าง SQLite engine ใน temporary directory หรือ in-memory database
-2. ใช้กลไกติดตั้ง PRAGMA เดียวกับ production engine เพื่อให้เทสต์ตรวจ implementation จริงโดยไม่เชื่อมต่อ app engine
-3. ห้าม import หรือ connect `SessionLocal`/`engine` ที่ชี้ production database ใน database unit tests
-4. เพิ่ม guard ใน test setup เพื่อปฏิเสธ `DATABASE_URL` ที่ resolve ไปยัง `backend/data/app.db`
-5. เพิ่ม regression tests สำหรับ invalid target/snapshot foreign keys และ restricted delete ตาม acceptance criteria เดิม
+### 3.4 [P2] End-to-End Staging Artifact Cleanup Through Coroutine Completion
 
-**เกณฑ์ตรวจรับ**
-
-- การรัน backend test suite ไม่เปิดหรือเปลี่ยน `backend/data/app.db`, `app.db-wal` หรือ `app.db-shm`
-- Test engine ทุกตัวที่จำลอง production SQLite มี `PRAGMA foreign_keys=1`
-- Invalid foreign-key insert และการลบ parent ที่ยังถูกอ้างถึงล้มเหลวด้วย `IntegrityError`
-- Test suite ผ่านเมื่อ production database ไม่มีอยู่หรือถูกทำให้ read-only
-
-### 3.4 [P2] ครอบคลุม Staging Cleanup จน CaptureResult ถูกส่งกลับสำเร็จ
-
-ไฟล์เกี่ยวข้อง:
-
+Affected files:
 - `backend/app/services/capture/capture.py`
 - `backend/app/services/capture/ssrf_proxy.py`
 - `backend/tests/test_capture.py`
 - `backend/tests/test_concurrency.py`
 
-**ข้อพบ**
+**Finding:** Capture cleanup covered write failures and cancellations during `browser.close()`. However, if cancellation occurred while exiting Playwright or `SsrfProxy` async context managers, the coroutine aborted without returning `CaptureResult`, leaving staging directories uncollected.
 
-cleanup ปัจจุบันครอบคลุม write failure และ cancellation ใน `browser.close()` แต่หลัง browser ปิดแล้วยังต้องออกจาก Playwright และ `SsrfProxy` async context managers หาก cancellation หรือ shutdown failure เกิดในช่วงนี้ coroutine จะไม่คืน `CaptureResult` แต่ staging อาจค้างอยู่
+**Action Items:**
+1. Enclose the capture lifecycle in comprehensive `try/finally` blocks ensuring cleanup executes until `CaptureResult` is returned.
+2. Mark capture operations successful strictly after all async context managers cleanly exit.
+3. Automatically delete staging directories upon unhandled exceptions or `CancelledError` before results are delivered.
+4. Propagate original `CancelledError` exceptions cleanly.
+5. Verify in-flight reservations and target statuses are released upon timeout or cancellation.
 
-**งานที่ต้องทำ**
+**Acceptance Criteria:**
+- Task cancellations during artifact generation, browser shutdown, Playwright exit, or proxy exit leave zero orphaned staging directories.
+- Successful captures preserve staging directories for caller promotion or discard.
+- `CancelledError` propagates without transformation into internal errors.
 
-1. ครอบ capture lifecycle ทั้งฟังก์ชันด้วย outer `try/finally` หรือ ownership guard ที่ทำงานจนถึงจุดคืน `CaptureResult`
-2. กำหนดสถานะสำเร็จหลังออกจาก async context managers ครบแล้วเท่านั้น
-3. ลบ staging เมื่อ exception หรือ `CancelledError` เกิดก่อน caller ได้รับผลลัพธ์
-4. ส่งต่อ cancellation เดิมโดยไม่เปลี่ยนเป็น business error
-5. ตรวจว่าการปล่อย in-flight reservation และการเปลี่ยน target status ยังทำงานถูกต้องเมื่อ timeout/cancel
+### 3.5 [P3] Synchronize Status Documentation with Verification Realities
 
-**เกณฑ์ตรวจรับ**
-
-- Cancellation ระหว่าง artifact write, `browser.close()`, Playwright shutdown และ `SsrfProxy.__aexit__()` ไม่ทิ้ง staging
-- Capture ที่สำเร็จเก็บ staging ไว้ให้ `run_target_check` promote หรือ discard ตามผลเปรียบเทียบ
-- `CancelledError` ยังถูกส่งต่อ และ reservation ถูกปล่อยใน worker `finally`
-- เพิ่ม regression test แยกสำหรับ cancellation ระหว่างออกจากแต่ละ async context ที่สำคัญ
-
-### 3.5 [P3] ทำให้สถานะในเอกสารตรงกับผลตรวจรับ
-
-ไฟล์เกี่ยวข้อง:
-
+Affected files:
 - `refinement/17-9-2026/Code-Review-Remediation-CR10-FollowUp-17-9-2026.md`
 - `refinement/17-9-2026/Code-Review-Remediation-CR10-Phase3-17-9-2026.md`
 - `UPDATE_SUMMARY.md`
 - `README.md`
 
-**ข้อพบ**
+**Finding:** Follow-up logs stated Docker validation was pending, whereas Phase 3 claimed CR10 was 100% verified. Furthermore, Follow-up items 2–3 were marked Completed despite test isolation and full capture cleanup remaining incomplete.
 
-Follow-up ระบุว่า Docker runtime validation ยังรอดำเนินการ แต่ Phase 3 ยังระบุว่า CR10 เสร็จและ verified 100% อีกทั้ง Follow-up Items 2–3 ยังเป็น Completed & Verified ทั้งที่ test isolation และ full capture cleanup ยังไม่ครบ
+**Action Items:**
+1. Adjust item statuses to reflect outstanding runtime verification.
+2. Avoid claiming production storage is "untouched" until test harnesses are verified decoupled.
+3. Explicitly distinguish between code implementation, automated testing, and live runtime deployment verification.
+4. Record Docker/TLS/Nginx validation results following actual Linux deployment runs.
 
-**งานที่ต้องทำ**
+**Acceptance Criteria:**
+- All tracking documents reflect consistent status for each CR10 deliverable.
+- No document asserts full verification without supporting runtime evidence.
 
-1. ปรับสถานะ Items 2–4 และสถานะรวมให้ตรงกับงานที่ยังค้าง
-2. ลบหรือแก้ข้อความว่า production database “untouched” จนกว่าชุดเทสต์จะแยกจาก app engine และมีหลักฐานยืนยัน
-3. แยกสถานะ implementation, automated verification และ runtime deployment verification
-4. บันทึก Docker/TLS/Nginx/backend integration results หลังทดสอบจริง
-5. ปรับข้อความ “100% completed” หลังเกณฑ์ตรวจรับทั้งหมดผ่านเท่านั้น
+## 4. Execution Order
 
-**เกณฑ์ตรวจรับ**
-
-- เอกสารทุกฉบับแสดงสถานะเดียวกันสำหรับแต่ละ CR10 item
-- ไม่มีข้อความ fully verified หากยังขาด Docker runtime, HTTPS หรือ capture lifecycle test
-- ผลทดสอบทุกตัวระบุคำสั่ง สภาพแวดล้อม วันที่ และข้อจำกัดที่เกี่ยวข้อง
-
-## 4. ลำดับดำเนินการ
-
-1. แยก test database ตามข้อ 3.3 ก่อนรัน backend suite ครั้งถัดไป
-2. แก้ capture lifecycle และ regression tests ตามข้อ 3.4
-3. ออกแบบ production HTTPS/session configuration ตามข้อ 3.1
-4. ปรับ browser/container isolation ตามข้อ 3.2
-5. รัน automated verification ทั้งหมดใน isolated environment
-6. ทดสอบ Docker Compose, HTTPS, Nginx-to-FastAPI, login และ smoke capture บน deployment host
-7. ปรับเอกสารตามข้อ 3.5 ด้วยผลตรวจรับจริง
+1. Decouple test database engines per Item 3.3.
+2. Complete capture lifecycle cleanup and regression tests per Item 3.4.
+3. Finalize production HTTPS and session configuration per Item 3.1.
+4. Configure browser container isolation per Item 3.2.
+5. Run automated test suites in isolated test environments.
+6. Validate Docker Compose, TLS, Nginx routing, and smoke capture on target deployment hosts.
+7. Update documentation per Item 3.5.
 
 ## 5. Verification Matrix
 
-| พื้นที่ | การตรวจที่ต้องผ่าน |
+| Area | Required Validation |
 |---|---|
-| Database isolation | Full backend suite โดย production DB เป็น read-only หรือไม่อยู่ใน workspace test path |
-| Foreign keys | PRAGMA, invalid insert และ restricted delete บน temporary SQLite engine |
-| Capture cleanup | Write failure, browser-close cancellation, Playwright-exit cancellation, proxy-exit cancellation และ timeout |
-| Backend quality | Pytest, Ruff และ Mypy |
-| Frontend quality | Vitest, TypeScript และ production build |
-| Container | Image build, non-root/isolation inspection, health checks และ smoke capture |
-| HTTPS/Auth | Secure cookie attributes, login, `/auth/me`, CSRF mutation และ logout ผ่าน `/api` |
-| Routing | SPA fallback, static caching และ Nginx `/api` path stripping |
-| Data preservation | Target, snapshot, baseline และ check-result counts/checksums ก่อนและหลัง deployment validation |
+| Database Isolation | Full backend suite runs while production database path is read-only or deleted |
+| Foreign Keys | Enforced PRAGMA, invalid insert rejections, and restricted deletes on test SQLite engines |
+| Capture Cleanup | Verified clean on write failures, browser cancellations, context exits, and timeouts |
+| Code Quality | Pytest, Ruff, and Mypy passing clean |
+| Frontend Quality | Vitest, TypeScript typecheck, and production build passing |
+| Container Security | Non-root users, seccomp enforcement, health checks, and smoke capture |
+| HTTPS & Auth | Secure cookie flags, login, `/auth/me`, CSRF validation, and logout |
+| Routing | HTML5 history fallback, static asset caching, and `/api` reverse proxy routing |
+| Data Integrity | Target, snapshot, baseline, and check counts preserved across validation runs |
 
-## 6. เงื่อนไขการปิดแผน
+## 6. Closure Conditions
 
-แผนนี้ปิดได้เมื่อ P1 และ P2 ทุกข้อผ่านเกณฑ์ตรวจรับ ไม่มีการเขียนจากชุดเทสต์ไปยัง production database, Docker runtime integration ผ่านบน host เป้าหมาย และเอกสาร CR10 ทุกฉบับแสดงสถานะตรงกับหลักฐานล่าสุด
+This plan is considered closed once all P1 and P2 items satisfy acceptance criteria, tests are decoupled from production storage, runtime integration passes on Linux, and all CR10 documentation aligns with verified results.
