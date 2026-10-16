@@ -466,3 +466,29 @@ caused real confusion. Going forward:
 
 Review documents may sit alongside the plan while their findings are still being
 acted on; once closed they move to `archive/`.
+
+### Plan archive review — 2026-10-16
+
+All eight Markdown documents at the top level of `plan/` were reviewed against
+the available source, tests and implementation records. Existing historical
+documents under `archive/` remain archived. A source implementation alone does
+not close a plan whose acceptance criteria still require verification. Some older
+plan headers describe their original planning state; the evidence below records
+why those documents remain active without claiming a new deployment or test pass.
+
+| Document | Decision | Evidence or remaining work |
+| :--- | :--- | :--- |
+| `PROJECT_PLAN.md` | Keep active | Core roadmap still contains unfinished stages and operational work. |
+| [Member Management](MEMBER_MANAGEMENT_PLAN.md) | Keep active | Member routes, UI and tests exist, superseding the original not-implemented description. The complete acceptance matrix and fresh/legacy Alembic migration verification are not recorded as complete. |
+| [Page flicker on focus](Page-Flicker-On-Window-Focus-Fix%20By%20Argon.md) | Keep active | Silent revalidation, cooldown and regression tests exist. Browser acceptance is not recorded; the Windows test rerun could not start because the installed dependencies lack the Rolldown Windows native binding. |
+| [OK target scheduling](Review%20issue%20by%20Argon%20Edit%20by%20Sol.md) | Keep active | [Implementation record](../refinement/10-16-2026/OK-Target-Scheduling-Fix-16-10-2026.md) records 73 passing tests, but explicitly leaves UI verification and deployment recovery unverified. |
+| [Review by GPT 6.1 Sol](Review%20By%20GPT%206.1%20Sol%2014-10-2026.md) | Keep active | The later Round 2 report records source fixes and passing checks. Required live Linux deployment acceptance remains unverified. |
+| [Review Round 2](Review%20Round%202%20By%20GPT%206.1%20Sol%2014-10-2026.md) | Keep active | The Security report records detector remediations, but still tracks form destination policy/owner association and deployment verification. Do not infer full closure from source changes. |
+| [Security review](Review%20Security%2014-10-2026.md) | Keep active | Explicitly has no fully closed findings; container, sandbox, resource limits and other verification/follow-up items remain. |
+| [Artifact Cleanup](archive/artifact-cleanup-20261016/Artifact%20Cleanup%20Plan.md) | Archived: dry-run scope closed | Zero eligible orphan files and zero reclaimable bytes. The plan and all three CSV inventories are preserved together; no apply or production acceptance is claimed. |
+
+Before reusing cleanup apply mode, address the review follow-ups: reject database
+locations within artifact directories, explicitly protect database/sidecar paths
+from deletion, and document partial-deletion recovery. A database backup does not
+restore deleted artifact files. These follow-ups do not reopen the completed
+zero-candidate inventory run.

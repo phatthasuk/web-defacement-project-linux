@@ -1,5 +1,7 @@
 # Artifact Cleanup Plan
 
+**Archive status (2026-10-16):** Closed for the inventory and dry-run scope. The Linux workspace inventory found **0 eligible orphan files / 0 bytes**. No apply operation was performed. The Windows PC contains source and documentation; the real database and artifacts remain on Linux. Production apply verification and future script hardening are separate follow-up work, not completed deployment acceptance. The procedure below is retained as a historical reference and requires a fresh deployment-side inventory before reuse.
+
 **Status:** Linux hardening and local-workspace dry run complete as of **2026-10-16 08:50 UTC**. No real artifact files or database rows were deleted or changed, no migration was run, and no service was stopped.
 
 **Apply readiness:** **Not ready for production.** The production host and its mounted database were not accessible for verification. The verified local workspace dry run has **0 eligible orphan files and 0 bytes to reclaim**, so there is nothing to apply from this inventory.
@@ -42,7 +44,7 @@ Much of this workspace's Stage 2 evidence dates from September 8 onward. A 14-da
 
 ## Hardened script and synthetic checks
 
-[cleanup_artifacts.py](../backend/scripts/cleanup_artifacts.py) remains dry-run by default. It requires Python 3.11+, uses a read-only SQLite connection for inventory, rejects symlink data/artifact directories and symlink/non-regular artifact files, and enforces path containment. Apply validation checks every manifest row before unlinking anything, including absolute/relative path agreement, allowed directory, snapshot ID, database disposition, expiry, exact `mtime_ns`, and exact size. A same-size file with a changed modification time is rejected. It rechecks candidates immediately before unlinking and uses directory file descriptors with no-follow flags.
+[cleanup_artifacts.py](../../../backend/scripts/cleanup_artifacts.py) remains dry-run by default. It requires Python 3.11+, uses a read-only SQLite connection for inventory, rejects symlink data/artifact directories and symlink/non-regular artifact files, and enforces path containment. Apply validation checks every manifest row before unlinking anything, including absolute/relative path agreement, allowed directory, snapshot ID, database disposition, expiry, exact `mtime_ns`, and exact size. A same-size file with a changed modification time is rejected. It rechecks candidates immediately before unlinking and uses directory file descriptors with no-follow flags.
 
 Manifest output is refused if it resolves to the selected database, its `-wal`, `-shm`, or `-journal` sidecar, an artifact, or a path inside an artifact directory; it also refuses to overwrite the approved manifest. Regression tests verify each sidecar destination remains unchanged. Apply mode requires `--approved-manifest` and `--confirm-writers-stopped`. The flag is an operator attestation, so the operator must actually stop every application/scheduler writer first. The script also holds a SQLite exclusive writer lock while validating and unlinking; it does not alter database rows.
 
