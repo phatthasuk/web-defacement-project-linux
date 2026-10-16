@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TargetListPage } from './pages/TargetListPage';
@@ -11,8 +11,7 @@ import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { MembersPage } from './pages/MembersPage';
 import { useAuth } from './hooks/authContext';
 import { AuthProvider } from './hooks/useAuth';
-import { LogOut, Tags } from 'lucide-react';
-import { Users } from 'lucide-react';
+import { LogOut, Menu, Tags, Users, X } from 'lucide-react';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -65,6 +64,28 @@ function NavBar() {
   const { user, logout } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMenuOpen]);
 
   if (!user) return null;
 
@@ -81,46 +102,60 @@ function NavBar() {
   };
 
   return (
-    <nav className="bg-slate-900 border-b border-slate-800 px-6 py-3 flex justify-between items-center sticky top-0 z-10">
+    <nav className="bg-slate-900 border-b border-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center sticky top-0 z-10">
       <div className="font-bold text-lg text-slate-100 tracking-tight">
         Web Defacement Monitor
       </div>
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/50 p-1">
+      <div className="relative" ref={menuRef}>
+        <button
+          type="button"
+          onClick={() => setIsMenuOpen((open) => !open)}
+          aria-expanded={isMenuOpen}
+          aria-controls="account-menu"
+          aria-label={`Open menu for ${user.display_name || user.username}`}
+          className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        >
+          <span>Welcome, <span className="font-medium text-slate-100">{user.display_name || user.username}</span></span>
+          {isMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
+        </button>
+
+        {isMenuOpen && <div id="account-menu" className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-black/30">
+          <div className="mb-2 border-b border-slate-800 px-3 py-2 text-xs text-slate-500">
+            Navigation
+          </div>
+          <div className="flex flex-col gap-1">
           <NavLink
             to="/"
             end
-            className={({ isActive }) => `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}
+            onClick={() => setIsMenuOpen(false)}
+            className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
           >
             Websites
           </NavLink>
           {user.role === 'admin' && <NavLink
             to="/tags"
-            className={({ isActive }) => `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}
+            onClick={() => setIsMenuOpen(false)}
+            className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
           >
             <Tags className="h-4 w-4" /> Tags
           </NavLink>}
-          {user.role === 'admin' && <NavLink to="/members" className={({ isActive }) => `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-100'}`}>
+          {user.role === 'admin' && <NavLink to="/members" onClick={() => setIsMenuOpen(false)} className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
             <Users className="h-4 w-4" /> Members
           </NavLink>}
-        </div>
-        {logoutError && (
-          <span className="text-xs text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2 py-1 rounded">
-            {logoutError}
-          </span>
-        )}
-        <span className="text-sm text-slate-400">
-          Welcome, <span className="text-slate-200 font-medium">{user.display_name || user.username}</span>
-        </span>
-        <button
-          onClick={handleLogout}
-          disabled={isLoggingOut}
-          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <LogOut className="w-4 h-4" />
-          {isLoggingOut ? 'Logging out...' : 'Logout'}
-        </button>
+          </div>
+          <div className="my-2 border-t border-slate-800" />
+          {logoutError && <p role="alert" className="mb-2 rounded-md bg-rose-950/60 px-3 py-2 text-xs text-rose-300">{logoutError}</p>}
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-rose-300 transition-colors hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            {isLoggingOut ? 'Logging out...' : 'Logout'}
+          </button>
       </div>
+        }
     </nav>
   );
 }
