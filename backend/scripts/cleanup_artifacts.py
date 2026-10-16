@@ -128,8 +128,8 @@ def assert_manifest_path_is_safe(
         if not parent.is_dir():
             raise RuntimeError(f"Manifest parent is not a directory: {parent}")
         resolved = parent / path.name
-    if resolved == database:
-        raise RuntimeError("Manifest path cannot be the SQLite database")
+    if resolved in sqlite_protected_paths(database):
+        raise RuntimeError("Manifest path cannot be the database or its SQLite sidecar")
     if any(resolved == directory or resolved.is_relative_to(directory) for directory in artifact_dirs.values()):
         raise RuntimeError("Manifest path cannot be inside an artifact directory")
     if not must_exist and resolved.exists() and not resolved.is_file():
@@ -139,6 +139,11 @@ def assert_manifest_path_is_safe(
 
 def database_uri(database: Path, mode: str) -> str:
     return f"file:{quote(database.as_posix(), safe='/')}?mode={mode}"
+
+
+def sqlite_protected_paths(database: Path) -> set[Path]:
+    """Return the database and SQLite journal/WAL sidecars that must not be replaced."""
+    return {database, *(Path(f"{database}{suffix}") for suffix in ("-wal", "-shm", "-journal"))}
 
 
 def open_database(database: Path, *, acquire_write_lock: bool) -> sqlite3.Connection:
@@ -270,16 +275,16 @@ def validate_manifest_paths(
     approved = approved_manifest.resolve(strict=True)
     if not approved.is_file():
         raise RuntimeError("Approved manifest is not a regular file")
-    if approved == database or any(
+    if approved in sqlite_protected_paths(database) or any(
         approved == directory or approved.is_relative_to(directory)
         for directory in artifact_dirs.values()
     ):
-        raise RuntimeError("Approved manifest cannot be the database or an artifact")
+        raise RuntimeError("Approved manifest cannot be the database, its sidecar, or an artifact")
     if output_manifest is not None:
         if output_manifest == approved:
             raise RuntimeError("--manifest cannot overwrite --approved-manifest")
-        if output_manifest == database:
-            raise RuntimeError("--manifest cannot overwrite the database")
+        if output_manifest in sqlite_protected_paths(database):
+            raise RuntimeError("--manifest cannot overwrite the database or its SQLite sidecar")
         if any(
             output_manifest == directory or output_manifest.is_relative_to(directory)
             for directory in artifact_dirs.values()

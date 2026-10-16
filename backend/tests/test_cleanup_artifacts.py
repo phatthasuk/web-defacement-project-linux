@@ -32,13 +32,23 @@ class CleanupArtifactsTests(unittest.TestCase):
             CREATE TABLE check_attempts (snapshot_id TEXT);
             INSERT INTO snapshots VALUES ('baseline-id', 1);
             INSERT INTO snapshots VALUES ('history-id', 0);
+            INSERT INTO snapshots VALUES ('standalone-id', 0);
+            INSERT INTO snapshots VALUES ('attempt-id', 0);
             INSERT INTO check_results VALUES ('baseline-id', 'history-id');
+            INSERT INTO check_attempts VALUES ('attempt-id');
             """
         )
         connection.commit()
         connection.close()
         old_ns = int((datetime.now(UTC) - timedelta(days=20)).timestamp() * 1_000_000_000)
-        for name in ("baseline-id.png", "history-id.png", "a-orphan.png", "z-orphan.png"):
+        for name in (
+            "baseline-id.png",
+            "history-id.png",
+            "standalone-id.png",
+            "attempt-id.png",
+            "a-orphan.png",
+            "z-orphan.png",
+        ):
             path = self.data / "screenshots" / name
             path.write_bytes(b"synthetic-data")
             os.utime(path, ns=(old_ns, old_ns))
@@ -78,6 +88,8 @@ class CleanupArtifactsTests(unittest.TestCase):
         self.assertFalse((self.data / "screenshots" / "z-orphan.png").exists())
         self.assertTrue((self.data / "screenshots" / "baseline-id.png").exists())
         self.assertTrue((self.data / "screenshots" / "history-id.png").exists())
+        self.assertTrue((self.data / "screenshots" / "standalone-id.png").exists())
+        self.assertTrue((self.data / "screenshots" / "attempt-id.png").exists())
 
     def test_same_size_file_with_changed_mtime_aborts_before_any_delete(self) -> None:
         manifest, cutoff = self.build_manifest()
@@ -159,6 +171,43 @@ class CleanupArtifactsTests(unittest.TestCase):
         approved.write_text("approved", encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "cannot overwrite"):
             cleanup.validate_manifest_paths(root, self.database, directories, approved, approved)
+
+    def test_manifest_output_cannot_replace_sqlite_sidecars(self) -> None:
+        root = cleanup.validate_data_root(self.data)
+        directories = cleanup.validate_artifact_dirs(root)
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(f"{self.database}{suffix}")
+            sidecar.write_text("preserve this sidecar", encoding="utf-8")
+            with self.subTest(sidecar=sidecar.name):
+                with self.assertRaisesRegex(RuntimeError, "SQLite sidecar"):
+                    cleanup.assert_manifest_path_is_safe(
+                        sidecar, root, self.database, directories, must_exist=False
+                    )
+                self.assertEqual(sidecar.read_text(encoding="utf-8"), "preserve this sidecar")
+
+    def test_files_within_retention_window_are_not_in_manifest(self) -> None:
+        recent = self.data / "screenshots" / "within-window.png"
+        recent.write_bytes(b"recent synthetic file")
+        manifest, _ = self.build_manifest()
+
+        with manifest.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+
+        self.assertNotIn(str(recent.resolve()), {row["path"] for row in rows})
+        self.assertTrue(recent.exists())
+
+    def test_apply_refuses_when_another_connection_holds_writer_lock(self) -> None:
+        manifest, cutoff = self.build_manifest()
+        lock_connection = sqlite3.connect(self.database, isolation_level=None)
+        self.addCleanup(lock_connection.close)
+        lock_connection.execute("BEGIN EXCLUSIVE")
+
+        with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+            self.apply(manifest, cutoff)
+
+        self.assertTrue((self.data / "screenshots" / "a-orphan.png").exists())
+        self.assertTrue((self.data / "screenshots" / "z-orphan.png").exists())
+        lock_connection.rollback()
 
     def test_apply_requires_writer_stop_confirmation(self) -> None:
         manifest, cutoff = self.build_manifest()
