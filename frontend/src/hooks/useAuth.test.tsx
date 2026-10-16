@@ -27,11 +27,12 @@ const authenticatedUser = {
 };
 
 function AuthProbe() {
-  const { user, isLoading, logout } = useAuth();
+  const { user, isLoading, authError, logout } = useAuth();
   if (isLoading) return <span>loading</span>;
   return (
     <div>
       <span>{user ? `user:${user.username}` : 'logged-out'}</span>
+      {authError && <span>auth-error</span>}
       <button onClick={() => void logout().catch(() => undefined)}>logout</button>
     </div>
   );
@@ -101,5 +102,64 @@ describe('AuthProvider logout', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'logout' }));
     await screen.findByText('logged-out');
+  });
+});
+
+describe('AuthProvider focus revalidation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
+  });
+
+  it('revalidates on focus without showing loading or unmounting the authenticated view', async () => {
+    mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
+    renderAuth();
+    await screen.findByText('user:operator');
+
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('user:operator')).toBeInTheDocument();
+    expect(screen.queryByText('loading')).not.toBeInTheDocument();
+  });
+
+  it('clears the session when focus revalidation returns 401', async () => {
+    mockedApiFetch.mockRejectedValueOnce(new ApiError(401, 'Not authenticated'));
+    renderAuth();
+    await screen.findByText('user:operator');
+
+    fireEvent.focus(window);
+
+    await screen.findByText('logged-out');
+    expect(screen.queryByText('auth-error')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['server error', new ApiError(500, 'Server unavailable')],
+    ['network error', new TypeError('Network error')],
+  ])('keeps the authenticated view after a background %s', async (_label, error) => {
+    mockedApiFetch.mockRejectedValueOnce(error);
+    renderAuth();
+    await screen.findByText('user:operator');
+
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('user:operator')).toBeInTheDocument();
+    expect(screen.queryByText('auth-error')).not.toBeInTheDocument();
+    expect(screen.queryByText('loading')).not.toBeInTheDocument();
+  });
+
+  it('throttles repeated focus and visibility events during the cooldown', async () => {
+    mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
+    renderAuth();
+    await screen.findByText('user:operator');
+
+    fireEvent.focus(window);
+    fireEvent.focus(window);
+    fireEvent(document, new Event('visibilitychange'));
+
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('user:operator')).toBeInTheDocument();
   });
 });

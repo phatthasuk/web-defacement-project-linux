@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError, setCsrfToken } from '../api/client';
 import { AuthContext, type AuthResponse, type User } from './authContext';
+
+const FOCUS_REVALIDATE_COOLDOWN_MS = 15_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -9,85 +11,108 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const queryClient = useQueryClient();
+  const userRef = useRef<User | null>(null);
+  const lastCheckedAtRef = useRef<number | null>(null);
+  const checkInFlightRef = useRef(false);
+
+  const updateUser = useCallback((nextUser: User | null) => {
+    userRef.current = nextUser;
+    setUser(nextUser);
+  }, []);
 
   const applyAuth = useCallback(({ csrf_token, ...currentUser }: AuthResponse) => {
     setCsrfToken(csrf_token);
-    setUser((previous) => {
-      if (previous && previous.id !== currentUser.id) queryClient.clear();
-      return currentUser;
-    });
+    if (userRef.current && userRef.current.id !== currentUser.id) queryClient.clear();
+    updateUser(currentUser);
     setAuthError(false);
-  }, [queryClient]);
+  }, [queryClient, updateUser]);
+
+  const checkAuth = useCallback(async (showLoading: boolean) => {
+    if (showLoading) setIsLoading(true);
+    if (checkInFlightRef.current) return;
+    checkInFlightRef.current = true;
+
+    try {
+      const auth = await apiFetch<AuthResponse>('/auth/me');
+      applyAuth(auth);
+      lastCheckedAtRef.current = Date.now();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        updateUser(null);
+        setCsrfToken(null);
+        setAuthError(false);
+        queryClient.clear();
+      } else if (!userRef.current) {
+        // Initial load and explicit retry need an error screen when no session
+        // is available. A transient background failure keeps the current page.
+        setAuthError(true);
+      }
+    } finally {
+      checkInFlightRef.current = false;
+      setIsLoading(false);
+    }
+  }, [applyAuth, queryClient, updateUser]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function checkAuth() {
-      setIsLoading(true);
-      try {
-        const auth = await apiFetch<AuthResponse>('/auth/me');
-        if (cancelled) return;
-        applyAuth(auth);
-      } catch (error) {
-        if (cancelled) return;
-        setUser(null);
-        setCsrfToken(null);
-        // 401 = not authenticated (expected). Anything else (network / 5xx) is a
-        // service error the user should be told about, not treated as logged out.
-        setAuthError(!(error instanceof ApiError && error.status === 401));
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    }
-
-    checkAuth();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyAuth, reloadKey]);
+    void checkAuth(true);
+  }, [checkAuth, reloadKey]);
 
   useEffect(() => {
     const onFocus = () => {
-      setReloadKey((key) => key + 1);
+      const lastCheckedAt = lastCheckedAtRef.current;
+      if (
+        lastCheckedAt !== null &&
+        Date.now() - lastCheckedAt < FOCUS_REVALIDATE_COOLDOWN_MS
+      ) {
+        return;
+      }
+
+      void checkAuth(false);
       void queryClient.invalidateQueries();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') onFocus();
     };
     const onAccessDenied = (event: Event) => {
       const status = (event as CustomEvent<{ status: number }>).detail?.status;
       if (status === 401) {
-        setUser(null);
+        updateUser(null);
         setCsrfToken(null);
+        setAuthError(false);
         queryClient.clear();
       } else {
         queryClient.clear();
       }
     };
     window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('api:access-denied', onAccessDenied);
     return () => {
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('api:access-denied', onAccessDenied);
     };
-  }, [queryClient]);
+  }, [checkAuth, queryClient, updateUser]);
 
   const logout = useCallback(async () => {
     try {
       await apiFetch('/auth/logout', { method: 'POST' });
       setCsrfToken(null);
-      setUser(null);
+      updateUser(null);
       setAuthError(false);
       queryClient.clear();
     } catch (e) {
       console.error('Logout failed:', e);
       if (e instanceof ApiError && e.status === 401) {
         setCsrfToken(null);
-        setUser(null);
+        updateUser(null);
         setAuthError(false);
         queryClient.clear();
         return;
       }
       throw e;
     }
-  }, [queryClient]);
+  }, [queryClient, updateUser]);
 
   const retry = useCallback(() => setReloadKey((key) => key + 1), []);
 
