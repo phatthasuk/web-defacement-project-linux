@@ -106,16 +106,18 @@ function NavBar() {
       <div className="font-bold text-lg text-slate-100 tracking-tight">
         Web Defacement Monitor
       </div>
-      <div className="relative" ref={menuRef}>
+      <div className="relative flex items-center gap-2" ref={menuRef}>
+        <span className="text-sm text-slate-300">
+          Welcome, <span className="font-medium text-slate-100">{user.display_name || user.username}</span>
+        </span>
         <button
           type="button"
           onClick={() => setIsMenuOpen((open) => !open)}
           aria-expanded={isMenuOpen}
           aria-controls="account-menu"
           aria-label={`Open menu for ${user.display_name || user.username}`}
-          className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
         >
-          <span>Welcome, <span className="font-medium text-slate-100">{user.display_name || user.username}</span></span>
           {isMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
         </button>
 
