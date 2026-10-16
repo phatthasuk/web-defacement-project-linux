@@ -106,57 +106,59 @@ function NavBar() {
       <div className="font-bold text-lg text-slate-100 tracking-tight">
         Web Defacement Monitor
       </div>
-      <div className="relative flex items-center gap-2" ref={menuRef}>
+      <div className="flex items-center gap-2">
         <span className="text-sm text-slate-300">
           Welcome, <span className="font-medium text-slate-100">{user.display_name || user.username}</span>
         </span>
-        <button
-          type="button"
-          onClick={() => setIsMenuOpen((open) => !open)}
-          aria-expanded={isMenuOpen}
-          aria-controls="account-menu"
-          aria-label={`Open menu for ${user.display_name || user.username}`}
-          className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-        >
-          {isMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
-        </button>
-
-        {isMenuOpen && <div id="account-menu" className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-black/30">
-          <div className="mb-2 border-b border-slate-800 px-3 py-2 text-xs text-slate-500">
-            Navigation
-          </div>
-          <div className="flex flex-col gap-1">
-          <NavLink
-            to="/"
-            end
-            onClick={() => setIsMenuOpen(false)}
-            className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Websites
-          </NavLink>
-          {user.role === 'admin' && <NavLink
-            to="/tags"
-            onClick={() => setIsMenuOpen(false)}
-            className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            <Tags className="h-4 w-4" /> Tags
-          </NavLink>}
-          {user.role === 'admin' && <NavLink to="/members" onClick={() => setIsMenuOpen(false)} className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-            <Users className="h-4 w-4" /> Members
-          </NavLink>}
-          </div>
-          <div className="my-2 border-t border-slate-800" />
-          {logoutError && <p role="alert" className="mb-2 rounded-md bg-rose-950/60 px-3 py-2 text-xs text-rose-300">{logoutError}</p>}
+        <div className="relative" ref={menuRef}>
           <button
             type="button"
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-rose-300 transition-colors hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setIsMenuOpen((open) => !open)}
+            aria-expanded={isMenuOpen}
+            aria-controls="account-menu"
+            aria-label={`Open menu for ${user.display_name || user.username}`}
+            className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-300 transition-colors hover:border-slate-600 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
           >
-            <LogOut className="h-4 w-4" aria-hidden="true" />
-            {isLoggingOut ? 'Logging out...' : 'Logout'}
+            {isMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
           </button>
-        </div>}
+
+          {isMenuOpen && <div id="account-menu" className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-black/30">
+            <div className="mb-2 border-b border-slate-800 px-3 py-2 text-xs text-slate-500">
+              Navigation
+            </div>
+            <div className="flex flex-col gap-1">
+              <NavLink
+                to="/"
+                end
+                onClick={() => setIsMenuOpen(false)}
+                className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+              >
+                Websites
+              </NavLink>
+              {user.role === 'admin' && <NavLink
+                to="/tags"
+                onClick={() => setIsMenuOpen(false)}
+                className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Tags className="h-4 w-4" /> Tags
+              </NavLink>}
+              {user.role === 'admin' && <NavLink to="/members" onClick={() => setIsMenuOpen(false)} className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-slate-800 text-cyan-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+                <Users className="h-4 w-4" /> Members
+              </NavLink>}
+            </div>
+            <div className="my-2 border-t border-slate-800" />
+            {logoutError && <p role="alert" className="mb-2 rounded-md bg-rose-950/60 px-3 py-2 text-xs text-rose-300">{logoutError}</p>}
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-rose-300 transition-colors hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+              {isLoggingOut ? 'Logging out...' : 'Logout'}
+            </button>
+          </div>}
+        </div>
       </div>
     </nav>
   );
