@@ -123,9 +123,6 @@ function NavBar() {
           </button>
 
           {isMenuOpen && <div id="account-menu" className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-black/30">
-            <div className="mb-2 border-b border-slate-800 px-3 py-2 text-xs text-slate-500">
-              Navigation
-            </div>
             <div className="flex flex-col gap-1">
               <NavLink
                 to="/"
