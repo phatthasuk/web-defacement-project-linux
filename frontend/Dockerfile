@@ -3,6 +3,9 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
+# The checked-in .env is for local development. Production uses Nginx's same-origin /api proxy.
+ENV VITE_API_BASE_URL=/api
+
 COPY package*.json ./
 # Vitest's Vite peer range currently resolves to a nested Vite 8, whose optional
 # esbuild peer is not recorded by the repository's lockfile. Keep the Docker

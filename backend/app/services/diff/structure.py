@@ -34,6 +34,7 @@ KIND_SCRIPT = "script"
 KIND_INLINE_SCRIPT = "inline-script"
 KIND_IFRAME = "iframe"
 KIND_IFRAME_SRCDOC = "iframe-srcdoc"
+KIND_IFRAME_SANDBOX = "iframe-sandbox"
 KIND_BASE = "base"
 KIND_FORM = "form"
 KIND_STYLESHEET = "stylesheet"
@@ -47,6 +48,7 @@ _EXECUTABLE_URL_ATTRIBUTES = {"href", "src", "action", "formaction", "xlink:href
 # Script classification follows the HTML "prepare the script element" rules: the
 # same body is inert as `text/plain` and live as `text/javascript`.
 SCRIPT_CLASSIC = "classic"
+SCRIPT_CLASSIC_NOMODULE = "classic-nomodule"
 SCRIPT_MODULE = "module"
 SCRIPT_IMPORTMAP = "importmap"
 SCRIPT_SPECULATIONRULES = "speculationrules"
@@ -98,11 +100,11 @@ def classify_script(attributes: dict[str, str]) -> str:
     else:
         type_string = ""
     if not type_string:
-        return SCRIPT_CLASSIC
+        return SCRIPT_CLASSIC_NOMODULE if "nomodule" in attributes else SCRIPT_CLASSIC
     # A JavaScript MIME essence match is an exact type string match, ignoring
     # ASCII case. Parameters make it a data block in an HTML script type value.
     if type_string.strip(_URL_STRIP_CHARS).lower() in _JAVASCRIPT_MIME_ESSENCES:
-        return SCRIPT_CLASSIC
+        return SCRIPT_CLASSIC_NOMODULE if "nomodule" in attributes else SCRIPT_CLASSIC
     token = type_string.lower()
     if token == SCRIPT_MODULE:
         return SCRIPT_MODULE
@@ -172,6 +174,7 @@ class _StructureParser(HTMLParser):
         self.form_submitters: list[str] = []
         self.iframe_srcs: list[str] = []
         self.iframe_srcdocs: list[str] = []
+        self.iframe_sandboxes: list[tuple[str | None, str | None, str]] = []
         self.base_href: str | None = None
         self.form_actions: list[str] = []
         self.stylesheet_hrefs: list[str] = []
@@ -219,6 +222,9 @@ class _StructureParser(HTMLParser):
             src = attributes.get("src", "").strip()
             if src:
                 self.iframe_srcs.append(src)
+            if "sandbox" in attributes:
+                tokens = " ".join(sorted(set(attributes["sandbox"].lower().split())))
+                self.iframe_sandboxes.append((src or None, attributes.get("srcdoc"), tokens))
         elif tag == "base":
             # The first base with an href wins, even if that href is empty.
             if self.base_href is None and "href" in attributes:
@@ -342,6 +348,16 @@ def extract_structure(
     for body in parser.iframe_srcdocs:
         digest = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest()
         facts.add(f"{KIND_IFRAME_SRCDOC}:{digest}")
+
+    for raw_src, srcdoc, tokens in parser.iframe_sandboxes:
+        if raw_src:
+            target = resolve(raw_src)
+        elif srcdoc is not None:
+            digest = hashlib.sha256(srcdoc.encode("utf-8", errors="replace")).hexdigest()[:16]
+            target = f"srcdoc:{digest}"
+        else:
+            target = "(anonymous)"
+        facts.add(f"{KIND_IFRAME_SANDBOX}:{target}:{tokens}")
 
     for content in parser.meta_refreshes:
         facts.add(f"{KIND_META_REFRESH}:{content}")

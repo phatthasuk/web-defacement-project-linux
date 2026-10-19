@@ -133,7 +133,11 @@ class Settings(BaseSettings):
 
     @property
     def check_retry_delays_list(self) -> list[int]:
-        return [int(delay.strip()) for delay in self.CHECK_RETRY_DELAYS_SECONDS.split(",") if delay.strip()]
+        return [
+            int(delay.strip())
+            for delay in self.CHECK_RETRY_DELAYS_SECONDS.split(",")
+            if delay.strip()
+        ]
 
     def validate_retry_settings(self) -> None:
         delays = self.check_retry_delays_list

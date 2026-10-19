@@ -16,10 +16,10 @@ from __future__ import annotations
 import argparse
 import csv
 import os
-import tempfile
 import sqlite3
 import stat
 import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
@@ -130,7 +130,10 @@ def assert_manifest_path_is_safe(
         resolved = parent / path.name
     if resolved in sqlite_protected_paths(database):
         raise RuntimeError("Manifest path cannot be the database or its SQLite sidecar")
-    if any(resolved == directory or resolved.is_relative_to(directory) for directory in artifact_dirs.values()):
+    if any(
+        resolved == directory or resolved.is_relative_to(directory)
+        for directory in artifact_dirs.values()
+    ):
         raise RuntimeError("Manifest path cannot be inside an artifact directory")
     if not must_exist and resolved.exists() and not resolved.is_file():
         raise RuntimeError(f"Manifest output is not a regular file: {resolved}")
@@ -143,7 +146,9 @@ def database_uri(database: Path, mode: str) -> str:
 
 def sqlite_protected_paths(database: Path) -> set[Path]:
     """Return the database and SQLite journal/WAL sidecars that must not be replaced."""
-    return {database, *(Path(f"{database}{suffix}") for suffix in ("-wal", "-shm", "-journal"))}
+    resolved_db = database.resolve()
+    sidecars = (Path(f"{resolved_db}{suffix}") for suffix in ("-wal", "-shm", "-journal"))
+    return {resolved_db, *sidecars}
 
 
 def open_database(database: Path, *, acquire_write_lock: bool) -> sqlite3.Connection:
@@ -154,11 +159,15 @@ def open_database(database: Path, *, acquire_write_lock: bool) -> sqlite3.Connec
         timeout=0 if acquire_write_lock else 5,
         isolation_level=None,
     )
-    if acquire_write_lock:
-        # In SQLite WAL mode this obtains the one-writer lock without changing
-        # rows. It prevents database references changing during file deletion.
-        connection.execute("BEGIN EXCLUSIVE")
-    connection.execute("PRAGMA query_only=ON")
+    try:
+        if acquire_write_lock:
+            # In SQLite WAL mode this obtains the one-writer lock without changing
+            # rows. It prevents database references changing during file deletion.
+            connection.execute("BEGIN EXCLUSIVE")
+        connection.execute("PRAGMA query_only=ON")
+    except Exception:
+        connection.close()
+        raise
     return connection
 
 
@@ -200,7 +209,12 @@ def read_snapshot_refs(
     return snapshot_ids, baseline_ids, history_ids
 
 
-def classify(snapshot_id: str, snapshot_ids: set[str], baseline_ids: set[str], history_ids: set[str]) -> tuple[str, str]:
+def classify(
+    snapshot_id: str,
+    snapshot_ids: set[str],
+    baseline_ids: set[str],
+    history_ids: set[str],
+) -> tuple[str, str]:
     if snapshot_id in baseline_ids:
         return "retain_baseline", "Active baseline; never eligible for deletion"
     if snapshot_id in history_ids:
@@ -281,12 +295,13 @@ def validate_manifest_paths(
     ):
         raise RuntimeError("Approved manifest cannot be the database, its sidecar, or an artifact")
     if output_manifest is not None:
-        if output_manifest == approved:
+        resolved_output = output_manifest.resolve()
+        if resolved_output == approved:
             raise RuntimeError("--manifest cannot overwrite --approved-manifest")
-        if output_manifest in sqlite_protected_paths(database):
+        if resolved_output in sqlite_protected_paths(database):
             raise RuntimeError("--manifest cannot overwrite the database or its SQLite sidecar")
         if any(
-            output_manifest == directory or output_manifest.is_relative_to(directory)
+            resolved_output == directory or resolved_output.is_relative_to(directory)
             for directory in artifact_dirs.values()
         ):
             raise RuntimeError("--manifest cannot be inside an artifact directory")
@@ -334,11 +349,16 @@ def validate_approved_manifest(
                     or relative.parts[0] not in artifact_dirs
                     or any(part in ("", ".", "..") for part in relative.parts)
                 ):
-                    raise RuntimeError("Manifest relative path is outside an allowed artifact directory")
+                    raise RuntimeError(
+                        "Manifest relative path is outside an allowed artifact directory"
+                    )
                 directory_name, filename = relative.parts
                 expected = artifact_dirs[directory_name] / filename
                 supplied = Path(row["path"])
-                if not supplied.is_absolute() or supplied.resolve(strict=True) != expected.resolve(strict=True):
+                if (
+                    not supplied.is_absolute()
+                    or supplied.resolve(strict=True) != expected.resolve(strict=True)
+                ):
                     raise RuntimeError("Manifest absolute and relative paths do not match")
                 if expected in seen:
                     raise RuntimeError("Manifest contains a duplicate path")
@@ -356,8 +376,13 @@ def validate_approved_manifest(
                 expected_disposition, _ = classify(
                     expected.stem, snapshot_ids, baseline_ids, history_ids
                 )
-                if row["disposition"] not in DISPOSITIONS or row["disposition"] != expected_disposition:
-                    raise RuntimeError("Manifest disposition no longer matches database references")
+                if (
+                    row["disposition"] not in DISPOSITIONS
+                    or row["disposition"] != expected_disposition
+                ):
+                    raise RuntimeError(
+                        "Manifest disposition no longer matches database references"
+                    )
                 if expected_disposition == "delete_if_approved_orphan":
                     validated.append((expected, info.st_size, info.st_mtime_ns))
             except (KeyError, TypeError, ValueError) as exc:
@@ -424,8 +449,6 @@ def apply_approved_orphans(
 
 
 def main() -> int:
-    if sys.version_info < (3, 11):
-        raise SystemExit("cleanup_artifacts requires Python 3.11 or newer")
     args = parse_args()
     data_root = validate_data_root(args.data_dir)
     artifact_dirs = validate_artifact_dirs(data_root)

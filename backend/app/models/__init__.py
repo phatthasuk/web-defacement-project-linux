@@ -1,5 +1,5 @@
-from .check_result import CheckResult
 from .check_attempt import CheckAttempt
+from .check_result import CheckResult
 from .member import MemberAuditEvent, UserTargetAssignment
 from .session import Session
 from .snapshot import Snapshot

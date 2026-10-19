@@ -104,6 +104,7 @@ def approve_baseline(
         require_valid_transition(target.status, STATUS_OK)
         target.status = STATUS_OK
         target.last_error = None
+        target.last_error_code = None
 
     if latest_check is not None and latest_check.current_snapshot_id == snapshot_id:
         if latest_check.acknowledged_at is None:
@@ -112,6 +113,7 @@ def approve_baseline(
             require_valid_transition(target.status, STATUS_OK)
             target.status = STATUS_OK
             target.last_error = None
+            target.last_error_code = None
     else:
         related_check = db.scalar(
             select(CheckResult)
@@ -170,6 +172,9 @@ def acknowledge_check_result(
     if target is None:
         raise NotFoundError(f"Target not found: {check_result.target_id}")
 
+    if target.status == STATUS_CHECKING or is_target_in_flight(target.id):
+        raise ConflictError("Cannot acknowledge a check result while a check is in progress")
+
     if check_result.acknowledged_at is not None:
         return check_result
 
@@ -202,6 +207,9 @@ def confirm_defacement(db: Session, check_result_id: str, actor: User | None = N
     target = db.get(Target, check_result.target_id)
     if target is None:
         raise NotFoundError(f"Target not found: {check_result.target_id}")
+
+    if target.status == STATUS_CHECKING or is_target_in_flight(target.id):
+        raise ConflictError("Cannot confirm defacement while a check is in progress")
 
     status_before = target.status
     was_acknowledged = check_result.acknowledged_at is not None

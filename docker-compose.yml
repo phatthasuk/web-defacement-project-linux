@@ -13,6 +13,9 @@ services:
     volumes:
       - ./backend/data:/app/data:rw
     shm_size: "1gb"
+    mem_limit: "${BACKEND_MEM_LIMIT:-8g}"
+    cpus: "${BACKEND_CPUS:-4.0}"
+    pids_limit: "${BACKEND_PIDS_LIMIT:-512}"
     cap_drop:
       - ALL
     security_opt:
@@ -55,6 +58,9 @@ services:
       dockerfile: Dockerfile
     init: true
     read_only: true
+    mem_limit: "${FRONTEND_MEM_LIMIT:-512m}"
+    cpus: "${FRONTEND_CPUS:-0.5}"
+    pids_limit: "${FRONTEND_PIDS_LIMIT:-128}"
     tmpfs:
       - /var/cache/nginx:size=64m
       - /var/run:size=8m
@@ -67,6 +73,7 @@ services:
       - no-new-privileges:true
     environment:
       PUBLIC_HTTPS_PORT: "${PUBLIC_HTTPS_PORT:-3030}"
+      PUBLIC_HOST: "${PUBLIC_HOST:-10.117.10.68}"
     secrets:
       - source: tls_cert
         mode: 0444

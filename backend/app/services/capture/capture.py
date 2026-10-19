@@ -128,7 +128,14 @@ def _navigation_redirect_document(target_url: str) -> str:
     requests are GETs, so replacing the location keeps their redirect semantics
     while making every hop pass through the guard before it can connect.
     """
-    script_url = json.dumps(target_url)
+    script_url = (
+        json.dumps(target_url)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
     return "<!doctype html><meta charset=utf-8>" f"<script>location.replace({script_url})</script>"
 
 
@@ -181,7 +188,10 @@ async def _capture_snapshot_impl(
     staging_dir: Path | None = None
     capture_succeeded = False
 
-    launch_args: list[str] = []
+    launch_args: list[str] = [
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--enforce-webrtc-ip-handling-policy",
+    ]
     if settings.BROWSER_DISABLE_SANDBOX:
         # Only for containers that cannot run the sandbox. Requires compensating
         # isolation (non-root, read-only fs, no internal network reachability).
@@ -213,7 +223,7 @@ async def _capture_snapshot_impl(
             capture_error: CaptureError | None = None
             main_redirect_count = 0
             pending_redirect_depths: dict[
-                tuple[str, str, int | None, str, str], deque[int]
+                tuple[bool, tuple[str, str, int | None, str, str]], deque[int]
             ] = defaultdict(deque)
             main_navigation_complete = asyncio.Event()
             final_http_status: int | None = None
@@ -258,6 +268,8 @@ async def _capture_snapshot_impl(
 
                 url_to_check = request.url
                 main_navigation = is_main_navigation(request)
+                if main_navigation:
+                    main_navigation_complete.clear()
 
                 # In-memory browser schemes never open an external socket.
                 if url_to_check.startswith(("data:", "blob:", "about:")):
@@ -299,7 +311,10 @@ async def _capture_snapshot_impl(
                     await route.abort()
                     return
 
-                redirect_key = _redirect_key(url_to_check)
+                redirect_key = (
+                    request.is_navigation_request(),
+                    _redirect_key(url_to_check),
+                )
                 queued_depths = pending_redirect_depths.get(redirect_key)
                 redirects_seen = (
                     queued_depths.popleft()
@@ -400,7 +415,9 @@ async def _capture_snapshot_impl(
 
                         if request.is_navigation_request():
                             next_depth = redirects_seen + 1
-                            pending_redirect_depths[_redirect_key(target_url)].append(next_depth)
+                            pending_redirect_depths[
+                                (True, _redirect_key(target_url))
+                            ].append(next_depth)
                             if main_navigation:
                                 main_redirect_count = next_depth
                             await route.fulfill(

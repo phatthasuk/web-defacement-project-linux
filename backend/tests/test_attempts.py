@@ -2,10 +2,9 @@
 
 from datetime import timedelta
 from pathlib import Path
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
-import pytest
 from PIL import Image
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -189,6 +188,70 @@ async def test_changed_attempt_keeps_result_ids_after_snapshot_refresh_failure(
             assert attempt.snapshot_id == "changed"
             check = db.get(CheckResult, attempt.check_result_id)
             assert check is not None and check.status == STATUS_CHANGED
+    finally:
+        engine.dispose()
+
+
+async def test_ok_attempt_keeps_ok_status_and_ids_after_check_result_refresh_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    session_factory, engine = make_db(tmp_path)
+    settings = Settings(
+        DATA_DIR=str(tmp_path), CHECK_INTERVAL_SECONDS=3600, CHECK_JITTER_MAX_SECONDS=0
+    )
+    try:
+        with session_factory() as db:
+            target = Target(name="Example", url="https://example.com")
+            db.add(target)
+            db.commit()
+            target_id = target.id
+
+        async def baseline_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            return make_capture(out_dir, "base", "Same text", "white")
+
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            assert target is not None
+            await run_target_check(db, target, settings, baseline_capture)
+            approve_baseline(db, target_id, "base", settings)
+            target = db.get(Target, target_id)
+            assert target is not None
+            target.check_run_id = "ok-refresh-fail-run"
+            target.check_run_source = "scheduled"
+            db.commit()
+
+        original_refresh = Session.refresh
+
+        def fail_check_result_refresh(db: Session, instance, *args, **kwargs) -> None:
+            if isinstance(instance, CheckResult):
+                db.expunge(instance)
+                raise RuntimeError("injected check_result refresh failure")
+            original_refresh(db, instance, *args, **kwargs)
+
+        monkeypatch.setattr(Session, "refresh", fail_check_result_refresh)
+
+        async def unchanged_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            return make_capture(out_dir, "unchanged", "Same text", "white")
+
+        assert try_acquire_in_flight(target_id)
+        result = await run_check_attempt(
+            target_id,
+            settings,
+            run_id="ok-refresh-fail-run",
+            initial_source="scheduled",
+            capture_func=unchanged_capture,
+            session_factory=session_factory,
+        )
+        assert result is not None and result.status == STATUS_OK
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            attempt = db.scalar(select(CheckAttempt).where(CheckAttempt.target_id == target_id))
+            check = db.scalar(select(CheckResult).where(CheckResult.target_id == target_id))
+            assert target is not None and target.status == STATUS_OK
+            assert attempt is not None and attempt.finished_at is not None
+            assert attempt.status == STATUS_OK
+            assert attempt.snapshot_id == "base"
+            assert check is not None and attempt.check_result_id == check.id
     finally:
         engine.dispose()
 

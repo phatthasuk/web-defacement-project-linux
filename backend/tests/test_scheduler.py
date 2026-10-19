@@ -12,6 +12,7 @@ from app.core.status import STATUS_AVAILABILITY_ISSUE, STATUS_CHECKING
 from app.core.time import utcnow
 from app.db.session import Base
 from app.models import Snapshot, Target
+from app.services.concurrency import is_target_in_flight
 from app.services.scheduler import CheckScheduler
 
 
@@ -116,6 +117,40 @@ async def test_scheduler_skips_checking_target_without_claiming_it(tmp_path: Pat
         assert target is not None and target.next_check_at is None
 
     await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_releases_reservation_when_due_target_commit_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    session_factory, _ = make_test_db(tmp_path)
+    with session_factory() as db:
+        target = Target(
+            name="Commit Failure Target",
+            url="https://example.com",
+            is_active=True,
+            next_check_at=utcnow() - timedelta(seconds=1),
+        )
+        db.add(target)
+        db.commit()
+        target_id = target.id
+
+    settings = Settings(DATA_DIR=str(tmp_path), CHECK_INTERVAL_SECONDS=60)
+    scheduler = CheckScheduler(settings, session_factory=session_factory)
+    original_commit = Session.commit
+
+    def fail_scheduled_reservation_commit(db: Session) -> None:
+        target = db.get(Target, target_id)
+        if target is not None and target.next_check_at is None:
+            raise RuntimeError("simulated reservation commit failure")
+        original_commit(db)
+
+    monkeypatch.setattr(Session, "commit", fail_scheduled_reservation_commit)
+
+    with pytest.raises(RuntimeError, match="simulated reservation commit failure"):
+        await scheduler._tick()
+
+    assert not is_target_in_flight(target_id)
 
 
 @pytest.mark.asyncio

@@ -1,9 +1,9 @@
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-import uuid
 
 from app.api.authorization import require_target_access
 from app.api.deps import (
@@ -18,13 +18,13 @@ from app.core.errors import NotFoundError, ValidationError
 from app.core.status import STATUS_CHECKING
 from app.models import CheckAttempt, CheckResult, Snapshot, User
 from app.schemas import CheckAttemptRead, CheckResultRead, CheckTriggerResponse
+from app.services.attempts import run_check_attempt
 from app.services.checks import CaptureFunc
 from app.services.concurrency import (
     SessionFactory,
     release_in_flight,
     try_acquire_in_flight,
 )
-from app.services.attempts import run_check_attempt
 
 router = APIRouter(tags=["checks"], dependencies=[Depends(get_current_user)])
 
@@ -51,12 +51,12 @@ async def trigger_target_check(
         return CheckTriggerResponse(target_id=target_id, accepted=False)
 
     run_id = str(uuid.uuid4())
-    target.check_run_id = run_id
-    target.check_run_source = "manual"
-    target.check_attempt_count = 0
-    target.next_check_at = None
-    db.commit()
     try:
+        target.check_run_id = run_id
+        target.check_run_source = "manual"
+        target.check_attempt_count = 0
+        target.next_check_at = None
+        db.commit()
         background_tasks.add_task(
             run_check_attempt,
             target_id,

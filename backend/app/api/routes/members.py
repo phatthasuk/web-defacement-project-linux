@@ -5,6 +5,7 @@ from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+from starlette.concurrency import run_in_threadpool
 
 from app.api.authorization import require_admin
 from app.api.deps import get_current_user, get_db
@@ -148,7 +149,7 @@ async def create_member(payload: MemberCreate, db: DbSession, actor: CurrentUser
     member = User(
         username=payload.username,
         display_name=payload.display_name,
-        hashed_password=get_password_hash(payload.temporary_password),
+        hashed_password=await run_in_threadpool(get_password_hash, payload.temporary_password),
         role="operator",
         registration_status="approved",
         is_active=True,
@@ -338,9 +339,14 @@ async def reset_password(member_id: int, payload: ResetPassword, db: DbSession, 
         raise NotFoundError("Member not found")
     if member.role != "operator" or member.registration_status != "approved":
         raise ConflictError("Password reset is available for approved Operators only")
-    if verify_password(payload.temporary_password, member.hashed_password):
+    same_password = await run_in_threadpool(
+        verify_password, payload.temporary_password, member.hashed_password
+    )
+    if same_password:
         raise ValidationError("Choose a different temporary password")
-    member.hashed_password = get_password_hash(payload.temporary_password)
+    member.hashed_password = await run_in_threadpool(
+        get_password_hash, payload.temporary_password
+    )
     member.must_change_password = True
     member.password_changed_at = None
     member.failed_login_count = 0

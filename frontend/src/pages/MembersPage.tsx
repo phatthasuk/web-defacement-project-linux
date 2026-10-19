@@ -2,61 +2,685 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, apiFetch } from '../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 
-type Member = { id:number; username:string; display_name:string; role:string; is_active:boolean; status:string; last_login_at:string|null; registration_at:string; assigned_website_count:number; must_change_password:boolean };
-type Website = { id:string; name:string; url:string; is_active:boolean; tags:{id:string;name:string;color_key:string}[]; assignees?:{id:number;username:string;display_name:string;is_active:boolean}[] };
+type Member = {
+  id: number;
+  username: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  status: string;
+  last_login_at: string | null;
+  registration_at: string;
+  assigned_website_count: number;
+  must_change_password: boolean;
+};
+
+type Website = {
+  id: string;
+  name: string;
+  url: string;
+  is_active: boolean;
+  tags: { id: string; name: string; color_key: string }[];
+  assignees?: { id: number; username: string; display_name: string; is_active: boolean }[];
+};
+
 const inputClass = 'rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200';
-const buttonClass = 'rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50';
+const buttonClass =
+  'rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50';
 
 export function MembersPage() {
   const queryClient = useQueryClient();
-  const [tab,setTab] = useState<'members'|'assignments'>('members');
-  const [members,setMembers] = useState<Member[]>([]); const [pending,setPending] = useState(0);
-  const [status,setStatus] = useState(''); const [search,setSearch] = useState(''); const [error,setError] = useState('');
-  const [memberForm,setMemberForm] = useState({username:'',display_name:'',temporary_password:''});
-  const [selected,setSelected] = useState<Member|null>(null); const [assigned,setAssigned] = useState<Website[]>([]);
-  const [websites,setWebsites] = useState<Website[]>([]); const [candidate,setCandidate] = useState('');
-  const [view,setView] = useState('all'); const [operatorId,setOperatorId] = useState('');
-  const [memberOffset,setMemberOffset] = useState(0); const [memberTotal,setMemberTotal] = useState(0);
-  const [assignmentOffset,setAssignmentOffset] = useState(0); const [assignmentTotal,setAssignmentTotal] = useState(0);
-  const [counts,setCounts] = useState({all:0,unassigned:0,assigned:0}); const [includeInactive,setIncludeInactive] = useState(false);
-  const [tagId,setTagId] = useState(''); const [tagOptions,setTagOptions] = useState<{id:string;name:string}[]>([]);
-  const [editDisplayName,setEditDisplayName] = useState('');
-  const [memberIncludeInactive,setMemberIncludeInactive] = useState(false);
+  const [tab, setTab] = useState<'members' | 'assignments'>('members');
 
-  const loadMembers = useCallback(async()=>{
-    try { const q=new URLSearchParams({limit:'50',offset:String(memberOffset)}); if(status) q.set('status',status); if(search) q.set('search',search); const data=await apiFetch<{items:Member[];pending_count:number;total:number}>(`/members?${q}`); setMembers(data.items); setPending(data.pending_count); setMemberTotal(data.total); setError(''); }
-    catch(e){setError(e instanceof ApiError?e.detail:'Unable to load members.');}
-  },[status,search,memberOffset]);
-  const loadAssignments = useCallback(async()=>{
-    try { const q=new URLSearchParams({view,search,limit:'50',offset:String(assignmentOffset),include_inactive:String(includeInactive)}); if(operatorId) q.set('operator_id',operatorId); if(tagId) q.append('tag_ids',tagId); const data=await apiFetch<{items:Website[];total:number;counts:{all:number;unassigned:number;assigned:number}}>(`/member-assignments/websites?${q}`); setWebsites(data.items); setAssignmentTotal(data.total); setCounts(data.counts); const people=await apiFetch<{items:Member[]}>('/members?limit=200'); setMembers(people.items); const tags=await apiFetch<{items:{id:string;name:string}[]}>('/tags?limit=200'); setTagOptions(tags.items); setError(''); }
-    catch(e){setError(e instanceof ApiError?e.detail:'Unable to load assignments.');}
-  },[view,search,operatorId,assignmentOffset,includeInactive,tagId]);
-  const loadMemberSites = useCallback(async(member:Member)=>{
-    try { const include=String(memberIncludeInactive); const data=await apiFetch<{items:Website[]}>(`/members/${member.id}/websites?include_inactive=${include}`); setAssigned(data.items); const all=await apiFetch<{items:Website[]}>(`/member-assignments/websites?view=all&include_inactive=${include}&limit=200`); setWebsites(all.items); }
-    catch(e){setError(e instanceof ApiError?e.detail:'Unable to load member websites.');}
-  },[memberIncludeInactive]);
-  useEffect(()=>{ if(tab==='members') void loadMembers(); else void loadAssignments(); },[tab,loadMembers,loadAssignments]);
-  useEffect(()=>{ if(selected) { setEditDisplayName(selected.display_name); void loadMemberSites(selected); } },[selected,loadMemberSites]);
-  const act=async(path:string,method='POST',body?:unknown)=>{ try { await apiFetch(path,{method,...(body?{body:JSON.stringify(body)}:{})}); await queryClient.invalidateQueries({queryKey:['targets']}); await queryClient.invalidateQueries({queryKey:['tags']}); await loadMembers(); if(selected) await loadMemberSites(selected); await loadAssignments(); setError(''); } catch(e){setError(e instanceof ApiError?e.detail:'The request failed.');} };
-  const addMember=async(e:React.FormEvent)=>{e.preventDefault(); await act('/members','POST',memberForm); setMemberForm({username:'',display_name:'',temporary_password:''});};
-  const assign=async()=>{ if(!selected||!candidate)return; await act(`/members/${selected.id}/websites/${candidate}`,'PUT'); setCandidate(''); };
-  const remove=async(targetId:string)=>{ if(!selected)return; await act(`/members/${selected.id}/websites/${targetId}`,'DELETE'); };
-  const assignForTarget=async(target:Website,memberId:number)=>{ await act(`/members/${memberId}/websites/${target.id}`,'PUT'); };
-  const removeForTarget=async(target:Website,memberId:number)=>{ await act(`/members/${memberId}/websites/${target.id}`,'DELETE'); };
+  // Members tab state
+  const [members, setMembers] = useState<Member[]>([]);
+  const [pending, setPending] = useState(0);
+  const [status, setStatus] = useState('');
+  const [memberSearch, setMemberSearch] = useState('');
+  const [memberOffset, setMemberOffset] = useState(0);
+  const [memberTotal, setMemberTotal] = useState(0);
+  const [memberForm, setMemberForm] = useState({ username: '', display_name: '', temporary_password: '' });
 
-  return <div className="mx-auto max-w-7xl px-4 py-8">
-    <header className="mb-6"><h1 className="text-3xl font-bold text-white">Member Management</h1><p className="mt-1 text-slate-400">Manage Operator accounts and their website access.</p></header>
-    <div className="mb-5 flex gap-2"><button className={buttonClass} onClick={()=>{setTab('members');setSelected(null);}}>Members <span className="ml-1 rounded-full bg-amber-900 px-2 text-amber-200">{pending} pending</span></button><button className={buttonClass} onClick={()=>{setTab('assignments');setSelected(null);}}>Website Assignments</button></div>
-    {error&&<p role="alert" className="mb-4 rounded border border-rose-800 bg-rose-950/50 p-3 text-rose-300">{error}</p>}
-    {tab==='members'?<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-        <div className="flex flex-wrap gap-3"><input className={inputClass} placeholder="Search members" value={search} onChange={e=>{setSearch(e.target.value);setMemberOffset(0);}}/><select className={inputClass} value={status} onChange={e=>{setStatus(e.target.value);setMemberOffset(0);}}><option value="">All statuses</option><option value="pending">Pending</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option></select></div>
-        <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-slate-500"><tr><th className="p-2">Member</th><th className="p-2">Status</th><th className="p-2">Last login</th><th className="p-2">Websites</th><th className="p-2">Actions</th></tr></thead><tbody>
-          {members.map(m=><tr key={m.id} className="border-t border-slate-800"><td className="p-2"><button className="text-cyan-300" onClick={()=>setSelected(m)}>{m.display_name}</button><div className="text-xs text-slate-500">{m.username} · {m.role}</div>{m.status==='pending'&&<div className="text-xs text-amber-300">Registered {m.registration_at?new Date(m.registration_at).toLocaleString():'—'}</div>}</td><td className="p-2 capitalize">{m.status}</td><td className="p-2 text-slate-400">{m.last_login_at?new Date(m.last_login_at).toLocaleString():'—'}</td><td className="p-2">{m.assigned_website_count}</td><td className="p-2"><div className="flex flex-wrap gap-1">{m.status==='pending'?<><button className={buttonClass} onClick={()=>{if(window.confirm(`Approve ${m.username}?`)) void act(`/members/${m.id}/approve`);}}>Approve</button><button className={buttonClass} onClick={()=>{if(window.confirm(`Reject ${m.username}?`)){const reason=window.prompt('Optional rejection reason')||null;void act(`/members/${m.id}/reject`,'POST',{reason});}}}>Reject</button></>:m.role==='operator'&&m.status!=='rejected'?<button className={buttonClass} onClick={()=>{if(window.confirm(`${m.is_active?'Suspend':'Re-enable'} ${m.username}?`)) void act(`/members/${m.id}`,'PATCH',{is_active:!m.is_active});}}>{m.is_active?'Suspend':'Re-enable'}</button>:null}{m.role==='operator'&&m.status==='active'&&<button className={buttonClass} onClick={()=>{const password=window.prompt('Temporary password (at least 12 characters)'); if(password) void act(`/members/${m.id}/reset-password`,'POST',{temporary_password:password});}}>Reset password</button>}</div></td></tr>)}
-        </tbody></table>{members.length===0&&<p className="p-5 text-center text-slate-500">No members match these filters.</p>}<div className="mt-3 flex items-center justify-between text-xs text-slate-400"><span>{memberTotal} members</span><div className="flex gap-2"><button className={buttonClass} disabled={!memberOffset} onClick={()=>setMemberOffset(Math.max(0,memberOffset-50))}>Previous</button><button className={buttonClass} disabled={memberOffset+50>=memberTotal} onClick={()=>setMemberOffset(memberOffset+50)}>Next</button></div></div></div>
-        <form onSubmit={addMember} className="mt-6 border-t border-slate-800 pt-5"><h2 className="mb-3 font-semibold text-slate-200">Add Operator</h2><div className="grid gap-2 sm:grid-cols-2"><input required className={inputClass} placeholder="Username" value={memberForm.username} onChange={e=>setMemberForm({...memberForm,username:e.target.value})}/><input required className={inputClass} placeholder="Display name" value={memberForm.display_name} onChange={e=>setMemberForm({...memberForm,display_name:e.target.value})}/><input required minLength={12} maxLength={200} type="password" className={`${inputClass} sm:col-span-2`} placeholder="Temporary password (12–200 characters)" value={memberForm.temporary_password} onChange={e=>setMemberForm({...memberForm,temporary_password:e.target.value})}/></div><button className={`${buttonClass} mt-3`}>Create Operator</button></form>
-      </section>
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5"><h2 className="text-lg font-semibold text-white">{selected?`Member details · ${selected.display_name}`:'Member details'}</h2>{selected?<><p className="mt-1 text-xs text-slate-500">Assignments remain in place while this account is suspended.</p><form className="mt-4 flex gap-2" onSubmit={e=>{e.preventDefault();void act(`/members/${selected.id}`,'PATCH',{display_name:editDisplayName});}}><input className={`${inputClass} min-w-0 flex-1`} aria-label="Display name" value={editDisplayName} onChange={e=>setEditDisplayName(e.target.value)}/><button className={buttonClass}>Save name</button></form><label className="mt-4 flex items-center gap-2 text-sm text-slate-400"><input type="checkbox" checked={memberIncludeInactive} onChange={e=>setMemberIncludeInactive(e.target.checked)}/>Include inactive websites</label><div className="mt-4 flex gap-2"><select className={`${inputClass} min-w-0 flex-1`} value={candidate} onChange={e=>setCandidate(e.target.value)}><option value="">Select website to assign</option>{websites.filter(w=>!assigned.some(a=>a.id===w.id)).map(w=><option key={w.id} value={w.id}>{w.name}{w.is_active?'':' (inactive)'}</option>)}</select><button className={buttonClass} disabled={!candidate} onClick={()=>void assign()}>Assign</button></div><ul className="mt-4 divide-y divide-slate-800">{assigned.map(w=><li key={w.id} className="flex items-center justify-between gap-3 py-3"><div><div className="text-sm text-slate-200">{w.name}{w.is_active?'':' · inactive'}</div><div className="text-xs text-slate-500">{w.url}</div></div><button className={buttonClass} onClick={()=>void remove(w.id)}>Remove</button></li>)}</ul>{assigned.length===0&&<p className="mt-5 text-sm text-slate-500">No websites assigned.</p>}</>:<p className="mt-3 text-sm text-slate-500">Select a member to review assignments and details.</p>}</section>
-    </div>:<section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5"><div className="flex flex-wrap gap-3"><input className={inputClass} placeholder="Search websites by name or URL" value={search} onChange={e=>{setSearch(e.target.value);setAssignmentOffset(0);}}/><select className={inputClass} value={view} onChange={e=>{setView(e.target.value);setAssignmentOffset(0);}}><option value="all">All ({counts.all})</option><option value="unassigned">Unassigned ({counts.unassigned})</option><option value="assigned">Assigned ({counts.assigned})</option></select><select className={inputClass} value={operatorId} onChange={e=>{setOperatorId(e.target.value);setAssignmentOffset(0);}}><option value="">Any Operator</option>{members.filter(m=>m.role==='operator').map(m=><option key={m.id} value={m.id}>{m.display_name} ({m.status})</option>)}</select><select className={inputClass} value={tagId} onChange={e=>{setTagId(e.target.value);setAssignmentOffset(0);}}><option value="">All tags</option>{tagOptions.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select><label className="flex items-center gap-2 text-sm text-slate-400"><input type="checkbox" checked={includeInactive} onChange={e=>{setIncludeInactive(e.target.checked);setAssignmentOffset(0);}}/>Include inactive</label></div><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-slate-500"><tr><th className="p-2">Website</th><th className="p-2">Tags</th><th className="p-2">Current assignees</th></tr></thead><tbody>{websites.map(w=><tr key={w.id} className="border-t border-slate-800"><td className="p-2"><div>{w.name}{w.is_active?'':' · inactive'}</div><div className="text-xs text-slate-500">{w.url}</div></td><td className="p-2 text-slate-400">{w.tags.map(t=>t.name).join(', ')||'—'}</td><td className="p-2"><div className="flex flex-wrap gap-2">{(w.assignees||[]).map(a=><span key={a.id} className="rounded bg-slate-800 px-2 py-1 text-xs">{a.display_name}{a.is_active?'':' (suspended)'} <button aria-label={`Remove ${a.display_name}`} onClick={()=>void removeForTarget(w,a.id)} className="ml-1 text-rose-300">×</button></span>)}<select className={`${inputClass} py-1 text-xs`} defaultValue="" onChange={e=>{if(e.target.value) void assignForTarget(w,Number(e.target.value));e.target.value='';}}><option value="">Add assignee…</option>{members.filter(m=>m.role==='operator'&&m.status!=='pending'&&m.status!=='rejected'&&!(w.assignees||[]).some(a=>a.id===m.id)).map(m=><option key={m.id} value={m.id}>{m.display_name}{m.is_active?'':' (suspended)'}</option>)}</select></div></td></tr>)}</tbody></table>{websites.length===0&&<p className="p-6 text-center text-slate-500">No websites match these filters.</p>}<div className="mt-3 flex items-center justify-between text-xs text-slate-400"><span>{assignmentTotal} websites</span><div className="flex gap-2"><button className={buttonClass} disabled={!assignmentOffset} onClick={()=>setAssignmentOffset(Math.max(0,assignmentOffset-50))}>Previous</button><button className={buttonClass} disabled={assignmentOffset+50>=assignmentTotal} onClick={()=>setAssignmentOffset(assignmentOffset+50)}>Next</button></div></div></div></section>}
-  </div>;
+  // Selected member details state
+  const [selected, setSelected] = useState<Member | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [memberIncludeInactive, setMemberIncludeInactive] = useState(false);
+  const [assignedWebsites, setAssignedWebsites] = useState<Website[]>([]);
+  const [assignableWebsites, setAssignableWebsites] = useState<Website[]>([]);
+  const [candidateWebsiteId, setCandidateWebsiteId] = useState('');
+
+  // Assignments tab state
+  const [assignmentWebsites, setAssignmentWebsites] = useState<Website[]>([]);
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [assignmentOffset, setAssignmentOffset] = useState(0);
+  const [assignmentTotal, setAssignmentTotal] = useState(0);
+  const [view, setView] = useState('all');
+  const [operatorId, setOperatorId] = useState('');
+  const [operatorOptions, setOperatorOptions] = useState<Member[]>([]);
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [tagId, setTagId] = useState('');
+  const [tagOptions, setTagOptions] = useState<{ id: string; name: string }[]>([]);
+  const [counts, setCounts] = useState({ all: 0, unassigned: 0, assigned: 0 });
+  const [resetTarget, setResetTarget] = useState<Member | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+
+  const [error, setError] = useState('');
+
+  const loadMembers = useCallback(async () => {
+    try {
+      const q = new URLSearchParams({ limit: '50', offset: String(memberOffset) });
+      if (status) q.set('status', status);
+      if (memberSearch) q.set('search', memberSearch);
+      const data = await apiFetch<{ items: Member[]; pending_count: number; total: number }>(`/members?${q}`);
+      setMembers(data.items);
+      setPending(data.pending_count);
+      setMemberTotal(data.total);
+      setError('');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : 'Unable to load members.');
+    }
+  }, [status, memberSearch, memberOffset]);
+
+  const loadAssignments = useCallback(async () => {
+    try {
+      const q = new URLSearchParams({
+        view,
+        search: assignmentSearch,
+        limit: '50',
+        offset: String(assignmentOffset),
+        include_inactive: String(includeInactive),
+      });
+      if (operatorId) q.set('operator_id', operatorId);
+      if (tagId) q.append('tag_ids', tagId);
+      const data = await apiFetch<{
+        items: Website[];
+        total: number;
+        counts: { all: number; unassigned: number; assigned: number };
+      }>(`/member-assignments/websites?${q}`);
+      setAssignmentWebsites(data.items);
+      setAssignmentTotal(data.total);
+      setCounts(data.counts);
+
+      const people = await apiFetch<{ items: Member[] }>('/members?limit=200');
+      setOperatorOptions(people.items);
+
+      const tags = await apiFetch<{ items: { id: string; name: string }[] }>('/tags?limit=200');
+      setTagOptions(tags.items);
+      setError('');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : 'Unable to load assignments.');
+    }
+  }, [view, assignmentSearch, operatorId, assignmentOffset, includeInactive, tagId]);
+
+  const loadMemberSites = useCallback(
+    async (member: Member) => {
+      try {
+        const include = String(memberIncludeInactive);
+        const data = await apiFetch<{ items: Website[] }>(
+          `/members/${member.id}/websites?include_inactive=${include}`
+        );
+        setAssignedWebsites(data.items);
+        const all = await apiFetch<{ items: Website[] }>(
+          `/member-assignments/websites?view=all&include_inactive=${include}&limit=200`
+        );
+        setAssignableWebsites(all.items);
+      } catch (e) {
+        setError(e instanceof ApiError ? e.detail : 'Unable to load member websites.');
+      }
+    },
+    [memberIncludeInactive]
+  );
+
+  useEffect(() => {
+    if (tab === 'members') void loadMembers();
+    else void loadAssignments();
+  }, [tab, loadMembers, loadAssignments]);
+
+  useEffect(() => {
+    if (selected) {
+      setEditDisplayName(selected.display_name);
+      void loadMemberSites(selected);
+    }
+  }, [selected, loadMemberSites]);
+
+  const act = async (path: string, method = 'POST', body?: unknown) => {
+    try {
+      await apiFetch(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+      await queryClient.invalidateQueries({ queryKey: ['targets'] });
+      await queryClient.invalidateQueries({ queryKey: ['tags'] });
+      await loadMembers();
+      if (selected) {
+        try {
+          const freshMember = await apiFetch<Member>(`/members/${selected.id}`);
+          setSelected(freshMember);
+          setEditDisplayName(freshMember.display_name);
+          await loadMemberSites(freshMember);
+        } catch {
+          await loadMemberSites(selected);
+        }
+      }
+      await loadAssignments();
+      setError('');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : 'The request failed.');
+    }
+  };
+
+  const addMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await act('/members', 'POST', memberForm);
+    setMemberForm({ username: '', display_name: '', temporary_password: '' });
+  };
+
+  const assign = async () => {
+    if (!selected || !candidateWebsiteId) return;
+    await act(`/members/${selected.id}/websites/${candidateWebsiteId}`, 'PUT');
+    setCandidateWebsiteId('');
+  };
+
+  const remove = async (targetId: string) => {
+    if (!selected) return;
+    await act(`/members/${selected.id}/websites/${targetId}`, 'DELETE');
+  };
+
+  const assignForTarget = async (target: Website, memberId: number) => {
+    await act(`/members/${memberId}/websites/${target.id}`, 'PUT');
+  };
+
+  const removeForTarget = async (target: Website, memberId: number) => {
+    await act(`/members/${memberId}/websites/${target.id}`, 'DELETE');
+  };
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8">
+      <header className="mb-6">
+        <h1 className="text-3xl font-bold text-white">Member Management</h1>
+        <p className="mt-1 text-slate-400">Manage Operator accounts and their website access.</p>
+      </header>
+
+      <div className="mb-5 flex gap-2">
+        <button
+          className={buttonClass}
+          onClick={() => {
+            setTab('members');
+            setSelected(null);
+          }}
+        >
+          Members <span className="ml-1 rounded-full bg-amber-900 px-2 text-amber-200">{pending} pending</span>
+        </button>
+        <button
+          className={buttonClass}
+          onClick={() => {
+            setTab('assignments');
+            setSelected(null);
+          }}
+        >
+          Website Assignments
+        </button>
+      </div>
+
+      {error && (
+        <p role="alert" className="mb-4 rounded border border-rose-800 bg-rose-950/50 p-3 text-rose-300">
+          {error}
+        </p>
+      )}
+
+      {resetTarget && (
+        <form
+          role="dialog"
+          aria-label={`Reset password for ${resetTarget.username}`}
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-700 bg-slate-900 p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const target = resetTarget;
+            const password = resetPasswordValue;
+            setResetTarget(null);
+            setResetPasswordValue('');
+            void act(`/members/${target.id}/reset-password`, 'POST', {
+              temporary_password: password,
+            });
+          }}
+        >
+          <span className="text-sm font-medium text-slate-200">
+            Reset password for <strong className="text-cyan-300">{resetTarget.display_name}</strong>:
+          </span>
+          <input
+            required
+            minLength={12}
+            maxLength={200}
+            type="password"
+            aria-label="Temporary password"
+            placeholder="Temporary password (12–200 characters)"
+            className={`${inputClass} min-w-[260px] flex-1`}
+            value={resetPasswordValue}
+            onChange={(e) => setResetPasswordValue(e.target.value)}
+          />
+          <button type="submit" className={buttonClass}>
+            Confirm reset
+          </button>
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => {
+              setResetTarget(null);
+              setResetPasswordValue('');
+            }}
+          >
+            Cancel
+          </button>
+        </form>
+      )}
+
+      {tab === 'members' ? (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+            <div className="flex flex-wrap gap-3">
+              <input
+                className={inputClass}
+                placeholder="Search members"
+                value={memberSearch}
+                onChange={(e) => {
+                  setMemberSearch(e.target.value);
+                  setMemberOffset(0);
+                }}
+              />
+              <select
+                className={inputClass}
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setMemberOffset(0);
+                }}
+              >
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-slate-500">
+                  <tr>
+                    <th className="p-2">Member</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2">Last login</th>
+                    <th className="p-2">Websites</th>
+                    <th className="p-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map((m) => (
+                    <tr key={m.id} className="border-t border-slate-800">
+                      <td className="p-2">
+                        <button className="text-cyan-300 hover:underline" onClick={() => setSelected(m)}>
+                          {m.display_name}
+                        </button>
+                        <div className="text-xs text-slate-500">
+                          {m.username} · {m.role}
+                        </div>
+                        {m.status === 'pending' && (
+                          <div className="text-xs text-amber-300">
+                            Registered {m.registration_at ? new Date(m.registration_at).toLocaleString() : '—'}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2 capitalize">{m.status}</td>
+                      <td className="p-2 text-slate-400">
+                        {m.last_login_at ? new Date(m.last_login_at).toLocaleString() : '—'}
+                      </td>
+                      <td className="p-2">{m.assigned_website_count}</td>
+                      <td className="p-2">
+                        <div className="flex flex-wrap gap-1">
+                          {m.status === 'pending' ? (
+                            <>
+                              <button
+                                className={buttonClass}
+                                onClick={() => {
+                                  if (window.confirm(`Approve ${m.username}?`)) void act(`/members/${m.id}/approve`);
+                                }}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                className={buttonClass}
+                                onClick={() => {
+                                  if (window.confirm(`Reject ${m.username}?`)) {
+                                    const rawReason = window.prompt('Optional rejection reason');
+                                    if (rawReason === null) return;
+                                    const reason = rawReason.trim() || null;
+                                    void act(`/members/${m.id}/reject`, 'POST', { reason });
+                                  }
+                                }}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : m.role === 'operator' && m.status !== 'rejected' ? (
+                            <button
+                              className={buttonClass}
+                              onClick={() => {
+                                if (window.confirm(`${m.is_active ? 'Suspend' : 'Re-enable'} ${m.username}?`))
+                                  void act(`/members/${m.id}`, 'PATCH', { is_active: !m.is_active });
+                              }}
+                            >
+                              {m.is_active ? 'Suspend' : 'Re-enable'}
+                            </button>
+                          ) : null}
+                          {m.role === 'operator' && m.status === 'active' && (
+                            <button
+                              className={buttonClass}
+                              onClick={() => {
+                                setResetTarget(m);
+                                setResetPasswordValue('');
+                              }}
+                            >
+                              Reset password
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {members.length === 0 && <p className="p-5 text-center text-slate-500">No members match these filters.</p>}
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+                <span>{memberTotal} members</span>
+                <div className="flex gap-2">
+                  <button
+                    className={buttonClass}
+                    disabled={!memberOffset}
+                    onClick={() => setMemberOffset(Math.max(0, memberOffset - 50))}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className={buttonClass}
+                    disabled={memberOffset + 50 >= memberTotal}
+                    onClick={() => setMemberOffset(memberOffset + 50)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={addMember} className="mt-6 border-t border-slate-800 pt-5">
+              <h2 className="mb-3 font-semibold text-slate-200">Add Operator</h2>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  required
+                  className={inputClass}
+                  placeholder="Username"
+                  value={memberForm.username}
+                  onChange={(e) => setMemberForm({ ...memberForm, username: e.target.value })}
+                />
+                <input
+                  required
+                  className={inputClass}
+                  placeholder="Display name"
+                  value={memberForm.display_name}
+                  onChange={(e) => setMemberForm({ ...memberForm, display_name: e.target.value })}
+                />
+                <input
+                  required
+                  minLength={12}
+                  maxLength={200}
+                  type="password"
+                  className={`${inputClass} sm:col-span-2`}
+                  placeholder="Temporary password (12–200 characters)"
+                  value={memberForm.temporary_password}
+                  onChange={(e) => setMemberForm({ ...memberForm, temporary_password: e.target.value })}
+                />
+              </div>
+              <button className={`${buttonClass} mt-3`}>Create Operator</button>
+            </form>
+          </section>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+            <h2 className="text-lg font-semibold text-white">
+              {selected ? `Member details · ${selected.display_name}` : 'Member details'}
+            </h2>
+            {selected ? (
+              <>
+                <p className="mt-1 text-xs text-slate-500">
+                  Assignments remain in place while this account is suspended.
+                </p>
+                <form
+                  className="mt-4 flex gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void act(`/members/${selected.id}`, 'PATCH', { display_name: editDisplayName });
+                  }}
+                >
+                  <input
+                    className={`${inputClass} min-w-0 flex-1`}
+                    aria-label="Display name"
+                    value={editDisplayName}
+                    onChange={(e) => setEditDisplayName(e.target.value)}
+                  />
+                  <button className={buttonClass}>Save name</button>
+                </form>
+
+                <label className="mt-4 flex items-center gap-2 text-sm text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={memberIncludeInactive}
+                    onChange={(e) => setMemberIncludeInactive(e.target.checked)}
+                  />
+                  Include inactive websites
+                </label>
+
+                <div className="mt-4 flex gap-2">
+                  <select
+                    className={`${inputClass} min-w-0 flex-1`}
+                    value={candidateWebsiteId}
+                    onChange={(e) => setCandidateWebsiteId(e.target.value)}
+                  >
+                    <option value="">Select website to assign</option>
+                    {assignableWebsites
+                      .filter((w) => !assignedWebsites.some((a) => a.id === w.id))
+                      .map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.name}
+                          {w.is_active ? '' : ' (inactive)'}
+                        </option>
+                      ))}
+                  </select>
+                  <button className={buttonClass} disabled={!candidateWebsiteId} onClick={() => void assign()}>
+                    Assign
+                  </button>
+                </div>
+
+                <ul className="mt-4 divide-y divide-slate-800">
+                  {assignedWebsites.map((w) => (
+                    <li key={w.id} className="flex items-center justify-between gap-3 py-3">
+                      <div>
+                        <div className="text-sm text-slate-200">
+                          {w.name}
+                          {w.is_active ? '' : ' · inactive'}
+                        </div>
+                        <div className="text-xs text-slate-500">{w.url}</div>
+                      </div>
+                      <button className={buttonClass} onClick={() => void remove(w.id)}>
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {assignedWebsites.length === 0 && (
+                  <p className="mt-5 text-sm text-slate-500">No websites assigned.</p>
+                )}
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">Select a member to review assignments and details.</p>
+            )}
+          </section>
+        </div>
+      ) : (
+        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="flex flex-wrap gap-3">
+            <input
+              className={inputClass}
+              placeholder="Search websites by name or URL"
+              value={assignmentSearch}
+              onChange={(e) => {
+                setAssignmentSearch(e.target.value);
+                setAssignmentOffset(0);
+              }}
+            />
+            <select
+              className={inputClass}
+              value={view}
+              onChange={(e) => {
+                setView(e.target.value);
+                setAssignmentOffset(0);
+              }}
+            >
+              <option value="all">All ({counts.all})</option>
+              <option value="unassigned">Unassigned ({counts.unassigned})</option>
+              <option value="assigned">Assigned ({counts.assigned})</option>
+            </select>
+            <select
+              className={inputClass}
+              value={operatorId}
+              onChange={(e) => {
+                setOperatorId(e.target.value);
+                setAssignmentOffset(0);
+              }}
+            >
+              <option value="">Any Operator</option>
+              {operatorOptions
+                .filter((m) => m.role === 'operator')
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name} ({m.status})
+                  </option>
+                ))}
+            </select>
+            <select
+              className={inputClass}
+              value={tagId}
+              onChange={(e) => {
+                setTagId(e.target.value);
+                setAssignmentOffset(0);
+              }}
+            >
+              <option value="">All tags</option>
+              {tagOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-2 text-sm text-slate-400">
+              <input
+                type="checkbox"
+                checked={includeInactive}
+                onChange={(e) => {
+                  setIncludeInactive(e.target.checked);
+                  setAssignmentOffset(0);
+                }}
+              />
+              Include inactive
+            </label>
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="p-2">Website</th>
+                  <th className="p-2">Tags</th>
+                  <th className="p-2">Current assignees</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignmentWebsites.map((w) => (
+                  <tr key={w.id} className="border-t border-slate-800">
+                    <td className="p-2">
+                      <div>
+                        {w.name}
+                        {w.is_active ? '' : ' · inactive'}
+                      </div>
+                      <div className="text-xs text-slate-500">{w.url}</div>
+                    </td>
+                    <td className="p-2 text-slate-400">
+                      {w.tags.map((t) => t.name).join(', ') || '—'}
+                    </td>
+                    <td className="p-2">
+                      <div className="flex flex-wrap gap-2">
+                        {(w.assignees || []).map((a) => (
+                          <span key={a.id} className="rounded bg-slate-800 px-2 py-1 text-xs">
+                            {a.display_name}
+                            {a.is_active ? '' : ' (suspended)'}{' '}
+                            <button
+                              aria-label={`Remove ${a.display_name}`}
+                              onClick={() => void removeForTarget(w, a.id)}
+                              className="ml-1 text-rose-300"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        <select
+                          className={`${inputClass} py-1 text-xs`}
+                          defaultValue=""
+                          onChange={(e) => {
+                            if (e.target.value) void assignForTarget(w, Number(e.target.value));
+                            e.target.value = '';
+                          }}
+                        >
+                          <option value="">Add assignee…</option>
+                          {operatorOptions
+                            .filter(
+                              (m) =>
+                                m.role === 'operator' &&
+                                m.status !== 'pending' &&
+                                m.status !== 'rejected' &&
+                                !(w.assignees || []).some((a) => a.id === m.id)
+                            )
+                            .map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.display_name}
+                                {m.is_active ? '' : ' (suspended)'}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {assignmentWebsites.length === 0 && (
+              <p className="p-6 text-center text-slate-500">No websites match these filters.</p>
+            )}
+            <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+              <span>{assignmentTotal} websites</span>
+              <div className="flex gap-2">
+                <button
+                  className={buttonClass}
+                  disabled={!assignmentOffset}
+                  onClick={() => setAssignmentOffset(Math.max(0, assignmentOffset - 50))}
+                >
+                  Previous
+                </button>
+                <button
+                  className={buttonClass}
+                  disabled={assignmentOffset + 50 >= assignmentTotal}
+                  onClick={() => setAssignmentOffset(assignmentOffset + 50)}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }

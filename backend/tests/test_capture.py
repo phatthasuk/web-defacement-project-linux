@@ -16,9 +16,19 @@ from app.core.errors import (
     SsrfBlockedError,
     UpstreamConnectionError,
 )
-from app.services.capture.capture import capture_snapshot
+from app.services.capture.capture import _navigation_redirect_document, capture_snapshot
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_page.html"
+
+
+def test_navigation_redirect_document_escapes_script_terminators() -> None:
+    document = _navigation_redirect_document(
+        "https://example.com/?next=</script><h1>injected</h1>&x=\u2028"
+    )
+
+    assert "</script><h1>injected" not in document
+    assert r"\u003c/script\u003e\u003ch1\u003einjected\u003c/h1\u003e\u0026" in document
+    assert r"\u2028" in document
 
 
 def _png_bytes() -> bytes:
@@ -258,6 +268,8 @@ async def test_capture_snapshot_sandbox_configuration(tmp_path: Path):
     kwargs_1 = mock_launch_1.chromium.launch.call_args[1]
     assert kwargs_1["chromium_sandbox"] is True
     assert "--no-sandbox" not in kwargs_1["args"]
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in kwargs_1["args"]
+    assert "--enforce-webrtc-ip-handling-policy" in kwargs_1["args"]
 
     # 2. BROWSER_DISABLE_SANDBOX = True -> chromium_sandbox=False, has --no-sandbox
     mock_ap_2, mock_launch_2 = build_mock_ap()
@@ -400,6 +412,62 @@ async def test_capture_redirect_preserves_final_url_and_relative_resources(tmp_p
     assert "redirected" in captured_text
     assert "/folder/page" in requests
     assert "/folder/image.png" in requests
+
+
+async def test_capture_redirect_with_script_terminator_redirects_without_html_injection(
+    tmp_path: Path,
+):
+    requests: list[str] = []
+
+    async def fixture(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            while True:
+                request = (await reader.readuntil(b"\r\n\r\n")).decode("iso-8859-1")
+                path = request.split(" ", 2)[1]
+                requests.append(path)
+                if path == "/start":
+                    response = (
+                        b"HTTP/1.1 302 Found\r\n"
+                        b"Location: /dest?payload=</script><h1>SPOOFED</h1>\r\n"
+                        b"Content-Length: 0\r\n\r\n"
+                    )
+                else:
+                    body = b"<html><body>REAL-DESTINATION</body></html>"
+                    response = (
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                        + body
+                    )
+                writer.write(response)
+                await writer.drain()
+        except (asyncio.IncompleteReadError, ConnectionError):
+            pass
+        finally:
+            writer.close()
+
+    server, port = await _start_http_fixture(fixture)
+    try:
+        with patch("app.services.capture.capture.validate_url"), \
+             patch("app.services.capture.ssrf_proxy.resolve_host_ips", return_value=[
+                 ipaddress.ip_address("127.0.0.1")
+             ]), \
+             patch("app.services.capture.ssrf_proxy.is_blocked_address", return_value=False):
+            result = await capture_snapshot(
+                f"http://allowed.test:{port}/start",
+                Settings(PAGE_STABILIZE_ENABLED=False),
+                tmp_path,
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert result.redirect_count == 1
+    assert result.final_url.startswith(f"http://allowed.test:{port}/dest?payload=")
+    captured_text = Path(result.text_path).read_text(encoding="utf-8")
+    captured_html = Path(result.html_path).read_text(encoding="utf-8")
+    assert "REAL-DESTINATION" in captured_text
+    assert "SPOOFED" not in captured_text
+    assert "SPOOFED" not in captured_html
 
 
 async def test_capture_blocks_redirect_before_destination_receives_request(tmp_path: Path):

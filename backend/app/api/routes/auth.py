@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session as DbSession
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_authenticated_user, get_current_session, get_db, hash_token
 from app.core.config import Settings, get_settings
@@ -102,7 +103,7 @@ async def login(
 
     # Unknown user: keep timing comparable and return the generic error.
     if not user:
-        verify_password(payload.password, _DUMMY_HASH)
+        await run_in_threadpool(verify_password, payload.password, _DUMMY_HASH)
         logger.info("login_failed reason=unknown_user username=%r", username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=GENERIC_LOGIN_ERROR)
 
@@ -110,11 +111,13 @@ async def login(
 
     # Locked account: reject without revealing the state, keep timing comparable.
     if user.locked_until is not None and now < user.locked_until:
-        verify_password(payload.password, _DUMMY_HASH)
+        await run_in_threadpool(verify_password, payload.password, _DUMMY_HASH)
         logger.warning("login_failed reason=locked user_id=%s", user.id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=GENERIC_LOGIN_ERROR)
 
-    password_ok = verify_password(payload.password, user.hashed_password)
+    password_ok = await run_in_threadpool(
+        verify_password, payload.password, user.hashed_password
+    )
 
     if not password_ok:
         _record_failed_attempt(user, settings)
@@ -231,7 +234,7 @@ async def register(
     user = User(
         username=payload.username.strip(),
         display_name=payload.display_name.strip(),
-        hashed_password=get_password_hash(payload.password),
+        hashed_password=await run_in_threadpool(get_password_hash, payload.password),
         role="operator",
         registration_status="pending",
         is_active=False,
@@ -265,7 +268,9 @@ async def register(
 
 
 @router.post("/change-password")
+@limiter.limit("5/minute")
 async def change_password(
+    request: Request,
     payload: PasswordChangeRequest,
     response: Response,
     db: DatabaseSession,
@@ -273,12 +278,23 @@ async def change_password(
     user: Annotated[User, Depends(get_authenticated_user)],
     current_session: Annotated[Session, Depends(get_current_session)],
 ) -> dict[str, str]:
-    if not verify_password(payload.current_password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    if verify_password(payload.new_password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Choose a different password")
     now = utcnow()
-    user.hashed_password = get_password_hash(payload.new_password)
+    if user.locked_until is not None and now < user.locked_until:
+        raise HTTPException(status_code=429, detail="Too many failed password attempts")
+    current_password_valid = await run_in_threadpool(
+        verify_password, payload.current_password, user.hashed_password
+    )
+    if not current_password_valid:
+        _record_failed_attempt(user, settings)
+        db.commit()
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    same_password = await run_in_threadpool(
+        verify_password, payload.new_password, user.hashed_password
+    )
+    if same_password:
+        raise HTTPException(status_code=400, detail="Choose a different password")
+    user.hashed_password = await run_in_threadpool(get_password_hash, payload.new_password)
+    _reset_failed_attempts(user)
     user.password_changed_at = now
     user.must_change_password = False
     db.query(Session).filter(Session.user_id == user.id, Session.revoked_at.is_(None)).update(

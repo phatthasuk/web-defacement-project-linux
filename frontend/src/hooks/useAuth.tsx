@@ -14,44 +14,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const userRef = useRef<User | null>(null);
   const lastCheckedAtRef = useRef<number | null>(null);
   const checkInFlightRef = useRef(false);
+  const authEpochRef = useRef(0);
 
   const updateUser = useCallback((nextUser: User | null) => {
     userRef.current = nextUser;
     setUser(nextUser);
   }, []);
 
+  const clearSession = useCallback(() => {
+    authEpochRef.current += 1;
+    checkInFlightRef.current = false;
+    setCsrfToken(null);
+    updateUser(null);
+    setAuthError(false);
+    queryClient.clear();
+  }, [queryClient, updateUser]);
+
   const applyAuth = useCallback(({ csrf_token, ...currentUser }: AuthResponse) => {
+    authEpochRef.current += 1;
+    checkInFlightRef.current = false;
     setCsrfToken(csrf_token);
-    if (userRef.current && userRef.current.id !== currentUser.id) queryClient.clear();
+    const prev = userRef.current;
+    if (
+      prev &&
+      (prev.id !== currentUser.id ||
+        prev.role !== currentUser.role ||
+        prev.must_change_password !== currentUser.must_change_password)
+    ) {
+      queryClient.clear();
+    }
     updateUser(currentUser);
     setAuthError(false);
+    lastCheckedAtRef.current = Date.now();
   }, [queryClient, updateUser]);
 
   const checkAuth = useCallback(async (showLoading: boolean) => {
     if (showLoading) setIsLoading(true);
     if (checkInFlightRef.current) return;
     checkInFlightRef.current = true;
+    const requestEpoch = ++authEpochRef.current;
 
     try {
       const auth = await apiFetch<AuthResponse>('/auth/me');
+      if (requestEpoch !== authEpochRef.current) return;
       applyAuth(auth);
-      lastCheckedAtRef.current = Date.now();
     } catch (error) {
+      if (requestEpoch !== authEpochRef.current) return;
       if (error instanceof ApiError && error.status === 401) {
-        updateUser(null);
-        setCsrfToken(null);
-        setAuthError(false);
-        queryClient.clear();
+        clearSession();
       } else if (!userRef.current) {
         // Initial load and explicit retry need an error screen when no session
         // is available. A transient background failure keeps the current page.
         setAuthError(true);
       }
     } finally {
-      checkInFlightRef.current = false;
+      if (requestEpoch === authEpochRef.current) {
+        checkInFlightRef.current = false;
+      }
       setIsLoading(false);
     }
-  }, [applyAuth, queryClient, updateUser]);
+  }, [applyAuth, clearSession]);
 
   useEffect(() => {
     void checkAuth(true);
@@ -66,7 +88,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ) {
         return;
       }
+      if (checkInFlightRef.current) {
+        return;
+      }
 
+      lastCheckedAtRef.current = Date.now();
       void checkAuth(false);
       void queryClient.invalidateQueries();
     };
@@ -76,12 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onAccessDenied = (event: Event) => {
       const status = (event as CustomEvent<{ status: number }>).detail?.status;
       if (status === 401) {
-        updateUser(null);
-        setCsrfToken(null);
-        setAuthError(false);
-        queryClient.clear();
-      } else {
-        queryClient.clear();
+        clearSession();
+      } else if (status === 403) {
+        void checkAuth(false);
       }
     };
     window.addEventListener('focus', onFocus);
@@ -92,27 +115,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('api:access-denied', onAccessDenied);
     };
-  }, [checkAuth, queryClient, updateUser]);
+  }, [checkAuth, clearSession, queryClient]);
 
   const logout = useCallback(async () => {
     try {
       await apiFetch('/auth/logout', { method: 'POST' });
-      setCsrfToken(null);
-      updateUser(null);
-      setAuthError(false);
-      queryClient.clear();
+      clearSession();
     } catch (e) {
       console.error('Logout failed:', e);
       if (e instanceof ApiError && e.status === 401) {
-        setCsrfToken(null);
-        updateUser(null);
-        setAuthError(false);
-        queryClient.clear();
+        clearSession();
         return;
       }
       throw e;
     }
-  }, [queryClient, updateUser]);
+  }, [clearSession]);
 
   const retry = useCallback(() => setReloadKey((key) => key + 1), []);
 

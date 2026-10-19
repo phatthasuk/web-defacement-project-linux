@@ -76,7 +76,7 @@ async def get_snapshot(
 
 
 @router.get("/{snapshot_id}/screenshot")
-async def get_snapshot_screenshot(
+def get_snapshot_screenshot(
     snapshot_id: str,
     db: DbSession,
     settings: AppSettings,

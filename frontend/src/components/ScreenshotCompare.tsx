@@ -13,9 +13,12 @@ interface ScreenshotPanelProps {
   src?: string | null;
   emptyMessage: string;
   isLoading?: boolean;
+  isError?: boolean;
+  errorMessage?: string;
   badge?: string;
   badgeColor?: string;
   onZoom?: (src: string, label: string) => void;
+  onRetry?: () => void;
 }
 
 const panelFrameClass =
@@ -122,11 +125,22 @@ function ScreenshotPanel({
   src,
   emptyMessage,
   isLoading,
+  isError = false,
+  errorMessage = 'Screenshot failed to load',
   badge,
   badgeColor = 'bg-slate-800 text-slate-400 border-slate-700',
   onZoom,
+  onRetry,
 }: ScreenshotPanelProps) {
   const [hasFailed, setHasFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const showError = isError || hasFailed;
+
+  const handleRetry = () => {
+    setHasFailed(false);
+    setRetryCount((count) => count + 1);
+    onRetry?.();
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -139,7 +153,24 @@ function ScreenshotPanel({
         )}
       </div>
 
-      {!src && !isLoading ? (
+      {showError ? (
+        <div
+          role="alert"
+          className="border border-rose-800/40 rounded-lg bg-rose-950/20 p-10 text-center text-sm flex flex-col items-center justify-center gap-2 min-h-[200px]"
+        >
+          <span className="font-semibold text-rose-400">{errorMessage}</span>
+          <span className="text-slate-400 text-xs">
+            This image is unavailable — not evidence that the page is unchanged.
+          </span>
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="mt-1 px-3 py-1 rounded-md bg-rose-900/40 hover:bg-rose-900/70 text-rose-200 border border-rose-700/60 text-xs font-medium transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      ) : !src && !isLoading ? (
         <div className="border border-slate-800 border-dashed rounded-lg bg-slate-950/40 p-10 text-center text-slate-500 text-sm flex items-center justify-center min-h-[200px]">
           {emptyMessage}
         </div>
@@ -151,16 +182,6 @@ function ScreenshotPanel({
           </svg>
           <span>Rendering visual comparison...</span>
         </div>
-      ) : hasFailed ? (
-        <div
-          role="alert"
-          className="border border-rose-800/40 rounded-lg bg-rose-950/20 p-10 text-center text-sm flex flex-col items-center justify-center gap-1 min-h-[200px]"
-        >
-          <span className="font-semibold text-rose-400">Screenshot failed to load</span>
-          <span className="text-slate-400 text-xs">
-            This image is unavailable — not evidence that the page is unchanged.
-          </span>
-        </div>
       ) : (
         <div
           className={`${panelFrameClass} cursor-zoom-in`}
@@ -168,6 +189,7 @@ function ScreenshotPanel({
           title="Click to view full size"
         >
           <img
+            key={retryCount}
             src={src || undefined}
             alt={alt}
             className="max-w-full h-auto object-contain transition-transform duration-300 group-hover:scale-[1.01]"
@@ -196,6 +218,8 @@ export function ScreenshotCompare({
   const [viewMode, setViewMode] = useState<'3-panel' | 'side-by-side'>('3-panel');
   const [diffUrl, setDiffUrl] = useState<string | null>(null);
   const [isDiffLoading, setIsDiffLoading] = useState(false);
+  const [hasDiffError, setHasDiffError] = useState(false);
+  const [diffRetryNonce, setDiffRetryNonce] = useState(0);
   const [zoomedImage, setZoomedImage] = useState<{ src: string; label: string } | null>(null);
 
   const isSameSnapshot =
@@ -235,12 +259,14 @@ export function ScreenshotCompare({
   useEffect(() => {
     if (!baselineSnapshotId || !currentSnapshotId || isSameSnapshot) {
       setDiffUrl(null);
+      setHasDiffError(false);
       setIsDiffLoading(false);
       return;
     }
 
     let isMounted = true;
     setIsDiffLoading(true);
+    setHasDiffError(false);
 
     const baselineUrl = `${BASE_URL}/snapshots/${baselineSnapshotId}/screenshot`;
     const currentUrl = `${BASE_URL}/snapshots/${currentSnapshotId}/screenshot`;
@@ -249,10 +275,16 @@ export function ScreenshotCompare({
       .then(([baseImg, curImg]) => {
         if (!isMounted) return;
         const diffDataUrl = computeDiffHeatmap(baseImg, curImg);
+        if (!diffDataUrl) {
+          throw new Error('Failed to compute visual diff heatmap');
+        }
         setDiffUrl(diffDataUrl);
       })
       .catch(() => {
-        if (isMounted) setDiffUrl(null);
+        if (isMounted) {
+          setDiffUrl(null);
+          setHasDiffError(true);
+        }
       })
       .finally(() => {
         if (isMounted) setIsDiffLoading(false);
@@ -261,7 +293,7 @@ export function ScreenshotCompare({
     return () => {
       isMounted = false;
     };
-  }, [baselineSnapshotId, currentSnapshotId, isSameSnapshot]);
+  }, [baselineSnapshotId, currentSnapshotId, isSameSnapshot, diffRetryNonce]);
 
   const baselineSrc = baselineSnapshotId ? `${BASE_URL}/snapshots/${baselineSnapshotId}/screenshot` : null;
   const currentSrc = currentSnapshotId ? `${BASE_URL}/snapshots/${currentSnapshotId}/screenshot` : null;
@@ -329,6 +361,8 @@ export function ScreenshotCompare({
             alt="Visual diff highlight"
             src={diffUrl}
             isLoading={isDiffLoading}
+            isError={hasDiffError}
+            errorMessage="Visual diff calculation failed"
             badge="Red = Changed"
             badgeColor="bg-rose-950/60 text-rose-400 border-rose-800/50"
             emptyMessage={
@@ -337,6 +371,7 @@ export function ScreenshotCompare({
                 : 'Diff preview requires both baseline and latest captures'
             }
             onZoom={(src, label) => setZoomedImage({ src, label })}
+            onRetry={() => setDiffRetryNonce((nonce) => nonce + 1)}
           />
         )}
 

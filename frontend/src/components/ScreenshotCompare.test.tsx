@@ -1,8 +1,12 @@
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ScreenshotCompare } from './ScreenshotCompare';
 
 describe('ScreenshotCompare', () => {
+  beforeEach(() => {
+    vi.mocked(globalThis.fetch).mockReset();
+  });
+
   it('renders placeholders when snapshot IDs are missing', () => {
     render(<ScreenshotCompare baselineSnapshotId={null} currentSnapshotId={null} />);
     expect(screen.getByText(/No baseline snapshot designated/i)).toBeInTheDocument();
@@ -48,7 +52,7 @@ describe('ScreenshotCompare', () => {
 
   // --- A screenshot that fails to load must not look like an unchanged page (Finding 4) ---
 
-  it('shows an explicit error when a screenshot fails to load', () => {
+  it('shows an explicit error with retry when a screenshot fails to load', () => {
     render(<ScreenshotCompare baselineSnapshotId="b-123" currentSnapshotId="c-456" />);
 
     fireEvent.error(screen.getByAltText('Baseline screenshot'));
@@ -59,6 +63,34 @@ describe('ScreenshotCompare', () => {
 
     // The other side is unaffected.
     expect(screen.getByAltText('Latest screenshot')).toBeInTheDocument();
+
+    // Clicking Retry restores the image element for another load attempt
+    const retryButtons = screen.getAllByRole('button', { name: /Retry/i });
+    fireEvent.click(retryButtons[0]);
+    expect(screen.getByAltText('Baseline screenshot')).toBeInTheDocument();
+  });
+
+  it('shows an explicit error with retry when visual diff heatmap calculation fails', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new TypeError('Failed to fetch screenshot blob'));
+
+    render(<ScreenshotCompare baselineSnapshotId="b-123" currentSnapshotId="c-456" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Visual diff calculation failed/i)).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/Diff preview requires both baseline and latest captures/i)
+    ).not.toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    const retryButton = screen.getByRole('button', { name: /Retry/i });
+    fireEvent.click(retryButton);
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+    });
   });
 
   it('clears a previous load failure when the snapshot changes', () => {

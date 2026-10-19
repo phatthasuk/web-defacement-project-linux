@@ -417,6 +417,31 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('Text comparison unavailable')).not.toBeInTheDocument();
   });
 
+  it('reports unavailable check results instead of claiming this is an initial baseline', () => {
+    const refetchChecks = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useTargetDetailHooks.useTargetChecksQuery).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      isFetching: false,
+      refetch: refetchChecks,
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useTargetChecksQuery>);
+
+    render(
+      <BrowserRouter>
+        <TargetDetailPage />
+      </BrowserRouter>
+    );
+
+    expect(screen.getByText('Check results unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/Failed to load latest check results/i)).toBeInTheDocument();
+    expect(screen.queryByText('Initial Baseline Capture')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No differences to calculate/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
+    expect(refetchChecks).toHaveBeenCalledTimes(1);
+  });
+
   it('opens edit modal and delete modal from target detail page', async () => {
     mockTextQueries({
       'snap-baseline': { data: 'old' },

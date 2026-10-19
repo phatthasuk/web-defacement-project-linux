@@ -14,7 +14,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.time import utcnow
 from app.core.errors import (
     CaptureBudgetExceeded,
     CaptureError,
@@ -32,6 +31,7 @@ from app.core.status import (
     STATUS_OK,
     require_valid_transition,
 )
+from app.core.time import utcnow
 from app.models import CheckAttempt, CheckResult, Snapshot, Target
 from app.services.capture.capture import CaptureResult, capture_snapshot
 from app.services.diff import compare_snapshot_artifacts
@@ -264,7 +264,10 @@ async def run_target_check(
         )
         target.last_error = error_msg
         target.last_http_status = capture.http_status
-        target.last_error_code, _ = classify_http_failure(capture.http_status) if capture.http_status is not None else ("no_http_response", True)
+        if capture.http_status is not None:
+            target.last_error_code, _ = classify_http_failure(capture.http_status)
+        else:
+            target.last_error_code = "no_http_response"
         next_status = (
             STATUS_AVAILABILITY_ISSUE
             if capture.http_status is not None and capture.http_status >= 400
@@ -321,6 +324,7 @@ async def run_target_check(
             db.add(snapshot)
             snapshot_id = snapshot.id
             next_status = STATUS_AWAITING_BASELINE
+            target.last_http_status = capture.http_status
             transition_target(target, next_status)
             db.commit()
             artifacts_committed = True
@@ -431,6 +435,7 @@ async def run_target_check(
                 structure_change_score=diff.structure_change_score,
                 summary=diff.summary,
             )
+            target.last_http_status = capture.http_status
             transition_target(target, STATUS_CHANGED)
             db.add(check_result)
             db.flush()
@@ -468,13 +473,21 @@ async def run_target_check(
                 structure_change_score=diff.structure_change_score,
                 summary=diff.summary,
             )
+            target.last_http_status = capture.http_status
             transition_target(target, STATUS_OK)
             db.add(check_result)
             db.flush()
             snapshot_id = matched_baseline.id
             check_result_id = check_result.id
             db.commit()
-            db.refresh(check_result)
+            try:
+                db.refresh(matched_baseline)
+                db.refresh(check_result)
+            except Exception:
+                logger.exception(
+                    "OK result for target %s committed but could not be refreshed",
+                    target_id,
+                )
             return TargetCheckResult(
                 status=STATUS_OK,
                 snapshot=matched_baseline,

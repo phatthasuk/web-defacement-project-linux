@@ -226,6 +226,13 @@ async def update_target(
             else:
                 target.status = STATUS_NEVER_CHECKED
     if "is_active" in update_data:
+        if update_data["is_active"] is False and (
+            target.status == STATUS_CHECKING or is_target_in_flight(target_id)
+        ):
+            raise ConflictError(
+                "Target is currently being checked. "
+                "Target cannot be deactivated until the check finishes."
+            )
         target.is_active = update_data["is_active"]
     if "allowed_domains" in update_data:
         target.allowed_domains = update_data["allowed_domains"]

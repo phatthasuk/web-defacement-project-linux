@@ -63,7 +63,7 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403 || response.status === 404) {
+    if (response.status === 401 || response.status === 403) {
       window.dispatchEvent(new CustomEvent('api:access-denied', { detail: { status: response.status, path } }));
     }
     let detail = 'An unknown error occurred';

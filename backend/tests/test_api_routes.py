@@ -129,6 +129,33 @@ async def test_double_check_trigger_skips_in_flight_duplicate(
     assert api_capture_calls == ["https://93.184.216.34"]
 
 
+async def test_check_trigger_releases_reservation_when_commit_fails(
+    client: httpx.AsyncClient,
+    monkeypatch,
+):
+    from app.services.concurrency import is_target_in_flight
+
+    target_id = await create_target(client)
+    original_commit = Session.commit
+
+    def fail_manual_reservation_commit(db: Session) -> None:
+        target = db.get(Target, target_id)
+        if target is not None and target.check_run_source == "manual":
+            raise RuntimeError("simulated manual reservation commit failure")
+        original_commit(db)
+
+    monkeypatch.setattr(Session, "commit", fail_manual_reservation_commit)
+
+    try:
+        await client.post(f"/targets/{target_id}/check")
+    except RuntimeError as exc:
+        assert "simulated manual reservation commit failure" in str(exc)
+    else:
+        raise AssertionError("Expected manual reservation commit failure")
+
+    assert not is_target_in_flight(target_id)
+
+
 async def test_checks_and_snapshots_read_paths(
     client: httpx.AsyncClient,
     api_session_factory,

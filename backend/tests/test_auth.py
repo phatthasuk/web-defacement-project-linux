@@ -331,6 +331,36 @@ async def test_account_locks_after_repeated_failures(
     assert locked.status_code == 401
 
 
+async def test_change_password_locks_account_after_repeated_current_password_failures(
+    client: httpx.AsyncClient,
+    auth_credentials: dict[str, str],
+    api_session_factory: Callable[[], Session],
+) -> None:
+    for _ in range(5):
+        response = await client.post(
+            "/auth/change-password",
+            json={
+                "current_password": "incorrect password",
+                "new_password": "a-new-long-password",
+            },
+        )
+        assert response.status_code == 400
+
+    locked = await client.post(
+        "/auth/change-password",
+        json={
+            "current_password": auth_credentials["password"],
+            "new_password": "a-new-long-password",
+        },
+    )
+    assert locked.status_code == 429
+
+    with api_session_factory() as db:
+        user = db.get(User, int(auth_credentials["user_id"]))
+        assert user is not None
+        assert user.locked_until is not None
+
+
 async def test_successful_login_resets_failure_counter(
     unauth_client: httpx.AsyncClient,
     auth_credentials: dict[str, str],

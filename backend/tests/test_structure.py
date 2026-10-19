@@ -474,3 +474,63 @@ def test_external_script_type_changes_are_detected():
     assert compare_structure(facts(external("text/plain")), facts(external(None))).changed
     assert compare_structure(facts(external("text/plain")), facts(external("module"))).changed
     assert not compare_structure(facts(external(None)), facts(external("text/javascript"))).changed
+
+
+def test_nomodule_removal_and_presence_are_detected():
+    classic = '<script src="/assets/legacy.js"></script>'
+    nomodule = '<script src="/assets/legacy.js" nomodule></script>'
+    diff = compare_structure(facts(nomodule), facts(classic))
+    assert diff.changed
+    assert diff.score > 0.0
+    assert "script[classic-nomodule]:https://hospital.example.com/assets/legacy.js" in diff.removed
+    assert "script:https://hospital.example.com/assets/legacy.js" in diff.added
+
+    # Inline script nomodule
+    inline_classic = '<script>console.log("fallback")</script>'
+    inline_nomodule = '<script nomodule>console.log("fallback")</script>'
+    inline_diff = compare_structure(facts(inline_nomodule), facts(inline_classic))
+    assert inline_diff.changed
+    assert any(fact.startswith("inline-script[classic-nomodule]:") for fact in inline_diff.removed)
+    assert any(fact.startswith("inline-script:") for fact in inline_diff.added)
+
+    # nomodule on ES module is ignored in browsers and remains module
+    mod = '<script type="module" src="/assets/app.js"></script>'
+    mod_nomodule = '<script type="module" nomodule src="/assets/app.js"></script>'
+    assert facts(mod) == facts(mod_nomodule)
+
+
+def test_iframe_sandbox_changes_are_detected():
+    sandboxed = '<iframe src="/embed/chart" sandbox="allow-scripts allow-forms"></iframe>'
+    unsandboxed = '<iframe src="/embed/chart"></iframe>'
+
+    # Removing sandbox attribute completely
+    remove_diff = compare_structure(facts(sandboxed), facts(unsandboxed))
+    assert remove_diff.changed
+    assert remove_diff.score > 0.0
+    expected_sandbox = (
+        "iframe-sandbox:https://hospital.example.com/embed/chart:allow-forms allow-scripts"
+    )
+    assert expected_sandbox in remove_diff.removed
+
+    # Token order and whitespace/case invariance
+    same_sandbox = '<iframe src="/embed/chart" sandbox="  ALLOW-SCRIPTS   allow-forms "></iframe>'
+    assert facts(sandboxed) == facts(same_sandbox)
+
+    # Escalating privileges: adding allow-same-origin
+    escalated = (
+        '<iframe src="/embed/chart" sandbox="allow-scripts allow-forms allow-same-origin"></iframe>'
+    )
+    escalate_diff = compare_structure(facts(sandboxed), facts(escalated))
+    assert escalate_diff.changed
+    escalated_sandbox = (
+        "iframe-sandbox:https://hospital.example.com/embed/chart:"
+        "allow-forms allow-same-origin allow-scripts"
+    )
+    assert escalated_sandbox in escalate_diff.added
+    assert expected_sandbox in escalate_diff.removed
+
+    # Empty sandbox attribute (strictest sandbox)
+    strict_sandbox = '<iframe src="/embed/chart" sandbox></iframe>'
+    strict_diff = compare_structure(facts(sandboxed), facts(strict_sandbox))
+    assert strict_diff.changed
+    assert "iframe-sandbox:https://hospital.example.com/embed/chart:" in strict_diff.added

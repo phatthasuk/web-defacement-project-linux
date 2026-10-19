@@ -142,19 +142,19 @@ async def run_check_attempt(
         finished_at = utcnow()
         try:
             with session_factory() as db:
-                attempt = db.get(CheckAttempt, attempt_id)
+                persisted_attempt = db.get(CheckAttempt, attempt_id)
                 target = db.get(Target, target_id)
-                if attempt is None or target is None:
+                if persisted_attempt is None or target is None:
                     raise RuntimeError(
                         f"Attempt or target disappeared during finalization: {attempt_id}"
                     )
-                attempt.finished_at = finished_at
-                attempt.status = result.status
-                attempt.error_code = result.error_code
-                attempt.error_message = result.error
-                attempt.http_status = result.http_status
-                attempt.check_result_id = result.check_result_id
-                attempt.snapshot_id = result.snapshot_id
+                persisted_attempt.finished_at = finished_at
+                persisted_attempt.status = result.status
+                persisted_attempt.error_code = result.error_code
+                persisted_attempt.error_message = result.error
+                persisted_attempt.http_status = result.http_status
+                persisted_attempt.check_result_id = result.check_result_id
+                persisted_attempt.snapshot_id = result.snapshot_id
 
                 # Do not let a stale run rewrite the schedule after a URL revision
                 # or a newer manual run has taken ownership.
@@ -218,8 +218,18 @@ async def run_check_attempt(
         if attempt_id is None:
             # If durable attempt creation itself failed, avoid leaving an
             # un-runnable run with a null deadline until the next restart.
-            with session_factory() as db:
-                target = db.get(Target, target_id)
-                if target is not None and target.check_run_id == run_id and target.next_check_at is None:
-                    target.next_check_at = utcnow() + timedelta(seconds=60)
-                    db.commit()
+            try:
+                with session_factory() as db:
+                    target = db.get(Target, target_id)
+                    if (
+                        target is not None
+                        and target.check_run_id == run_id
+                        and target.next_check_at is None
+                    ):
+                        target.next_check_at = utcnow() + timedelta(seconds=60)
+                        db.commit()
+            except Exception:
+                logger.exception(
+                    "Could not schedule fallback run for un-started attempt target %s",
+                    target_id,
+                )

@@ -38,9 +38,15 @@ export function TargetDetailPage() {
 
   const { data: target, isLoading: isTargetLoading, isError: isTargetError } = useTargetQuery(targetId);
   const { data: snapshots, isLoading: isSnapshotsLoading } = useTargetSnapshotsQuery(targetId);
-  const { data: baselineSnapshot, isLoading: isBaselineLoading } = useTargetBaselineSnapshotQuery(targetId);
-  const { data: baselines = [], isLoading: isBaselinesLoading } = useTargetBaselinesQuery(targetId);
-  const { data: checks, isLoading: isChecksLoading } = useTargetChecksQuery(targetId);
+  const { data: baselineSnapshot, isLoading: isBaselineLoading, isError: isBaselineError } = useTargetBaselineSnapshotQuery(targetId);
+  const { data: baselines = [], isLoading: isBaselinesLoading, isError: isBaselinesError } = useTargetBaselinesQuery(targetId);
+  const {
+    data: checks,
+    isLoading: isChecksLoading,
+    isError: isChecksError,
+    isFetching: isChecksFetching,
+    refetch: refetchChecks,
+  } = useTargetChecksQuery(targetId);
   const { data: appConfig } = useConfigQuery();
   const { data: tagData } = useTagsQuery();
   const { data: historicalChecks = [] } = useQuery({
@@ -103,7 +109,7 @@ export function TargetDetailPage() {
   const matchedBaseline = baselineMetadataQuery.data;
   const currentSnapshot = currentMetadataQuery.data;
   const triageActions = useTargetTriageActions({
-    targetId,
+    targetId: target?.id || targetId,
     targetStatus: target?.status ?? '',
     latestCheck: latestCheckItem ?? null,
     currentSnapshot: currentSnapshot ?? null,
@@ -177,7 +183,7 @@ export function TargetDetailPage() {
   }
 
   const latestCheck = checks?.[0] || null;
-  const isInitialBaseline = !latestCheck;
+  const isInitialBaseline = !isChecksError && !latestCheck;
   const latestCheckIsHistorical =
     target.status === 'Failed' || target.status === 'Availability Issue';
 
@@ -357,9 +363,9 @@ export function TargetDetailPage() {
                 {baselines.length} / 20 Active
               </span>
             </div>
-            {baselineMetadataQuery.isError ? (
+            {baselineMetadataQuery.isError || isBaselineError ? (
               <p className="text-rose-400 text-sm">Baseline metadata unavailable. Retry the page.</p>
-            ) : baselineMetadataQuery.isLoading ? (
+            ) : baselineMetadataQuery.isLoading || isBaselineLoading ? (
               <p className="text-slate-500 text-sm">Loading baseline metadata...</p>
             ) : matchedBaseline ? (
               <div className="space-y-3 text-sm">
@@ -392,7 +398,7 @@ export function TargetDetailPage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <span>Manage Baselines ({baselines.length})</span>
+              <span>Manage Baselines {isBaselinesError ? '(Error)' : `(${baselines.length})`}</span>
             </button>
           </div>
         </div>
@@ -501,6 +507,13 @@ export function TargetDetailPage() {
                   </p>
                 </div>
               </div>
+            ) : isChecksError ? (
+              <ArtifactError
+                title="Check results unavailable"
+                failedArtifacts={["latest check results"]}
+                onRetry={() => void refetchChecks()}
+                isRetrying={isChecksFetching}
+              />
             ) : pendingCandidate ? (
               <div className="text-slate-400 text-sm leading-relaxed">
                 <p className="font-semibold text-amber-300 mb-1">Baseline Review Required</p>

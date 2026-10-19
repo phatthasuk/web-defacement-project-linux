@@ -171,39 +171,39 @@ class CheckScheduler:
                 if not try_acquire_in_flight(target_id):
                     continue
 
-                if target.check_run_id is None:
-                    target.check_run_id = str(uuid.uuid4())
-                    target.check_run_source = "scheduled"
-                    target.check_attempt_count = 0
-                run_id = target.check_run_id
-                if run_id is None:
-                    raise RuntimeError(f"Target {target.id} has no reserved check run")
-                target.next_check_at = None
-                target_id_for_log = target.id
-                target_name = target.name
-                db.commit()
+                try:
+                    if target.check_run_id is None:
+                        target.check_run_id = str(uuid.uuid4())
+                        target.check_run_source = "scheduled"
+                        target.check_attempt_count = 0
+                    run_id = target.check_run_id
+                    if run_id is None:
+                        raise RuntimeError(f"Target {target.id} has no reserved check run")
+                    target.next_check_at = None
+                    target_id_for_log = target.id
+                    target_name = target.name
+                    db.commit()
 
-            source = "scheduled"
-            logger.info(
-                "Scheduler triggering check for target %s (%s); attempt %d",
-                target_id_for_log,
-                target_name,
-                1,
-            )
-            try:
-                task = asyncio.create_task(
-                    run_check_attempt(
+                    source = "scheduled"
+                    logger.info(
+                        "Scheduler triggering check for target %s (%s); attempt %d",
                         target_id_for_log,
-                        self.settings,
-                        run_id=run_id,
-                        initial_source=source,
-                        capture_func=capture_snapshot,
-                        session_factory=self.session_factory,
-                    ),
-                    name=f"scheduled_check_{target_id_for_log}",
-                )
-                self._background_tasks.add(task)
-                task.add_done_callback(self._on_task_done)
-            except Exception:
-                release_in_flight(target_id_for_log)
-                raise
+                        target_name,
+                        1,
+                    )
+                    task = asyncio.create_task(
+                        run_check_attempt(
+                            target_id_for_log,
+                            self.settings,
+                            run_id=run_id,
+                            initial_source=source,
+                            capture_func=capture_snapshot,
+                            session_factory=self.session_factory,
+                        ),
+                        name=f"scheduled_check_{target_id_for_log}",
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._on_task_done)
+                except Exception:
+                    release_in_flight(target_id)
+                    raise

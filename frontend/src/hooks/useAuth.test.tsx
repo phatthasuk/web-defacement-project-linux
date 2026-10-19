@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, apiFetch } from '../api/client';
 import { useAuth } from './authContext';
 import { AuthProvider } from './useAuth';
@@ -106,16 +106,25 @@ describe('AuthProvider logout', () => {
 });
 
 describe('AuthProvider focus revalidation', () => {
+  let currentTime = 1_000_000;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    currentTime = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
     mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
   });
 
-  it('revalidates on focus without showing loading or unmounting the authenticated view', async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('revalidates on focus after cooldown without showing loading or unmounting the authenticated view', async () => {
     mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
     renderAuth();
     await screen.findByText('user:operator');
 
+    currentTime += 16_000;
     fireEvent.focus(window);
 
     await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
@@ -128,6 +137,7 @@ describe('AuthProvider focus revalidation', () => {
     renderAuth();
     await screen.findByText('user:operator');
 
+    currentTime += 16_000;
     fireEvent.focus(window);
 
     await screen.findByText('logged-out');
@@ -142,6 +152,7 @@ describe('AuthProvider focus revalidation', () => {
     renderAuth();
     await screen.findByText('user:operator');
 
+    currentTime += 16_000;
     fireEvent.focus(window);
 
     await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
@@ -151,15 +162,106 @@ describe('AuthProvider focus revalidation', () => {
   });
 
   it('throttles repeated focus and visibility events during the cooldown', async () => {
-    mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
     renderAuth();
     await screen.findByText('user:operator');
 
+    currentTime += 5_000;
     fireEvent.focus(window);
     fireEvent.focus(window);
     fireEvent(document, new Event('visibilitychange'));
 
-    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(mockedApiFetch).toHaveBeenCalledTimes(1);
     expect(screen.getByText('user:operator')).toBeInTheDocument();
+  });
+
+  it('does not double-fire or double-invalidate on paired visibilitychange and focus events after cooldown', async () => {
+    mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
+    const queryClient = renderAuth();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    await screen.findByText('user:operator');
+
+    currentTime += 16_000;
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('user:operator')).toBeInTheDocument();
+  });
+
+  it('clears cached queries when role or must_change_password changes on revalidation', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ...authenticatedUser,
+      role: 'operator',
+    });
+    const queryClient = renderAuth();
+    await screen.findByText('user:operator');
+    queryClient.setQueryData(['targets'], [{ id: 'target-1' }]);
+
+    currentTime += 16_000;
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryData(['targets'])).toBeUndefined();
+
+    queryClient.setQueryData(['targets'], [{ id: 'target-2' }]);
+    mockedApiFetch.mockResolvedValueOnce({
+      ...authenticatedUser,
+      role: 'operator',
+      must_change_password: true,
+    });
+
+    currentTime += 16_000;
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(3));
+    expect(queryClient.getQueryData(['targets'])).toBeUndefined();
+  });
+
+  it('preserves cached queries on 403/404 access-denied events and clears session/cache on 401', async () => {
+    mockedApiFetch.mockResolvedValueOnce(authenticatedUser);
+    const queryClient = renderAuth();
+    await screen.findByText('user:operator');
+    queryClient.setQueryData(['targets'], [{ id: 'cached-target' }]);
+
+    window.dispatchEvent(new CustomEvent('api:access-denied', { detail: { status: 404 } }));
+    expect(queryClient.getQueryData(['targets'])).toEqual([{ id: 'cached-target' }]);
+    expect(screen.getByText('user:operator')).toBeInTheDocument();
+
+    window.dispatchEvent(new CustomEvent('api:access-denied', { detail: { status: 403 } }));
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryData(['targets'])).toEqual([{ id: 'cached-target' }]);
+    expect(screen.getByText('user:operator')).toBeInTheDocument();
+
+    window.dispatchEvent(new CustomEvent('api:access-denied', { detail: { status: 401 } }));
+    await screen.findByText('logged-out');
+    expect(queryClient.getQueryData(['targets'])).toBeUndefined();
+  });
+
+  it('ignores a stale in-flight focus revalidation response that resolves after logout', async () => {
+    let resolveBackgroundMe!: (value: typeof authenticatedUser) => void;
+    mockedApiFetch
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBackgroundMe = resolve;
+          })
+      )
+      .mockResolvedValueOnce({});
+
+    renderAuth();
+    await screen.findByText('user:operator');
+
+    currentTime += 16_000;
+    fireEvent.focus(window);
+    await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }));
+    await screen.findByText('logged-out');
+
+    resolveBackgroundMe(authenticatedUser);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(screen.getByText('logged-out')).toBeInTheDocument();
   });
 });
