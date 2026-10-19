@@ -329,9 +329,10 @@ independent states (see the status rules in
   `docs(plan): ...`. Types: feat, fix, refactor, style, docs, test, chore.
 - Keep commits focused; do not mix unrelated refactors with fixes.
 - Never commit `.env`, certificates, `backend/data/app.db*`, captured artifacts,
-  `node_modules`, `.venv`, `.pytest-tmp`, caches or build output. Note:
-  `backend/data/raw_screenshots/` is currently tracked by mistake and not in
-  `.gitignore`; do not add new files there to commits.
+  `node_modules`, `.venv`, `.pytest-tmp`, caches or build output.
+- Exception: `backend/data/raw_screenshots/` is tracked **on purpose** so the
+  Linux deployment receives it through git. Do not untrack it, add it to
+  `.gitignore` or delete its files. Commit changes there only when the user asks.
 - Never rewrite published history or force-push.
 
 ---
