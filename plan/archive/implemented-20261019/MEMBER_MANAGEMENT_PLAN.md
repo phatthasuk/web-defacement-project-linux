@@ -1,16 +1,22 @@
 # Member Management and Website Assignments — Standalone Add-on Plan
 
+> **Archived 2026-10-19 — code implemented:** Stored here because the scoped code changes exist. Tests and runtime acceptance remain open where recorded; track them in the [active status and backlog register](../../ROADMAP_STATUS_AND_BACKLOG.md). Historical Pending labels below describe the original report.
+
 **Original planning decision:** 2026-09-18.
-**Updated:** 2026-10-12 — standalone scope aligned with the current repository;
-self-registration requires explicit Admin approval.
-**Status:** Member Management and website assignments are planned, not implemented.
-Existing Tags functionality is implemented and will be reused.
+**Updated:** 2026-10-19 — reconciled against source baseline
+`ba1bbf2d8933293f115a2336df57b0d5430c30b7`.
+**Implemented:** Implemented for member administration, fixed roles, approval,
+website assignments, password lifecycle, session revocation and administrative audit.
+**Tested:** Partial; focused tests exist and historical reports cover subsets.
+The complete permission/migration acceptance matrix is not established as passed.
+**Runtime verified:** Not verified for full Linux/browser acceptance.
+See the [evidence and open backlog register](../../ROADMAP_STATUS_AND_BACKLOG.md).
 
 This document owns the scope, implementation sequence and acceptance criteria of
 the standalone Member Management add-on. It has no Stage number and no dependency
-on the core roadmap's Notification or auth-hardening stages. Its implementation
-start and release date are not yet set. This documentation update does not declare
-the observation period complete or authorise implementation or deployment.
+on the core roadmap's Notification or auth-hardening stages. Its
+release acceptance remains open. This documentation update does not declare
+the observation period complete or deploy the existing implementation.
 
 ## Delivery boundary and existing foundations
 
@@ -35,23 +41,24 @@ the observation period complete or authorise implementation or deployment.
 
 ## Current repository baseline
 
-Inspected on 2026-10-12. These are source-code findings, not confirmation of the
-database or application running on the Linux server. Proposed changes below are
-not implemented by this planning update.
+Reconciled on 2026-10-19. These are source findings, not confirmation of the live
+Linux database or application. Requirements below remain the acceptance contract;
+their imperative wording is not evidence that the implementation is absent.
 
-| Area | Current implementation | Required add-on change |
+| Area | Current implementation | Remaining acceptance / boundary |
 | :--- | :--- | :--- |
-| Users | [User model](../backend/app/models/user.py) has integer IDs, unique username, password hash, `is_active`, free-text `role` defaulting to `authenticated-user`, and lockout fields | Constrain roles; add registration approval, member metadata and password-change state; keep existing IDs and hashes |
-| Authentication | [Auth routes](../backend/app/api/routes/auth.py) provide login, logout and me; successful login creates a new session | Add registration with approval gate, password change/reset and successful-login timestamp; extend identity responses |
-| Sessions | [Dependencies](../backend/app/api/deps.py) check cookie token, expiry, revocation, CSRF and active user on requests | Reuse this validation and add central role/target scope checks; suspension must revoke sessions permanently |
-| Website access | Existing target/check/review/snapshot/tag routers require login but do not enforce roles or assignments | Apply the endpoint matrix below; add a separate user-target association |
-| Websites | [Target API](../backend/app/api/routes/targets.py) has list/page, status/tag filtering, history, baselines and soft disable | Add server-side name/URL search and assignee summaries; preserve list/page response shapes and existing filters |
-| Tags | Existing tags and target-tags tables, parent/sub-tags, any/all filters and `/tags` UI | Reuse schema and UI; scope options/counts and make all mutations Admin-only |
-| Artifacts | [Snapshot API](../backend/app/api/routes/snapshots.py) serves metadata, screenshot, raw screenshot and text; HTML is stored but has no download endpoint | Authorise through `Snapshot.target_id` before reading files; preserve path containment and screenshot handling; no new HTML endpoint required |
-| Config | [Config API](../backend/app/api/routes/config.py) exposes read-only detector thresholds and baseline cap used by target detail | Keep read access for both roles; no settings mutation API or settings editor is added here |
-| Frontend | [App](../frontend/src/App.tsx) protects routes by login; auth context carries a string role; TanStack Query holds target, snapshot, check and tag caches | Add role-aware routes and controls, required-password-change flow, and cache cleanup on access loss |
-| Background work | Scheduler and capture/check services run independently of interactive users | Continue monitoring every active target, including unassigned targets; assignments govern user access, not scheduling |
-| Audit | Auth/review events currently use Python logging; no persistent administrative audit model | Add transactional audit storage for this add-on; a separate audit browsing page is outside initial delivery |
+| Users | [User model](../../../backend/app/models/user.py) constrains admin/operator roles and approval state, with member/password/login timestamps | Verify legacy ID/hash preservation and last-active-Admin protection, including concurrency |
+| Authentication | [Auth routes](../../../backend/app/api/routes/auth.py) include pending registration and own password change; member routes include approval/reset | Verify registration denial/bypass cases, password/session lifecycle and role transitions |
+| Sessions | [Dependencies](../../../backend/app/api/deps.py) validate sessions, approval, active state and password-change gate | Verify permanent revocation after suspension/reset and reactivation behavior |
+| Website access | [Authorization](../../../backend/app/api/authorization.py) scopes targets through UserTargetAssignment; Admin-only routes exist | Exercise the complete endpoint matrix with real cookies/CSRF and nested IDs |
+| Websites | [Target API](../../../backend/app/api/routes/targets.py) has name/URL search, filters/sorting and assignee summaries | Verify counts/pagination and both roles; preserve response contracts |
+| Tags | Existing Tags reused with scoped visibility/counts and Admin mutation checks | Verify parent/sub-tag and any/all behavior under assignments |
+| Artifacts | [Snapshot API](../../../backend/app/api/routes/snapshots.py) checks target scope before serving metadata/screenshots/text | Verify raw/normalized/historical artifact access and path containment; no HTML endpoint required |
+| Config | Read-only config remains available to both roles | Verify Operator target detail; no settings editor in this add-on |
+| Frontend | Register, ChangePassword and Members pages; role-aware routes, assignment tabs and auth cache cleanup exist | Full browser acceptance and October 19 frontend test provenance remain open |
+| Background work | Scheduler remains independent of user assignment | Verify active unassigned sites still run |
+| Audit | MemberAuditEvent and transactional member/review events exist; Admin-only audit API | Verify actor/state/rollback/secret exclusion; audit browsing UI is a later add-on |
+| Migration | [Member migration](../../../backend/alembic/versions/c9d0e1f2a3b4_member_management.py) requires explicit legacy Admin mapping and revokes sessions | Test fresh and legacy Alembic paths, invalid/missing mapping, constraint/backfill and restore |
 
 Do not recreate existing Tags tables or add a new dashboard, notification channel,
 per-target scheduling editor or role editor in this work. Public registration is
@@ -297,11 +304,13 @@ Before upgrading an existing database:
 3. Revoke existing sessions during conversion, preserve account IDs/password hashes,
    and apply the database role constraint after mapping. Validate with a fresh Admin
    login and verify an Operator with no assignments sees an empty scope.
-4. Use SQLite-compatible Alembic batch changes where required. Existing startup
-   and account creation call `Base.metadata.create_all`, which cannot migrate old
-   tables; require migrations before either path and update the setup script.
-   Docker currently runs `alembic upgrade head` before Uvicorn, so mapping must be
-   prepared before container startup, without an interactive deployment prompt.
+4. Use SQLite-compatible Alembic batch changes where required. The member migration
+   and controlled setup script exist; startup requires an active approved Admin.
+   `Base.metadata.create_all` is not a substitute for migration acceptance.
+   Docker's command runs `alembic upgrade head` before Uvicorn, while first-time
+   bootstrap must run migrations and create an Admin before serving traffic, as
+   documented in the README. Prepare legacy mapping before migration; verify this
+   sequence on isolated fresh/legacy databases without an interactive startup prompt.
 
 Update `scripts/create_user.py` to accept only the fixed role values, default new
 ordinary users to Operator, and provide explicit controlled Admin setup/recovery.
@@ -343,7 +352,7 @@ Register new routers/models in the existing application entry points.
 
 The existing implementation provides a Tags page, badges below website URLs,
 parent/sub-tags and any/all filters. Reuse these structures and extend their
-authorisation. [Tags Management Plan](archive/TAGS_MANAGEMENT_PLAN.md) is historical
+authorisation. [Tags Management Plan](../TAGS_MANAGEMENT_PLAN.md) is historical
 design context; current add-on access requirements are owned here.
 
 - Allow multiple tags per website. Admins manage a shared tag catalogue with
@@ -391,6 +400,13 @@ through nested schemas or eager-loaded parent/child relationships.
   prompt. Keep loading/error/retry states and pagination consistent with existing pages.
 
 ## Implementation sequence
+
+The sequence below is the original delivery design, retained for traceability.
+Its code paths now exist. Remaining execution is acceptance and any fixes proven
+necessary by it: full permission/session matrix, fresh/legacy migrations and
+restore, current-source test evidence, then Linux/browser acceptance. Record
+results in the [register](../../ROADMAP_STATUS_AND_BACKLOG.md); do not repeat completed
+schema/API work solely because it appears in this sequence.
 
 1. Inspect the existing authentication, user model, target routes and artifact
    serving paths against this repository baseline. Confirm the endpoint matrix,
@@ -474,8 +490,8 @@ or report system is outside the initial Member Management release.
   an Operator without assignments, an Admin and an account requiring password change.
   Include pending and rejected applicants and attempts to bypass the approval gate.
   Check raw/normalised screenshots, text, historical snapshots/checks and nested IDs.
-- Existing API test fixtures currently seed `authenticated-user`. Update privileged
-  regression fixtures to an explicit Admin and add separate scoped Operator fixtures;
+- Privileged API test fixtures now seed an explicit Admin; a scoped Operator test
+  exists. Expand the acceptance matrix with separate scoped Operator fixtures;
   do not bypass authorisation dependencies to make existing tests pass.
 - Verify `/config` still supports Operator target detail, scoped parent/sub-tag
   filtering/counts, idempotent assignment writes, retained inactive assignments,

@@ -1,5 +1,10 @@
 # Review Issue: OK Targets Stop Automatic Checks
 
+> **Archived 2026-10-19 — code implemented:** Stored here because the scoped code changes exist. Tests and runtime acceptance remain open where recorded; track them in the [active status and backlog register](../../ROADMAP_STATUS_AND_BACKLOG.md). Historical Pending labels below describe the original report.
+
+> October 19 source reconciliation: primitive result IDs, attempt-finalization recovery and schedule-preservation changes exist. The October 16 implementation record reports 73 passing tests; UI/deployment recovery remains unverified. Original investigation and remediation steps below are retained for traceability.
+> See [current implementation, test/runtime status and open backlog](../../ROADMAP_STATUS_AND_BACKLOG.md).
+
 **Date**: October 16, 2026  
 **Original reviewer**: Argon (Gemini)  
 **Edited by**: Sol  

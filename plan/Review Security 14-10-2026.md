@@ -1,5 +1,8 @@
 # Review Security — 14-10-2026
 
+> October 19 source reconciliation: transfer/render budgets, Compose resource limits and actor-attributed audit exist. Statements below that these are absent are historical. Full container acceptance, form policy/owner association and report-specific follow-ups remain open; no finding is closed by this update.
+> See [current implementation, test/runtime status and open backlog](ROADMAP_STATUS_AND_BACKLOG.md).
+
 Review Date: October 14, 2026 (Asia/Bangkok)  
 Project: Web Defacement Monitoring System  
 Status: Audit report and remediation proposals — **partially addressed in source code (see Section 7), but not yet deployed or validated on real Linux/container environments; no finding is considered closed.**  
@@ -233,10 +236,10 @@ npm.cmd audit --json
 
 ## 6. Related Documentation
 
-- [Audit Round 2 — October 14, 2026](./Review%20Round%202%20By%20GPT%206.1%20Sol%2014-10-2026.md)
-- [Review By GPT 6.1 Sol 14-10-2026](./Review%20By%20GPT%206.1%20Sol%2014-10-2026.md)
-- [Project Plan](./PROJECT_PLAN.md)
-- [Member Management Plan](./MEMBER_MANAGEMENT_PLAN.md)
+- [Audit Round 2 — October 14, 2026](Review%20Round%202%20By%20GPT%206.1%20Sol%2014-10-2026.md)
+- [Review By GPT 6.1 Sol 14-10-2026](archive/implemented-20261019/Review%20By%20GPT%206.1%20Sol%2014-10-2026.md)
+- [Project Plan](PROJECT_PLAN.md)
+- [Member Management Plan](archive/implemented-20261019/MEMBER_MANAGEMENT_PLAN.md)
 
 ---
 

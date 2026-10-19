@@ -4,6 +4,13 @@
 **Status:** Hardening changes are implemented; runtime verification remains open.  
 **Last recorded environment:** Windows development host; Docker Desktop Linux engine was unavailable.
 
+**Reconciled 2026-10-19:** Implemented: Implemented for the listed hardening
+controls; Tested: Partial (historical subset reports; see provenance limitations);
+Runtime verified: Not verified for full Phase 5 acceptance. No new Linux check was
+run by this update. The [status register](ROADMAP_STATUS_AND_BACKLOG.md) links the
+open items and evidence rules. This remediation Phase 5 is separate from the core
+roadmap's Stage 5. Keep this document as owner of detailed runtime procedures.
+
 ## Purpose and scope
 
 Phase 5 verifies behavior that cannot be established by static checks or Windows-only tests. Run these checks on a Linux host with Docker Engine, using the deployment-compatible Compose configuration.

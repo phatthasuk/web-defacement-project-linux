@@ -4,6 +4,20 @@
 **Audit reference:** [Audit Report (Archive)](archive/codebase_audit_report_by_argon_comment_by_sol.md)  
 **Baseline Commit SHA:** `e2934813f81d5660dccf9cdd54273de58c4105ec` (`e293481` — `docs(plan): archive artifact cleanup dry-run and record plan review`)
 
+> **Evidence reconciliation, 2026-10-19:** The original implementation and
+> execution claims below are preserved as historical report content. Current
+> source baseline is `ba1bbf2d8933293f115a2336df57b0d5430c30b7`.
+> Section 6's frontend excerpt names files absent from the current source (for
+> example SettingsPage, AlertsPage, UsersPage and HtmlDiffViewer); the matching
+> count of 14 files does not establish provenance. Treat that execution as
+> **Tested: Evidence needs review**, not a current pass. Obtain original logs and
+> source revision or rerun before relying on the totals/phase gates. Backend and
+> static results are reported historical outcomes, not newly verified here; the
+> recorded cleanup result remains 7 passed / 2 failed on Windows. No application
+> tests were rerun by this documentation update. See the independent Implemented,
+> Tested and Runtime verified matrix and open work in the
+> [status register](ROADMAP_STATUS_AND_BACKLOG.md).
+
 ---
 
 ## 1. Baseline Environment Metadata
@@ -158,6 +172,11 @@ Phase 5 scope, prerequisites, verification steps, acceptance criteria, and execu
 ---
 
 ## 6. Verified Test Execution Record
+
+**Historical execution claims; provenance review open.** The heading and raw
+excerpt are retained for traceability. They do not override the reconciliation
+notice above or establish current-source verification. In particular, do not
+promote section 6.3's phase gates to current Passed status until evidence agrees.
 
 **Verification date:** October 19, 2026  
 **Baseline Commit SHA:** `e2934813f81d5660dccf9cdd54273de58c4105ec` (`e293481`)

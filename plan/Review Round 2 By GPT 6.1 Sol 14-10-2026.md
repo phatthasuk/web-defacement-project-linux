@@ -1,5 +1,8 @@
 # Audit Round 2 — October 14, 2026
 
+> October 19 source reconciliation: URL normalization, script execution classification and formaction extraction now exist. Form policy/owner association and deployment acceptance remain open. The original report below is retained as dated evidence, including its original workspace/test claims.
+> See [current implementation, test/runtime status and open backlog](ROADMAP_STATUS_AND_BACKLOG.md).
+
 Inspected current files following `Review By GPT 6.1 Sol 14-10-2026.md`, evaluating backend, frontend, capture/review workflows, authorization, and deployment configuration. Because no Git metadata is present in this folder, this review evaluates the file state directly rather than a git commit diff. No application source code was modified during this round; only findings documentation and offline probe scripts were added.
 
 ## New Findings

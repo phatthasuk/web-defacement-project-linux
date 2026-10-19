@@ -1,5 +1,10 @@
 # Review By GPT 6.1 Sol 14-10-2026
 
+> **Archived 2026-10-19 — code implemented:** Stored here because the scoped code changes exist. Tests and runtime acceptance remain open where recorded; track them in the [active status and backlog register](../../ROADMAP_STATUS_AND_BACKLOG.md). Historical Pending labels below describe the original report.
+
+> October 19 source reconciliation: source-level fixes now exist for baseline approval, authorization, capture and UI behavior. The original proposed-remediation status below is historical; full acceptance is not established by source inspection.
+> See [current implementation, test/runtime status and open backlog](../../ROADMAP_STATUS_AND_BACKLOG.md).
+
 Review Date: October 14, 2026 (Asia/Bangkok)  
 Project: Web Defacement Monitoring System  
 Status: Proposed remediation items from audit — source code not yet modified

@@ -58,7 +58,7 @@ Web Defacement Project/
 
 - `plan/PROJECT_PLAN.md` — the active core monitoring roadmap: current status, design principles, rejected approaches, and staged plan.
 - `plan/archive/TAGS_MANAGEMENT_PLAN.md` — specifications for website tags & hierarchical taxonomy (implemented).
-- `plan/MEMBER_MANAGEMENT_PLAN.md` — standalone add-on plan for Admin/Operator roles, member administration, website assignments, password/session lifecycle, audit events and scoped use of existing Tags. It owns its delivery sequence and acceptance criteria; implementation timing is not yet set.
+- [Archived Member Management plan](plan/archive/implemented-20261019/MEMBER_MANAGEMENT_PLAN.md) — scoped code is implemented; remaining permission, migration and runtime acceptance is tracked in the [active register](plan/ROADMAP_STATUS_AND_BACKLOG.md).
 - `plan/archive/` — all previous plans and review documents, kept for history.
 - `refinement/` — dated project summaries and remediation records.
 
@@ -66,4 +66,4 @@ Web Defacement Project/
 
 Stage 1 is complete: the automated scheduler (`CheckScheduler`) runs unattended checks with jitter, unchanged captures consume zero disk, availability issues are distinguished from defacements, and 3 deterministic detectors (Text, Visual, Structural) are active. The Tag Management feature is implemented. See [plan/PROJECT_PLAN.md](plan/PROJECT_PLAN.md) for the core roadmap and its last recorded operational update; this documentation update does not verify the live server's status.
 
-Member Management and website assignments remain planned as a standalone add-on, with no Stage number or dependency on notification delivery. See [plan/MEMBER_MANAGEMENT_PLAN.md](plan/MEMBER_MANAGEMENT_PLAN.md) for its scope and release criteria.
+Member Management and website assignments have source implementations as a standalone add-on, with no Stage number or dependency on notification delivery. The [plan](plan/archive/implemented-20261019/MEMBER_MANAGEMENT_PLAN.md) is archived because code implementation is complete; test and runtime acceptance remains open in the active register.

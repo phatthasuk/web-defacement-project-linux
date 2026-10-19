@@ -1,5 +1,10 @@
 # Remediation Plan: Page Flicker on Window Focus / Tab Switch
 
+> **Archived 2026-10-19 — code implemented:** Stored here because the scoped code changes exist. Tests and runtime acceptance remain open where recorded; track them in the [active status and backlog register](../../ROADMAP_STATUS_AND_BACKLOG.md). Historical Pending labels below describe the original report.
+
+> October 19 source reconciliation: silent revalidation, cooldown/event deduplication and auth-race/cache regression code exist. The original Pending Implementation label below is historical. Current frontend execution evidence needs review and browser acceptance remains unverified.
+> See [current implementation, test/runtime status and open backlog](../../ROADMAP_STATUS_AND_BACKLOG.md).
+
 **Date**: October 16, 2026  
 **Author**: Argon  
 **Document**: `plan/Page-Flicker-On-Window-Focus-Fix By Argon.md`  
@@ -22,7 +27,7 @@
 
 ### 2.1 ตัวจุดชนวน: `window.addEventListener('focus', ...)` ใน `frontend/src/hooks/useAuth.tsx`
 
-ใน [`AuthProvider`](../frontend/src/hooks/useAuth.tsx) มีการผูก Event Listener กับ `window` `'focus'`:
+ใน [`AuthProvider`](../../../frontend/src/hooks/useAuth.tsx) มีการผูก Event Listener กับ `window` `'focus'`:
 
 ```tsx
 useEffect(() => {
@@ -40,7 +45,7 @@ useEffect(() => {
 
 ### 2.2 ต้นเหตุหลักของการกระพริบ: การตั้ง `setIsLoading(true)` ซ้ำใน Background Revalidation
 
-ใน `useEffect` สำหรับตรวจสอบสิทธิ์ (`checkAuth` ใน [`frontend/src/hooks/useAuth.tsx`](../frontend/src/hooks/useAuth.tsx)):
+ใน `useEffect` สำหรับตรวจสอบสิทธิ์ (`checkAuth` ใน [`frontend/src/hooks/useAuth.tsx`](../../../frontend/src/hooks/useAuth.tsx)):
 
 ```tsx
 useEffect(() => {
@@ -69,7 +74,7 @@ useEffect(() => {
 }, [applyAuth, reloadKey]);
 ```
 
-เมื่อ `setIsLoading(true)` ถูกเรียกในจังหวะที่มี `user` อยู่แล้ว คอมโพเนนต์ [`ProtectedRoute`](../frontend/src/App.tsx) ใน `frontend/src/App.tsx` จะเข้าเงื่อนไข `if (isLoading)` ทันที:
+เมื่อ `setIsLoading(true)` ถูกเรียกในจังหวะที่มี `user` อยู่แล้ว คอมโพเนนต์ [`ProtectedRoute`](../../../frontend/src/App.tsx) ใน `frontend/src/App.tsx` จะเข้าเงื่อนไข `if (isLoading)` ทันที:
 
 ```tsx
 if (isLoading) {

@@ -5,7 +5,7 @@ Status: Planning Document (Archived Design Record)
 
 This document planned the introduction of Tags to organize, filter, and categorize monitored websites. It specified a dedicated tag management view at `/tags`, navigation links in the application header, and visual tag badges displayed beneath URLs in the Target / URL column.
 
-> Historical Note (October 12, 2026): The Tagging system has been implemented. This document is retained for architectural and design history. Development sequences and preliminary statuses reflect historical milestones. The standalone [Member Management](../MEMBER_MANAGEMENT_PLAN.md#tags-and-filtering) specification governs role-based access control (Admin/Operator) layered atop this tagging system.
+> Historical Note (October 12, 2026): The Tagging system has been implemented. This document is retained for architectural and design history. Development sequences and preliminary statuses reflect historical milestones. The standalone [Member Management](implemented-20261019/MEMBER_MANAGEMENT_PLAN.md#tags-and-filtering) specification governs role-based access control (Admin/Operator) layered atop this tagging system.
 
 This design establishes many-to-many tag associations per website without altering operational access permissions.
 
