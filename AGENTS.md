@@ -283,12 +283,14 @@ Rules:
 - Capture/SSRF/container behavior can only be truly verified on Linux in Docker.
   Windows results for those areas are partial evidence; say so.
 - For visible UI changes, run the app (`.claude/launch.json` defines `backend`
-  on :8000 and `frontend` on :5173) and check it in a browser. Before startup,
-  explicitly set `DATABASE_URL` to a disposable test database outside
-  `backend/data/`, `DATA_DIR` to a separate disposable artifact directory, and
-  `SCHEDULER_ENABLED=false` in the backend process environment. The launch file
-  does not configure this isolation, and pytest's `conftest.py` does not apply
-  to a standalone app. Use only local fixtures or mocked API/capture responses;
+  on :8000 and `frontend` on :5173) and check it in a browser. Use the
+  `backend-isolated` configuration (`backend/scripts/run_isolated_dev.py`), not
+  `backend`: it points `DATABASE_URL` and `DATA_DIR` at a disposable directory
+  outside `backend/data/` (system temp, or `WDM_ISOLATED_DIR`), sets
+  `SCHEDULER_ENABLED=false`, and migrates that database. Create its first Admin
+  with `python scripts/run_isolated_dev.py --create-user <name> --role admin`.
+  The plain `backend` configuration uses live data, and pytest's `conftest.py`
+  does not apply to a standalone app. Use only local fixtures or mocked API/capture responses;
   do not trigger captures against real monitored sites. Any required capture
   must use the existing SSRF protections in an isolated test environment.
   Test accounts may be created only in the disposable test database. If browser

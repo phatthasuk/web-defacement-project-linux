@@ -9,6 +9,13 @@
       "port": 8000
     },
     {
+      "name": "backend-isolated",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["scripts/run_isolated_dev.py"],
+      "cwd": "backend",
+      "port": 8000
+    },
+    {
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
