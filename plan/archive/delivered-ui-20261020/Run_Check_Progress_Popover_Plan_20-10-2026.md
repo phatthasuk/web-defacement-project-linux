@@ -1,6 +1,14 @@
 # Run Check Progress Popover — Implementation Plan
 
+**Archived:** 2026-10-20 (Asia/Bangkok). Delivered UI work; implementation/test/runtime statuses remain as recorded. Remaining work is tracked in [the active status register](../../ROADMAP_STATUS_AND_BACKLOG.md#archived-ui-deliveries-and-remaining-work).
+
 **Created:** 2026-10-20 (Asia/Bangkok)
+
+**Latest direction, 2026-10-20:** The
+[Run Check Popover removal plan](../../Run_Check_Popover_Removal_Plan_20-10-2026.md)
+now owns frontend retirement and replacement access. This supersedes prior
+hold/continued-Popover instructions below. Historical evidence and backend
+progress reporting remain applicable; removal has not been implemented.
 
 **Source inspected:** `31cf6b279f075b13d830ad658ba40825e0c6f127`
 
@@ -8,7 +16,7 @@
 
 **Implemented:** Partial (remaining feature acceptance; the four reviewed code defects are fixed). **Tested:** Partial. **Runtime verified:** Not verified.
 
-**Completed corrective implementation:** [Archived remediation plan](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md).
+**Completed corrective implementation:** [Archived remediation plan](../implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md).
 
 **Next layout work:** [Right Active Checks plan](Dashboard_Right_Active_Checks_Plan_20-10-2026.md).
 This feature plan stays active for its outstanding acceptance. The future right
@@ -21,7 +29,7 @@ Show real check progress when an operator hovers over the `Checking` badge in
 the target table. Keep the existing table compact. Support keyboard focus and
 click/tap so the same information is accessible without a mouse.
 
-This is a standalone operator UX add-on. The core [project plan](PROJECT_PLAN.md)
+This is a standalone operator UX add-on. The core [project plan](../../PROJECT_PLAN.md)
 continues to own Stage priorities. This document does not add a Stage, close a
 finding or authorize changes to the active Stage 2 observation run. Implementation
 was requested on 2026-10-20; production deployment remains outside this change.
@@ -229,8 +237,8 @@ backend suite passed 276 tests and failed two cleanup-artifact tests because
 Windows lacks the symlink privilege and POSIX directory operations those tests
 require. Targeted Ruff and mypy passed; full Ruff still reports six existing
 findings in an applied migration. Isolated browser and Linux runtime verification
-remain open. See the [remediation plan](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md)
-and [remediation evidence](../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md).
+remain open. See the [remediation plan](../implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md)
+and [remediation evidence](../../../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md).
 
 ## 7. Verification plan and acceptance criteria
 
@@ -313,5 +321,5 @@ acceptance checks have evidence or explicit reported limitations.
 - Procedure: inspected the source paths in section 2 and reviewed the core
   roadmap, status register, security review and Linux runtime verification plan.
 - Implementation record: see
-  [`refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md`](../refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md)
+  [`refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md`](../../../refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md)
   for exact commands, results and limitations.

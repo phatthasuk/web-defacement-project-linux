@@ -4,7 +4,7 @@
 
 **Source baseline:** `31cf6b279f075b13d830ad658ba40825e0c6f127` plus the uncommitted progress feature.
 
-**Parent:** [Feature plan](../../Run_Check_Progress_Popover_Plan_20-10-2026.md)
+**Parent:** [Feature plan](../delivered-ui-20261020/Run_Check_Progress_Popover_Plan_20-10-2026.md)
 
 **Evidence:** [Follow-up review](../../../refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md#follow-up-review--2026-10-20-asiabangkok)
 
@@ -13,7 +13,7 @@
 **Archived:** 2026-10-20 at the project owner's request because the four scoped
 code fixes are implemented. Archiving does not close remaining acceptance or
 change any test/runtime status. The active [status register](../../ROADMAP_STATUS_AND_BACKLOG.md)
-and [right-panel plan](../../Dashboard_Right_Active_Checks_Plan_20-10-2026.md)
+and [right-panel plan](../delivered-ui-20261020/Dashboard_Right_Active_Checks_Plan_20-10-2026.md)
 retain the relevant follow-up work.
 
 The parent feature remains Partial. Existing test passes cover other behavior;

@@ -1,8 +1,15 @@
 # Active Checks Inline Card Progress — Implementation Plan
 
+**Archived:** 2026-10-20 (Asia/Bangkok). Delivered UI work; implementation/test/runtime statuses remain as recorded. Remaining work is tracked in [the active status register](../../ROADMAP_STATUS_AND_BACKLOG.md#archived-ui-deliveries-and-remaining-work).
+
 **Created:** 2026-10-20 (Asia/Bangkok)  
 **Source inspected:** `a074e0b9a7c797759b9881dc6ec9afd78600e30d`  
 **Implemented:** Partial. **Tested:** Partial. **Runtime verified:** Partial.
+
+**Latest direction, 2026-10-20:** The separate
+[Run Check Popover removal plan](../../Run_Check_Popover_Removal_Plan_20-10-2026.md)
+supersedes earlier Popover-hold statements below. It does not change this plan's
+completed-card retention or verification results.
 
 ## 1. Purpose and ownership
 
@@ -142,7 +149,7 @@ retained and cached data and returns focus safely. No API, backend, database,
 Popover or capture behavior changed.
 
 Implementation and verification details are in the
-[execution record](../refinement/10-20-2026/Active-Checks-Inline-Card-Progress-20-10-2026.md).
+[execution record](../../../refinement/10-20-2026/Active-Checks-Inline-Card-Progress-20-10-2026.md).
 The focused component tests cover inline placement, one expanded card, switching
 and manual collapse persistence, terminal retention expiry, missing progress,
 refresh failure and 404 clearing. Full frontend tests, lint and build pass.

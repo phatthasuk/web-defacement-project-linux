@@ -114,6 +114,7 @@ describe('TargetDetailPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/');
 
     // Re-establish the default (both artifacts load fine).
     useQueryMock.mockReturnValue({
@@ -205,6 +206,62 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('button', { name: /Approve as Baseline/i })).not.toHaveTextContent('snap-latest');
     expect(screen.getByText('View Full Details →')).toBeInTheDocument();
     expect(screen.getByText('View Full Details →').closest('a')).toHaveAttribute('href', '/checks/check-1');
+  });
+
+  it('opens and focuses inline progress when entering through the progress anchor', async () => {
+    const currentTime = '2026-10-20T00:00:00Z';
+    vi.mocked(useTargetDetailHooks.useTargetQuery).mockReturnValue({
+      data: {
+        ...mockTarget,
+        status: 'Checking',
+        url_revision: 1,
+        check_run_id: 'run-1',
+        check_progress: {
+          run_id: 'run-1', url_revision: 1, attempt_number: 1, phase: 'comparing', state: 'running',
+          attempt_started_at: currentTime, phase_started_at: currentTime, updated_at: currentTime,
+          finished_at: null, outcome: null, error_code: null,
+          steps: [{ phase: 'opening_page', state: 'completed', started_at: currentTime, finished_at: currentTime }],
+        },
+      },
+      isLoading: false,
+      isError: false,
+      isRefetchError: false,
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useTargetQuery>);
+    window.history.replaceState({}, '', '/targets/target-1#check-progress');
+
+    render(<BrowserRouter><TargetDetailPage /></BrowserRouter>);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Check progress' })).toHaveFocus());
+    expect(screen.getByText('Compare with baselines')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View check progress' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['a different run', { run_id: 'stale-run', url_revision: 1 }],
+    ['a different URL revision', { run_id: 'run-1', url_revision: 0 }],
+  ])('does not display progress from %s', (_description, identity) => {
+    const currentTime = '2026-10-20T00:00:00Z';
+    vi.mocked(useTargetDetailHooks.useTargetQuery).mockReturnValue({
+      data: {
+        ...mockTarget,
+        status: 'Checking',
+        url_revision: 1,
+        check_run_id: 'run-1',
+        check_progress: {
+          ...identity, attempt_number: 1, phase: 'comparing', state: 'running',
+          attempt_started_at: currentTime, phase_started_at: currentTime, updated_at: currentTime,
+          finished_at: null, outcome: null, error_code: null, steps: [],
+        },
+      },
+      isLoading: false,
+      isError: false,
+      isRefetchError: false,
+    } as unknown as ReturnType<typeof useTargetDetailHooks.useTargetQuery>);
+
+    render(<BrowserRouter><TargetDetailPage /></BrowserRouter>);
+
+    expect(screen.getByText('Progress details unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Compare with baselines')).not.toBeInTheDocument();
   });
 
   it('uses the Operator auth fixture to hide Admin-only target controls', () => {

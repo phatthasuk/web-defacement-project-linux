@@ -1,8 +1,15 @@
 # Dashboard Right Active Checks Panel — Implementation Plan
 
+**Archived:** 2026-10-20 (Asia/Bangkok). Delivered UI work; implementation/test/runtime statuses remain as recorded. Remaining work is tracked in [the active status register](../../ROADMAP_STATUS_AND_BACKLOG.md#archived-ui-deliveries-and-remaining-work).
+
 **Created:** 2026-10-20 (Asia/Bangkok)
 **Source inspected:** `06adbb6923713acf327da7798591da58462fe229` plus current local changes.
 **Implemented:** Partial. **Tested:** Partial. **Runtime verified:** Partial.
+
+**Latest direction, 2026-10-20:** The user now requests planning frontend
+Popover removal under the [removal plan](../../Run_Check_Popover_Removal_Plan_20-10-2026.md).
+It supersedes the prior Popover hold below; completed-card retention, this
+plan's remaining acceptance and production-test evidence are unchanged.
 
 ## 1. Purpose and ownership
 
@@ -12,10 +19,10 @@ Show detailed progress in the right panel on wide screens; retain the existing
 popover on narrower screens and on the target detail page initially.
 
 This plan owns the responsive layout, activity feed and replacement of the
-wide-screen list popover. The separate [left Overview plan](Dashboard_Left_Overview_Plan_20-10-2026.md)
+wide-screen list popover. The separate [left Overview plan](../../Dashboard_Left_Overview_Plan_20-10-2026.md)
 owns summary counts and filter shortcuts. Implement this plan first and support
-the left panel as an optional later addition. The [core roadmap](PROJECT_PLAN.md)
-and [status register](ROADMAP_STATUS_AND_BACKLOG.md) retain Stage ownership.
+the left panel as an optional later addition. The [core roadmap](../../PROJECT_PLAN.md)
+and [status register](../../ROADMAP_STATUS_AND_BACKLOG.md) retain Stage ownership.
 The user has explicitly paused all Popover changes until Right Active Checks
 passes production testing. Accordingly, the existing popover remains in place
 and is not modified by this implementation; the planned wide-screen replacement
@@ -36,8 +43,8 @@ included in this implementation.
 - The [popover feature plan](Run_Check_Progress_Popover_Plan_20-10-2026.md)
   remains Partial. Four reviewed code defects were remediated, but its wider
   browser, authorization/lifecycle and Linux acceptance must not be presumed
-  complete. See the [archived remediation plan](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md)
-  and [evidence](../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md).
+  complete. See the [archived remediation plan](../implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md)
+  and [evidence](../../../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md).
 
 ## 3. Layout and responsive behavior
 
@@ -195,7 +202,7 @@ replacement, one-surface behavior and the original plan's 1600 px breakpoint
 remain unresolved. The 1680 px threshold is provisional pending browser
 measurement.
 
-Verification record: [Right Active Checks execution](../refinement/10-20-2026/Dashboard-Right-Active-Checks-20-10-2026.md).
+Verification record: [Right Active Checks execution](../../../refinement/10-20-2026/Dashboard-Right-Active-Checks-20-10-2026.md).
 Full test suites and targeted static checks were run on Windows. Browser
 verification could not start because Vite/esbuild failed with `spawn EPERM`.
 Linux runtime and production acceptance were not run. Production testing remains

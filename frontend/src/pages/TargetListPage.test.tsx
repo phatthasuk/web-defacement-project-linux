@@ -124,6 +124,28 @@ describe('TargetListPage', () => {
     expect(screen.getByText('https://example.com')).toBeInTheDocument();
   });
 
+  it('shows plain status badges and a detail progress link on narrow layouts', () => {
+    const checkingTarget = {
+      ...mockTargets[0],
+      status: 'Checking' as const,
+      url_revision: 2,
+      check_run_id: 'run-1',
+      check_progress: { run_id: 'run-1', url_revision: 2, state: 'running', phase: 'capturing', steps: [] },
+    };
+    vi.mocked(useTargetsHooks.usePaginatedTargetsQuery).mockReturnValue({
+      data: { items: [checkingTarget], total: 1, limit: 50, offset: 0 },
+      isLoading: false,
+      isPlaceholderData: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useTargetsHooks.usePaginatedTargetsQuery>);
+
+    render(<BrowserRouter><TargetListPage /></BrowserRouter>);
+
+    expect(screen.getByText('Checking', { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View progress' })).toHaveAttribute('href', '/targets/target-1#check-progress');
+    expect(screen.queryByRole('button', { name: 'View check progress' })).not.toBeInTheDocument();
+  });
+
   it('polls the Active Checks panel only at wide desktop widths', () => {
     const previousWidth = window.innerWidth;
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1800 });

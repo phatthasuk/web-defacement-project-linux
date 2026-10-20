@@ -5,7 +5,7 @@
 The target list showed only `Checking`, so operators could not tell whether a
 manual or scheduled check was waiting for capacity, capturing the page, comparing
 baselines, saving a result, or waiting for retry. The approved feature plan is
-[Run Check Progress Popover](../../plan/Run_Check_Progress_Popover_Plan_20-10-2026.md).
+[Run Check Progress Popover](../../plan/archive/delivered-ui-20261020/Run_Check_Progress_Popover_Plan_20-10-2026.md).
 
 ## Implementation
 

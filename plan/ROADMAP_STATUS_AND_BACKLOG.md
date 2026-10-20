@@ -58,7 +58,7 @@ them as skips or passes because POSIX behavior is expected to differ.
 
 | Capability | Implemented | Tested | Runtime verified | Source / remaining evidence |
 | :--- | :--- | :--- | :--- | :--- |
-| Run Check progress popover | Partial | Partial | Not verified | Four defects from the 2026-10-20 follow-up review are fixed with regressions. Focused backend suites: 54 passed; frontend: 100 tests passed, lint and build passed; targeted Ruff and mypy passed. Full backend suite: 276 passed, 2 Windows-specific cleanup-artifact failures (symlink privilege and POSIX directory operations). Full Ruff has six existing findings in an applied migration. Isolated browser and Linux runtime verification remain open. See [feature record](../refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md) and [remediation record](../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md). |
+| Run Check progress UI and Popover retirement | Implemented (scoped frontend) | Partial | Not verified | The Popover was removed from list/detail pages; Active Checks and target detail share `CheckProgressDetails`, and narrow layouts link to the detail anchor. Current frontend: 107 tests passed, lint/build passed on Windows Node 24.7.0 (the repo requests Node 20); isolated browser matrix and Linux runtime remain open. Historical Popover backend/full-suite evidence and failures remain in the [prior feature record](../refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md). See [removal execution record](../refinement/10-20-2026/Run-Check-Popover-Removal-20-10-2026.md) and [remediation record](../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md). |
 | Capture, stabilization and overlay preservation | Implemented | Partial | Not verified | `capture.py`, `page_ready.py`, `overlays.py`; capture tests exist and historical reports cover subsets. Validate actual browser/image and unchanged/changed fixtures. No automatic dismiss clicks, even with legacy DISMISS_OVERLAYS=true. |
 | SSRF socket pinning, WebSocket/service-worker blocking | Implemented | Partial | Partial | `ssrf_proxy.py`, `capture.py`; historical Linux subset reported. Full production-equivalent egress, redirects and WebRTC remain under Phase 5. |
 | Capture budgets and container hardening | Implemented | Partial | Not verified | Proxy transfer cap, pre-screenshot dimensions/pixels, pre-serialization DOM cap, Compose CPU/memory/PID limits. B-11c width cap deferred; effective cgroups/seccomp need runtime evidence. |
@@ -100,18 +100,39 @@ authoritative plan; named human assignees remain to be allocated when work start
 | Deferred — F8 / Stage 6 / SEC-01/SEC-06 worker isolation | Core roadmap; revisit before multiple workers/hosts or when isolation requirements demand it | Durable queue/leases, DB duplicate suppression and browser/API separation remain architectural work; persisted retries do not satisfy them. Preserve the single-worker constraint until verified replacement exists. |
 | Deferred — auth audit scope / MFA / OIDC | Core roadmap Stage 5.3/6 and member scope | Review whether auth failure/login/logout coverage and username canonicalization are required beyond current member/review audit. Record exact gaps; normalized_username is absent but case-sensitive matching is intentional in the member plan. Do not silently change identity semantics. |
 
-## Proposed add-ons awaiting feature scope
+## Archived UI deliveries and remaining work
 
-These are proposals, not confirmed defects or authorization to implement them.
-They do not receive Stage numbers. Scope and acceptance must be agreed in their
-own plans before implementation.
+**Archive update, 2026-10-20 (Asia/Bangkok):** At the user's request, moved three
+delivered/superseded UI feature plans to `plan/archive/delivered-ui-20261020/`.
+Their recorded Partial statuses and historical failures/exclusions remain
+unchanged. The active items below explicitly retain unfinished requirements;
+archive placement does not authorize claiming completion or production testing.
+
+| Archived delivery | Active remaining work and closure criteria |
+| :--- | :--- |
+| [Right Active Checks](archive/delivered-ui-20261020/Dashboard_Right_Active_Checks_Plan_20-10-2026.md) | Validate responsive center/table widths, provisional 1680 px threshold, the undelivered wide-layout form-relocation proposal and form-state preservation. Complete pagination, off-page/filter, run/revision, registry-loss and access/session acceptance. Popover retirement is owned by the active removal plan. Keep Linux/production acceptance open. |
+| [Inline card progress](archive/delivered-ui-20261020/Active_Checks_Inline_Card_Progress_Plan_20-10-2026.md) | Complete width/zoom/touch/reduced-motion tests, clipped-card scrolling, page changes while expanded and keyboard focus after expiry/access changes. Preserve the reported terminal-card retention concern as open; the deleted cleanup plan is not an active implementation instruction. Existing 60-second behavior has not been changed. |
+| [Original Progress Popover](archive/delivered-ui-20261020/Run_Check_Progress_Popover_Plan_20-10-2026.md) | The active removal plan supersedes further frontend Popover delivery. Preserve applicable progress identity, authorization, retry/finalization and unavailable-state regressions in replacements; backend progress telemetry remains required. Historical Linux/backend acceptance stays open under its original owner. |
+
+## Proposed add-ons and accepted UI follow-ups
+
+**Latest direction, 2026-10-20:** The user asked to execute the
+[Run Check Popover removal plan](Run_Check_Popover_Removal_Plan_20-10-2026.md).
+Its scoped frontend implementation is recorded below; completed-card retention
+and historical verification results are unchanged.
+
+Except for the accepted Popover removal direction recorded below, these are
+proposals rather than confirmed defects or implementation authorization. They do
+not receive Stage numbers. Scope and acceptance must be agreed in their own plans
+before implementation.
 
 | Proposal | Dependency / intended outcome |
 | :--- | :--- |
-| [Active Checks inline card progress](Active_Checks_Inline_Card_Progress_Plan_20-10-2026.md) | Partial: one-card inline expansion, collapse/switch, terminal retention, run/revision matching and 404 cleanup implemented. Frontend 107 tests passed; lint/build passed; Chromium 153 mocked UI check at 1920×1080 passed. Width/accessibility matrix and production acceptance remain open; Popover hold is unchanged. See [execution record](../refinement/10-20-2026/Active-Checks-Inline-Card-Progress-20-10-2026.md). |
-| [Right Active Checks panel](Dashboard_Right_Active_Checks_Plan_20-10-2026.md) | Partial: scoped/paginated active-check endpoint and wide-screen activity panel implemented. Backend 279 passed/2 Windows cleanup failures; frontend 104 passed, lint/build passed; targeted Ruff/mypy passed. Browser launch failed (`spawn EPERM`); Linux and production acceptance not run. Popover replacement/deduplication is explicitly paused by the user until production testing passes. See [execution record](../refinement/10-20-2026/Dashboard-Right-Active-Checks-20-10-2026.md). |
+| [Run Check Popover removal](Run_Check_Popover_Removal_Plan_20-10-2026.md) | Scoped frontend retirement implemented: plain badges, shared progress presenter, inline detail anchor and narrow-screen link. Implemented scoped; Tested Partial (107 frontend tests, lint/build); Runtime verified Not verified. Node 20 and isolated browser matrix remain open; no production operation included. See [execution record](../refinement/10-20-2026/Run-Check-Popover-Removal-20-10-2026.md). |
+| [Active Checks inline card progress](archive/delivered-ui-20261020/Active_Checks_Inline_Card_Progress_Plan_20-10-2026.md) | Partial: one-card inline expansion, collapse/switch, terminal retention, run/revision matching and 404 cleanup implemented. Frontend 107 tests passed; lint/build passed; Chromium 153 mocked UI check at 1920×1080 passed. Width/accessibility matrix and production acceptance remain open. The earlier Popover hold was superseded by the user's 2026-10-20 removal-plan execution request. See [execution record](../refinement/10-20-2026/Active-Checks-Inline-Card-Progress-20-10-2026.md) and the [Popover removal record](../refinement/10-20-2026/Run-Check-Popover-Removal-20-10-2026.md). |
+| [Right Active Checks panel](archive/delivered-ui-20261020/Dashboard_Right_Active_Checks_Plan_20-10-2026.md) | Partial: scoped/paginated active-check endpoint and wide-screen activity panel implemented. Backend 279 passed/2 Windows cleanup failures; frontend 104 passed, lint/build passed; targeted Ruff/mypy passed. Browser launch failed (`spawn EPERM`); Linux and production acceptance not run. The earlier Popover hold was superseded by the user's 2026-10-20 removal-plan execution request. See [execution record](../refinement/10-20-2026/Dashboard-Right-Active-Checks-20-10-2026.md) and the [Popover removal record](../refinement/10-20-2026/Run-Check-Popover-Removal-20-10-2026.md). |
 | [Left Overview panel](Dashboard_Left_Overview_Plan_20-10-2026.md) | Separate later delivery after the shared right-panel layout: authorization-scoped full-population status counts and matching table-filter shortcuts. Never derive global counts from paginated rows. Implemented Not started; Tested Not run; Runtime verified Not verified. |
-| [Existing Run Check progress popover](Run_Check_Progress_Popover_Plan_20-10-2026.md) | Four reviewed defects fixed with focused regressions; their [remediation plan is archived](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md). Feature remains Implemented Partial; Tested Partial; Runtime verified Not verified. Remaining feature/lifecycle/authorization acceptance and isolated browser/Linux checks stay open; wide-screen layout replacement is owned by the new right-panel plan. |
+| [Existing Run Check progress popover](archive/delivered-ui-20261020/Run_Check_Progress_Popover_Plan_20-10-2026.md) | Four reviewed defects fixed with focused regressions; their [remediation plan is archived](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md). Historical feature evidence remains Implemented Partial; Tested Partial; Runtime verified Not verified. Backend/lifecycle/authorization acceptance and isolated browser/Linux checks stay open; frontend retirement is recorded in the new removal plan. |
 | Monitoring health and Stage 2 report | Report overdue/stuck checks, detector availability, attempt causes and per-target growth; separate liveness/readiness and external monitor failure paths. Supports Stage 2. |
 | Structured findings | Persist detector facts, availability and policy/version context to explain and group changes without parsing summary text. Review storage/privacy requirements. |
 | Incident Inbox | Group recurring findings, assign owners and track resolution independently of transient target status. New dangerous findings must not be swallowed by deduplication. |

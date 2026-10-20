@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   useTargetQuery,
@@ -15,7 +15,7 @@ import { useUpdateTargetMutation, useDeleteTargetMutation, useTriggerCheckMutati
 import { getSnapshotText } from '../api/snapshots';
 import { listTargetChecks } from '../api/checks';
 import { TargetStatusBadge } from '../components/TargetStatusBadge';
-import { CheckProgressPopover } from '../components/CheckProgressPopover';
+import { CheckProgressDetails } from '../components/CheckProgressDetails';
 import { ScreenshotCompare } from '../components/ScreenshotCompare';
 import { BaselineManagerModal } from '../components/BaselineManagerModal';
 import { EditTargetModal } from '../components/EditTargetModal';
@@ -61,6 +61,11 @@ export function TargetDetailPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const progressHeadingRef = useRef<HTMLHeadingElement>(null);
+  const handledProgressAnchorRef = useRef<string | null>(null);
+  const [progressOpen, setProgressOpen] = useState<boolean | null>(null);
+  const [progressElapsed, setProgressElapsed] = useState(0);
 
   const updateTargetMutation = useUpdateTargetMutation();
   const deleteTargetMutation = useDeleteTargetMutation();
@@ -152,6 +157,35 @@ export function TargetDetailPage() {
     if (!isSameSnapshot && latestTextQuery.isError) void latestTextQuery.refetch();
   };
 
+  useEffect(() => {
+    const progress = target?.check_progress;
+    const matches = Boolean(progress && progress.url_revision === target?.url_revision && (!target?.check_run_id || progress.run_id === target.check_run_id));
+    const hasSurface = Boolean(
+      target && ((target.check_run_id && (target.status === 'Checking' || progress?.state === 'queued' || progress?.state === 'retry_wait' || target.next_check_at)) || (matches && progress?.state === 'finished')),
+    );
+    const anchorKey = `${target?.id ?? ''}${location.hash}`;
+    if (location.hash !== '#check-progress' || !hasSurface || handledProgressAnchorRef.current === anchorKey) return;
+    handledProgressAnchorRef.current = anchorKey;
+    setProgressOpen(true);
+    const frame = window.requestAnimationFrame(() => {
+      progressHeadingRef.current?.focus();
+      document.getElementById('check-progress')?.scrollIntoView?.({ block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash, target]);
+
+  useEffect(() => {
+    const progress = target?.check_progress;
+    const matches = Boolean(progress && progress.url_revision === target?.url_revision && (!target?.check_run_id || progress.run_id === target.check_run_id));
+    const active = Boolean(target?.check_run_id && (target.status === 'Checking' || (matches && (progress?.state === 'queued' || progress?.state === 'retry_wait')) || target.next_check_at));
+    const startedAt = matches ? progress?.attempt_started_at : undefined;
+    if (!(progressOpen ?? active) || !active || !startedAt) return;
+    const update = () => setProgressElapsed(Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000)));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [progressOpen, target]);
+
   if (isTargetLoading || isSnapshotsLoading || isBaselineLoading || isChecksLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
@@ -189,6 +223,20 @@ export function TargetDetailPage() {
     target.status === 'Failed' || target.status === 'Availability Issue';
 
   const isChecking = target.status === 'Checking';
+  const rawProgress = target.check_progress;
+  const progressMatchesTarget = Boolean(
+    rawProgress &&
+    rawProgress.url_revision === target.url_revision &&
+    (!target.check_run_id || rawProgress.run_id === target.check_run_id) &&
+    (target.check_run_id || rawProgress.state === 'finished'),
+  );
+  const checkProgress = progressMatchesTarget ? rawProgress ?? null : null;
+  const hasProgressSurface = Boolean(
+    (target.check_run_id && (isChecking || checkProgress?.state === 'queued' || checkProgress?.state === 'retry_wait' || target.next_check_at)) ||
+    checkProgress?.state === 'finished',
+  );
+  const progressIsActive = Boolean(target.check_run_id && (isChecking || checkProgress?.state === 'queued' || checkProgress?.state === 'retry_wait' || target.next_check_at));
+  const progressDetailsOpen = progressOpen ?? progressIsActive;
 
   const handleTriggerCheck = async () => {
     setTriageError(null);
@@ -255,12 +303,10 @@ export function TargetDetailPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-3xl font-extrabold text-slate-100">{target.name}</h1>
-            {target.status === 'Checking' || target.check_progress?.state === 'finished' ? (
-              <CheckProgressPopover target={target} refreshFailed={isTargetRefetchError}><TargetStatusBadge status={target.status as TargetStatus} /></CheckProgressPopover>
-            ) : <TargetStatusBadge
+            <TargetStatusBadge
               status={target.status as TargetStatus}
               title={target.status === 'Failed' ? target.last_error || undefined : undefined}
-            />}
+            />
           </div>
           <div>
             <a
@@ -355,6 +401,30 @@ export function TargetDetailPage() {
         {/* Action Buttons */}
         <TargetTriageActionButtons actions={triageActions} className="lg:shrink-0" />
       </header>
+
+      {hasProgressSurface && <details
+        id="check-progress"
+        open={progressDetailsOpen}
+        onToggle={(event) => setProgressOpen(event.currentTarget.open)}
+        className="mb-8 max-w-3xl rounded-xl border border-slate-800 bg-slate-900/50"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400">
+          <span>
+            <h2 ref={progressHeadingRef} tabIndex={-1} className="inline font-semibold text-slate-100">Check progress</h2>
+            <span className="ml-2 text-xs text-slate-400">{checkProgress?.state === 'finished' ? `Finished · ${checkProgress.outcome ?? target.status}` : checkProgress?.state === 'retry_wait' || target.next_check_at ? 'Retry scheduled' : checkProgress?.state === 'queued' ? 'Waiting for a check slot' : 'In progress'}</span>
+          </span>
+          <span className="shrink-0 text-xs text-cyan-300">{progressDetailsOpen ? 'Hide details' : 'Show details'}</span>
+        </summary>
+        <div className="border-t border-slate-800 px-4 py-4">
+          <CheckProgressDetails
+            progress={checkProgress}
+            status={target.status}
+            nextCheckAt={target.next_check_at}
+            elapsed={progressElapsed}
+            refreshFailed={isTargetRefetchError}
+          />
+        </div>
+      </details>}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Baseline Snapshot Card */}

@@ -8,7 +8,7 @@
 
 Use the wide-screen left area for a compact Overview of the current results of
 monitors the signed-in user can access. Counts act as shortcuts into the central
-target table. The [right Active Checks plan](Dashboard_Right_Active_Checks_Plan_20-10-2026.md)
+target table. The [right Active Checks plan](archive/delivered-ui-20261020/Dashboard_Right_Active_Checks_Plan_20-10-2026.md)
 owns live check progress and the shared responsive layout; implement that layout
 first, then add this independently deliverable panel.
 

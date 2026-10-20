@@ -5,16 +5,17 @@ Revises: c9d0e1f2a3b4
 Create Date: 2026-10-15
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
+
 revision: str = "7e3a9c2f1b64"
-down_revision: Union[str, None] = "c9d0e1f2a3b4"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "c9d0e1f2a3b4"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -23,7 +24,10 @@ def upgrade() -> None:
     op.add_column("targets", sa.Column("next_check_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("targets", sa.Column("check_run_id", sa.String(length=36), nullable=True))
     op.add_column("targets", sa.Column("check_run_source", sa.String(length=20), nullable=True))
-    op.add_column("targets", sa.Column("check_attempt_count", sa.Integer(), nullable=False, server_default="0"))
+    op.add_column(
+        "targets",
+        sa.Column("check_attempt_count", sa.Integer(), nullable=False, server_default="0"),
+    )
     targets = sa.table(
         "targets",
         sa.column("is_active", sa.Boolean()),

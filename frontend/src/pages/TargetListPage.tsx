@@ -8,7 +8,6 @@ import {
   useTriggerCheckMutation,
 } from '../hooks/useTargets';
 import { TargetStatusBadge } from '../components/TargetStatusBadge';
-import { CheckProgressPopover } from '../components/CheckProgressPopover';
 import { EditTargetModal } from '../components/EditTargetModal';
 import { DeleteTargetModal } from '../components/DeleteTargetModal';
 import { Target } from '../types/target';
@@ -64,7 +63,7 @@ export function TargetListPage() {
     return () => window.clearTimeout(timeoutId);
   }, [searchQuery]);
 
-  const { data: paginatedData, isLoading, isPlaceholderData, isError, isRefetchError, error } = usePaginatedTargetsQuery(
+  const { data: paginatedData, isLoading, isPlaceholderData, isError, error } = usePaginatedTargetsQuery(
     pageSize,
     offset,
     false,
@@ -501,20 +500,19 @@ export function TargetListPage() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          {target.status === 'Checking' || target.check_progress?.state === 'finished' ? (
-                            <CheckProgressPopover target={target} refreshFailed={isRefetchError}>
-                              <TargetStatusBadge status={target.status} />
-                            </CheckProgressPopover>
-                          ) : <TargetStatusBadge status={target.status} title={target.last_error || undefined} />}
+                          <TargetStatusBadge status={target.status} title={target.last_error || undefined} />
                           {target.check_run_id && target.check_progress?.state === 'queued' && target.status !== 'Checking' && (
-                            <span className="ml-2 inline-flex align-middle"><CheckProgressPopover target={target}><span className="rounded-full border border-cyan-800/50 bg-cyan-950/50 px-2 py-1 text-xs text-cyan-300">Waiting</span></CheckProgressPopover></span>
+                            <span className="ml-2 inline-flex align-middle rounded-full border border-cyan-800/50 bg-cyan-950/50 px-2 py-1 text-xs text-cyan-300">Waiting</span>
                           )}
                           {target.check_run_id && target.next_check_at && target.status !== 'Checking' && (
                             <span className="mt-1 block text-xs text-amber-400" title={target.last_error || undefined}>
-                              <CheckProgressPopover target={target} retry refreshFailed={isRefetchError}>
-                                <span className="hover:text-amber-200 underline decoration-dotted underline-offset-2">Retry {Math.min((target.check_attempt_count ?? 0) + 1, target.check_retry_max_attempts ?? 3)}/{target.check_retry_max_attempts ?? 3} · {formatDateTime(target.next_check_at)}</span>
-                              </CheckProgressPopover>
+                              Retry {Math.min((target.check_attempt_count ?? 0) + 1, target.check_retry_max_attempts ?? 3)}/{target.check_retry_max_attempts ?? 3} · {formatDateTime(target.next_check_at)}
                             </span>
+                          )}
+                          {!wideActivityLayout && target.check_run_id && (target.status === 'Checking' || target.check_progress?.state === 'queued' || target.check_progress?.state === 'retry_wait' || Boolean(target.next_check_at)) && (
+                            <Link to={`/targets/${target.id}#check-progress`} className="mt-1 block w-fit text-xs text-cyan-300 underline underline-offset-2 hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+                              View progress
+                            </Link>
                           )}
                           {!target.check_run_id && target.next_check_at && (
                             <span className="mt-1 block text-xs text-slate-500">
