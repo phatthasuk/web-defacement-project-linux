@@ -11,6 +11,28 @@ export type TargetStatus =
 
 import type { Tag } from './tag';
 
+export interface CheckProgressStep {
+  phase: string;
+  state: 'running' | 'completed' | 'skipped' | 'failed' | 'retry_wait';
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface CheckProgress {
+  run_id: string;
+  url_revision: number;
+  attempt_number: number;
+  phase: string;
+  state: 'queued' | 'running' | 'retry_wait' | 'finished';
+  attempt_started_at: string;
+  phase_started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  outcome: string | null;
+  error_code: string | null;
+  steps: CheckProgressStep[];
+}
+
 export interface Target {
   id: string;
   name: string;
@@ -26,6 +48,7 @@ export interface Target {
   check_run_source?: string | null;
   check_attempt_count?: number;
   check_retry_max_attempts?: number;
+  check_progress?: CheckProgress | null;
   latest_structure_change_score?: number | null;
   tags?: Tag[];
   assignees?: { id:number; username:string; display_name:string; is_active:boolean }[] | null;

@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 from app.models import Snapshot, Target
 from app.services.attempts import run_check_attempt
 from app.services.capture.capture import capture_snapshot
+from app.services.check_progress import register_queued
 from app.services.concurrency import (
     SessionFactory,
     release_in_flight,
@@ -182,7 +183,9 @@ class CheckScheduler:
                     target.next_check_at = None
                     target_id_for_log = target.id
                     target_name = target.name
+                    url_revision = target.url_revision
                     db.commit()
+                    register_queued(target_id_for_log, run_id, url_revision)
 
                     source = "scheduled"
                     logger.info(

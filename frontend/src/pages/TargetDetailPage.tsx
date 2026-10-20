@@ -15,6 +15,7 @@ import { useUpdateTargetMutation, useDeleteTargetMutation, useTriggerCheckMutati
 import { getSnapshotText } from '../api/snapshots';
 import { listTargetChecks } from '../api/checks';
 import { TargetStatusBadge } from '../components/TargetStatusBadge';
+import { CheckProgressPopover } from '../components/CheckProgressPopover';
 import { ScreenshotCompare } from '../components/ScreenshotCompare';
 import { BaselineManagerModal } from '../components/BaselineManagerModal';
 import { EditTargetModal } from '../components/EditTargetModal';
@@ -36,7 +37,7 @@ export function TargetDetailPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
-  const { data: target, isLoading: isTargetLoading, isError: isTargetError } = useTargetQuery(targetId);
+  const { data: target, isLoading: isTargetLoading, isError: isTargetError, isRefetchError: isTargetRefetchError } = useTargetQuery(targetId);
   const { data: snapshots, isLoading: isSnapshotsLoading } = useTargetSnapshotsQuery(targetId);
   const { data: baselineSnapshot, isLoading: isBaselineLoading, isError: isBaselineError } = useTargetBaselineSnapshotQuery(targetId);
   const { data: baselines = [], isLoading: isBaselinesLoading, isError: isBaselinesError } = useTargetBaselinesQuery(targetId);
@@ -254,10 +255,12 @@ export function TargetDetailPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-3xl font-extrabold text-slate-100">{target.name}</h1>
-            <TargetStatusBadge
+            {target.status === 'Checking' || target.check_progress?.state === 'finished' ? (
+              <CheckProgressPopover target={target} refreshFailed={isTargetRefetchError}><TargetStatusBadge status={target.status as TargetStatus} /></CheckProgressPopover>
+            ) : <TargetStatusBadge
               status={target.status as TargetStatus}
               title={target.status === 'Failed' ? target.last_error || undefined : undefined}
-            />
+            />}
           </div>
           <div>
             <a

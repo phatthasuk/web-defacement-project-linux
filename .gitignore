@@ -28,6 +28,7 @@ backend/data/html/*
 # Backend test/temp output
 backend/data/test-artifacts/
 backend/.pytest-tmp/
+backend/.pytest-*/
 
 # Node
 node_modules/

@@ -8,6 +8,16 @@ from app.core.config import Settings
 from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.models import CheckAttempt, Target
+from app.services.check_progress import (
+    ProgressRecord,
+    begin_attempt,
+    bind_progress,
+    finish_progress,
+    get_progress_record,
+    register_queued,
+    reset_progress,
+    retry_wait,
+)
 from app.services.checks import CaptureFunc, TargetCheckResult
 from app.services.concurrency import SessionFactory, release_in_flight, run_checks_for_targets
 
@@ -24,7 +34,7 @@ def _recover_attempt_finalization_failure(
     error: Exception,
     settings: Settings,
     session_factory: SessionFactory,
-) -> None:
+) -> bool:
     """Best-effort recovery after result recording failed in its own transaction."""
     try:
         with session_factory() as db:
@@ -32,7 +42,10 @@ def _recover_attempt_finalization_failure(
             target = db.get(Target, target_id)
             finished_at = utcnow()
 
-            if attempt is not None and attempt.finished_at is None:
+            if attempt is None:
+                return False
+
+            if attempt.finished_at is None:
                 attempt.finished_at = finished_at
                 attempt.status = result.status
                 attempt.error_code = "attempt_persistence_error"
@@ -59,6 +72,7 @@ def _recover_attempt_finalization_failure(
                 target.check_attempt_count = 0
 
             db.commit()
+        return True
     except Exception:
         logger.exception(
             "Could not recover failed attempt finalization target=%s run=%s; original error: %s",
@@ -66,6 +80,7 @@ def _recover_attempt_finalization_failure(
             run_id,
             error,
         )
+        return False
 
 
 def _is_retryable(error_code: str | None) -> bool:
@@ -95,6 +110,9 @@ async def run_check_attempt(
     attempt_id: str | None = None
     url_revision: int | None = None
     attempt_number = 0
+    progress: ProgressRecord | None = None
+    progress_token = None
+    result: TargetCheckResult | None = None
     try:
         with session_factory() as db:
             target = db.get(Target, target_id)
@@ -118,6 +136,11 @@ async def run_check_attempt(
             db.add(attempt)
             db.commit()
             attempt_id = attempt.id
+            progress = get_progress_record(target_id, run_id, url_revision)
+            if progress is None:
+                progress = register_queued(target_id, run_id, url_revision, attempt_number)
+            begin_attempt(progress, attempt_number)
+            progress_token = bind_progress(progress)
 
         try:
             results = await run_checks_for_targets(
@@ -140,6 +163,8 @@ async def run_check_attempt(
             )
 
         finished_at = utcnow()
+        should_finish_progress = False
+        should_retry_progress = False
         try:
             with session_factory() as db:
                 persisted_attempt = db.get(CheckAttempt, attempt_id)
@@ -181,6 +206,7 @@ async def run_check_attempt(
                                 ),
                             )
                         target.next_check_at = finished_at + timedelta(seconds=delay)
+                        should_retry_progress = True
                         logger.info(
                             "Retry scheduled target=%s attempt=%d/%d due=%s error=%s",
                             target_id,
@@ -197,10 +223,15 @@ async def run_check_attempt(
                         target.check_run_id = None
                         target.check_run_source = None
                         target.check_attempt_count = 0
+                should_finish_progress = target.check_run_id != run_id
                 db.commit()
+            if should_retry_progress and progress is not None:
+                retry_wait(progress, result.error_code)
+            elif should_finish_progress:
+                finish_progress(result.status, result.error_code)
         except Exception as exc:
             logger.exception("Could not finalize check attempt for target %s", target_id)
-            _recover_attempt_finalization_failure(
+            recovered = _recover_attempt_finalization_failure(
                 target_id=target_id,
                 run_id=run_id,
                 url_revision=url_revision,
@@ -210,11 +241,23 @@ async def run_check_attempt(
                 settings=settings,
                 session_factory=session_factory,
             )
+            if progress is not None:
+                finish_progress(
+                    result.status,
+                    result.error_code if recovered else "attempt_finalization_unconfirmed",
+                )
         return result
     finally:
         # run_checks_for_targets also releases this reservation on normal paths;
         # discard is idempotent and covers failures before it is entered.
         release_in_flight(target_id)
+        if progress is not None and progress.state in {"queued", "running"}:
+            if result is not None:
+                finish_progress(result.status, result.error_code)
+            else:
+                finish_progress("Failed", "check_interrupted")
+        if progress_token is not None:
+            reset_progress(progress_token)
         if attempt_id is None:
             # If durable attempt creation itself failed, avoid leaving an
             # un-runnable run with a null deadline until the next restart.
@@ -228,6 +271,14 @@ async def run_check_attempt(
                     ):
                         target.next_check_at = utcnow() + timedelta(seconds=60)
                         db.commit()
+                if progress is None:
+                    progress = get_progress_record(target_id, run_id, url_revision or 0)
+                if progress is not None and progress.state == "queued":
+                    token = bind_progress(progress)
+                    try:
+                        finish_progress("Failed", "attempt_start_failed")
+                    finally:
+                        reset_progress(token)
             except Exception:
                 logger.exception(
                     "Could not schedule fallback run for un-started attempt target %s",

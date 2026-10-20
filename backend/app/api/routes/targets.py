@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
 from app.services.audit import ACTION_BASELINE_DEMOTED, record_review_event
+from app.services.check_progress import get_progress
 from app.services.concurrency import is_target_in_flight
 
 router = APIRouter(prefix="/targets", tags=["targets"], dependencies=[Depends(get_current_user)])
@@ -308,7 +309,10 @@ def _resolve_tags(db: Session, tag_ids: list[str]) -> list[Tag]:
 
 def _target_read(db: Session, user: User, target: Target) -> TargetRead:
     result = TargetRead.model_validate(target).model_copy(
-        update={"check_retry_max_attempts": get_settings().CHECK_RETRY_MAX_ATTEMPTS}
+        update={
+            "check_retry_max_attempts": get_settings().CHECK_RETRY_MAX_ATTEMPTS,
+            "check_progress": get_progress(target.id, target.check_run_id, target.url_revision),
+        }
     )
     if user.role == "admin":
         assignees = db.execute(

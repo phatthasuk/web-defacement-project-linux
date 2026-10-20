@@ -51,6 +51,7 @@ them as skips or passes because POSIX behavior is expected to differ.
 
 | Capability | Implemented | Tested | Runtime verified | Source / remaining evidence |
 | :--- | :--- | :--- | :--- | :--- |
+| Run Check progress popover | Partial | Partial | Not verified | Four defects from the 2026-10-20 follow-up review are fixed with regressions. Focused backend suites: 54 passed; frontend: 100 tests passed, lint and build passed; targeted Ruff and mypy passed. Full backend suite: 276 passed, 2 Windows-specific cleanup-artifact failures (symlink privilege and POSIX directory operations). Full Ruff has six existing findings in an applied migration. Isolated browser and Linux runtime verification remain open. See [feature record](../refinement/10-20-2026/Run-Check-Progress-Popover-20-10-2026.md) and [remediation record](../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md). |
 | Capture, stabilization and overlay preservation | Implemented | Partial | Not verified | `capture.py`, `page_ready.py`, `overlays.py`; capture tests exist and historical reports cover subsets. Validate actual browser/image and unchanged/changed fixtures. No automatic dismiss clicks, even with legacy DISMISS_OVERLAYS=true. |
 | SSRF socket pinning, WebSocket/service-worker blocking | Implemented | Partial | Partial | `ssrf_proxy.py`, `capture.py`; historical Linux subset reported. Full production-equivalent egress, redirects and WebRTC remain under Phase 5. |
 | Capture budgets and container hardening | Implemented | Partial | Not verified | Proxy transfer cap, pre-screenshot dimensions/pixels, pre-serialization DOM cap, Compose CPU/memory/PID limits. B-11c width cap deferred; effective cgroups/seccomp need runtime evidence. |
@@ -100,6 +101,7 @@ own plans before implementation.
 
 | Proposal | Dependency / intended outcome |
 | :--- | :--- |
+| [Run Check progress popover](Run_Check_Progress_Popover_Plan_20-10-2026.md) | Source added 2026-10-20 (Asia/Bangkok); four reviewed defects fixed with focused regressions. Feature: Implemented Partial; Tested Partial; Runtime verified Not verified. Remediation: Implemented complete; Tested Partial; Runtime verified Not verified. Isolated browser and Linux runtime checks remain open. Standalone UX add-on; no Stage or production observation changes. |
 | Monitoring health and Stage 2 report | Report overdue/stuck checks, detector availability, attempt causes and per-target growth; separate liveness/readiness and external monitor failure paths. Supports Stage 2. |
 | Structured findings | Persist detector facts, availability and policy/version context to explain and group changes without parsing summary text. Review storage/privacy requirements. |
 | Incident Inbox | Group recurring findings, assign owners and track resolution independently of transient target status. New dangerous findings must not be swallowed by deduplication. |

@@ -39,6 +39,7 @@ from app.services.capture.page_ready import (
     wait_page_ready,
 )
 from app.services.capture.ssrf_proxy import SsrfProxy
+from app.services.check_progress import set_phase, skip_phase
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +455,7 @@ async def _capture_snapshot_impl(
                 # Navigate only as far as domcontentloaded, then hand over to
                 # wait_page_ready, which freezes animations and settles layout.
                 # "networkidle" alone returns while carousels are still moving.
+                set_phase("opening_page")
                 response = await page.goto(
                     url,
                     timeout=settings.PAGE_TIMEOUT_SECONDS * 1000,
@@ -479,6 +481,7 @@ async def _capture_snapshot_impl(
             readiness: dict[str, int | bool] = {}
             if settings.PAGE_STABILIZE_ENABLED:
                 wait_options = build_wait_options(settings)
+                set_phase("waiting_page_ready")
                 readiness = await wait_page_ready(page, wait_options)
                 raise_navigation_error()
                 if main_navigation_generation != completed_navigation_generation:
@@ -486,6 +489,10 @@ async def _capture_snapshot_impl(
 
                 # Page-controlled dismissal handlers can erase defacement.
                 # Preserve overlays in every artifact used by the detectors.
+            else:
+                skip_phase("waiting_page_ready")
+
+            set_phase("capturing")
 
             redirect_count = max(
                 redirect_depth(response.request) if response else 0,

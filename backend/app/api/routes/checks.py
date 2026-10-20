@@ -19,6 +19,7 @@ from app.core.status import STATUS_CHECKING
 from app.models import CheckAttempt, CheckResult, Snapshot, User
 from app.schemas import CheckAttemptRead, CheckResultRead, CheckTriggerResponse
 from app.services.attempts import run_check_attempt
+from app.services.check_progress import register_queued
 from app.services.checks import CaptureFunc
 from app.services.concurrency import (
     SessionFactory,
@@ -57,6 +58,7 @@ async def trigger_target_check(
         target.check_attempt_count = 0
         target.next_check_at = None
         db.commit()
+        register_queued(target.id, run_id, target.url_revision)
         background_tasks.add_task(
             run_check_attempt,
             target_id,

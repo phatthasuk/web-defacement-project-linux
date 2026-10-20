@@ -8,6 +8,7 @@ import {
   useTriggerCheckMutation,
 } from '../hooks/useTargets';
 import { TargetStatusBadge } from '../components/TargetStatusBadge';
+import { CheckProgressPopover } from '../components/CheckProgressPopover';
 import { EditTargetModal } from '../components/EditTargetModal';
 import { DeleteTargetModal } from '../components/DeleteTargetModal';
 import { Target } from '../types/target';
@@ -55,7 +56,7 @@ export function TargetListPage() {
     return () => window.clearTimeout(timeoutId);
   }, [searchQuery]);
 
-  const { data: paginatedData, isLoading, isPlaceholderData, isError, error } = usePaginatedTargetsQuery(
+  const { data: paginatedData, isLoading, isPlaceholderData, isError, isRefetchError, error } = usePaginatedTargetsQuery(
     pageSize,
     offset,
     false,
@@ -433,10 +434,10 @@ export function TargetListPage() {
                             <button
                               data-testid={`run-check-${target.id}`}
                               onClick={() => handleRunCheck(target.id)}
-                              disabled={target.status === 'Checking' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id)}
+                              disabled={target.status === 'Checking' || target.check_progress?.state === 'queued' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id)}
                               className="whitespace-nowrap px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:border-slate-600 hover:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                             >
-                              {target.status === 'Checking' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id) ? 'Checking...' : 'Run Check'}
+                              {target.status === 'Checking' || target.check_progress?.state === 'queued' || (triggerCheckMutation.isPending && triggerCheckMutation.variables === target.id) ? 'Checking...' : 'Run Check'}
                             </button>
                             <button
                               type="button"
@@ -491,13 +492,19 @@ export function TargetListPage() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          <TargetStatusBadge
-                            status={target.status}
-                            title={target.last_error || undefined}
-                          />
+                          {target.status === 'Checking' || target.check_progress?.state === 'finished' ? (
+                            <CheckProgressPopover target={target} refreshFailed={isRefetchError}>
+                              <TargetStatusBadge status={target.status} />
+                            </CheckProgressPopover>
+                          ) : <TargetStatusBadge status={target.status} title={target.last_error || undefined} />}
+                          {target.check_run_id && target.check_progress?.state === 'queued' && target.status !== 'Checking' && (
+                            <span className="ml-2 inline-flex align-middle"><CheckProgressPopover target={target}><span className="rounded-full border border-cyan-800/50 bg-cyan-950/50 px-2 py-1 text-xs text-cyan-300">Waiting</span></CheckProgressPopover></span>
+                          )}
                           {target.check_run_id && target.next_check_at && target.status !== 'Checking' && (
                             <span className="mt-1 block text-xs text-amber-400" title={target.last_error || undefined}>
-                              Retry {Math.min((target.check_attempt_count ?? 0) + 1, target.check_retry_max_attempts ?? 3)}/{target.check_retry_max_attempts ?? 3} · {formatDateTime(target.next_check_at)}
+                              <CheckProgressPopover target={target} retry refreshFailed={isRefetchError}>
+                                <span className="hover:text-amber-200 underline decoration-dotted underline-offset-2">Retry {Math.min((target.check_attempt_count ?? 0) + 1, target.check_retry_max_attempts ?? 3)}/{target.check_retry_max_attempts ?? 3} · {formatDateTime(target.next_check_at)}</span>
+                              </CheckProgressPopover>
                             </span>
                           )}
                           {!target.check_run_id && target.next_check_at && (

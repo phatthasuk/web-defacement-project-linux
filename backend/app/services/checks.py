@@ -34,6 +34,7 @@ from app.core.status import (
 from app.core.time import utcnow
 from app.models import CheckAttempt, CheckResult, Snapshot, Target
 from app.services.capture.capture import CaptureResult, capture_snapshot
+from app.services.check_progress import set_phase, skip_phase
 from app.services.diff import compare_snapshot_artifacts
 from app.services.diff.diff import DiffResult
 
@@ -228,6 +229,7 @@ async def run_target_check(
     db.commit()
 
     try:
+        set_phase("opening_page")
         capture = await capture_func(target.url, settings, settings.data_dir_path)
     except Exception as exc:
         target.last_error = str(exc)
@@ -256,6 +258,7 @@ async def run_target_check(
 
     # Only a successful document can become a trusted baseline or comparison.
     if capture.http_status is None or not 200 <= capture.http_status < 300:
+        set_phase("saving_result")
         _discard_snapshot_files(capture)
         error_msg = (
             f"Target returned HTTP {capture.http_status}"
@@ -291,6 +294,8 @@ async def run_target_check(
         baseline = get_baseline_snapshot(db, target_id, target.url_revision)
 
         if baseline is None:
+            skip_phase("comparing")
+            set_phase("saving_result")
             # Every new URL revision, including the first, must be reviewed
             # before it can be trusted as a baseline.
             perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
@@ -363,6 +368,7 @@ async def run_target_check(
 
         # Diffing is CPU-bound (image comparison); run it off the event loop so it does
         # not stall other concurrent checks sharing this loop.
+        set_phase("comparing")
         comparisons = await asyncio.to_thread(
             _diff_against_baselines,
             baseline_artifacts,
@@ -382,6 +388,7 @@ async def run_target_check(
 
         matched_baseline_id, diff = select_best_baseline(comparisons, settings)
         has_changes = diff_severity(diff, settings) > 1.0
+        set_phase("saving_result")
 
         if len(comparisons) > 1:
             logger.debug(

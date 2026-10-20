@@ -355,6 +355,14 @@ async def test_attempt_finalization_failure_recovers_target_and_attempt(
             assert attempt.error_code == "attempt_persistence_error"
             assert "injected attempt write failure" in (attempt.error_message or "")
             assert attempt.status == result.status
+        from app.services.check_progress import get_progress_record
+
+        progress = get_progress_record(target_id, None, 1)
+        assert progress is not None
+        assert progress.state == "finished"
+        assert progress.outcome == result.status
+        assert progress.error_code is None
+        assert not any(step.state == "running" for step in progress.steps)
     finally:
         event.remove(Session, "before_commit", fail_first_finalization)
         engine.dispose()

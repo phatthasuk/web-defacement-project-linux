@@ -73,6 +73,7 @@ class TargetRead(BaseModel):
     check_run_source: str | None = None
     check_attempt_count: int = 0
     check_retry_max_attempts: int = 3
+    check_progress: dict[str, object] | None = None
     latest_structure_change_score: float | None = None
     allowed_domains: list[str] | None = None
     tags: list[TagRead] = Field(default_factory=list)
