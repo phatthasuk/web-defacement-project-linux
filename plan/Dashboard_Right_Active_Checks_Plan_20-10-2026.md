@@ -2,7 +2,7 @@
 
 **Created:** 2026-10-20 (Asia/Bangkok)
 **Source inspected:** `06adbb6923713acf327da7798591da58462fe229` plus current local changes.
-**Implemented:** Partial. **Tested:** Partial. **Runtime verified:** Not verified.
+**Implemented:** Partial. **Tested:** Partial. **Runtime verified:** Partial.
 
 ## 1. Purpose and ownership
 
@@ -65,6 +65,14 @@ On resize, preserve selection where possible and safely restore focus if its
 current control disappears. A plain row badge remains visible at every width.
 
 ## 4. Activity content and interaction
+
+**Follow-up design, 2026-10-20:** The user requested planning to expand details
+inside the selected activity card and remove the panel's separate bottom detail
+block. The [inline card progress plan](Active_Checks_Inline_Card_Progress_Plan_20-10-2026.md)
+owns this focused frontend change and its acceptance. Its implementation and
+verification are Partial; the desktop mocked-browser check passed, while the
+full lifecycle/accessibility/production acceptance remains open. It does not
+release the Popover hold or close parent-plan acceptance.
 
 - Label scope “All active monitors you can access”; activity ignores table search,
   tags, status filters and the current table page. An off-table active target

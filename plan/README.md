@@ -12,12 +12,15 @@ runtime acceptance can remain open and is tracked in the active register.
 - [Round 2 review](Review%20Round%202%20By%20GPT%206.1%20Sol%2014-10-2026.md)
 - [Security review](Review%20Security%2014-10-2026.md)
 - [Right Active Checks panel and responsive progress](Dashboard_Right_Active_Checks_Plan_20-10-2026.md)
+- [Active Checks inline card progress](Active_Checks_Inline_Card_Progress_Plan_20-10-2026.md)
 - [Left Overview panel and status shortcuts](Dashboard_Left_Overview_Plan_20-10-2026.md)
 - [Existing progress popover — remaining feature acceptance](Run_Check_Progress_Popover_Plan_20-10-2026.md)
 
 Implement the right-panel layout first. The left Overview is a separate delivery
-using the same responsive frame. Both new plans are Not started / Not run / Not
-verified; this documentation update does not implement either panel.
+using the same responsive frame. The right panel and inline card follow-up have
+partial implementation and verification; the left Overview is Not started / Not
+run / Not verified. Browser and production acceptance remain open. Popover
+changes remain paused until the right panel passes production testing.
 
 ## Archived on 2026-10-20 because scoped code implementation is complete
 
