@@ -43,7 +43,7 @@ backend/app/schemas/        Pydantic request/response models
 backend/app/services/capture/  capture.py, page_ready.py, overlays.py, ssrf_proxy.py
 backend/app/services/diff/  diff.py (text + visual), structure.py (structural)
 backend/app/services/       checks.py (pipeline), review.py, audit.py, attempts.py, scheduler.py, concurrency.py
-backend/alembic/versions/   migrations (linear chain; current head 7e3a9c2f1b64)
+backend/alembic/versions/   migrations (linear chain; check current head with alembic heads)
 backend/scripts/            create_user.py, cleanup_artifacts.py, smoke_test.py, probes
 backend/tests/              pytest suite (conftest.py builds isolated temp DBs)
 backend/data/               LIVE/LOCAL DATA: app.db and artifacts — never edit by hand
@@ -138,9 +138,18 @@ Treat every change here as security-sensitive.
   artifact size limits enforced *before* the expensive step. Exceeding one fails
   the capture (`CaptureBudgetExceeded`) and does not retry.
 - **Authentication:** cookie session (hashed token in DB, HttpOnly, SameSite),
-  Argon2id passwords, lockout and rate limiting. Every state-changing route must
-  go through `get_current_session` so CSRF (`X-CSRF-Token`) is enforced. Do not
-  add unauthenticated mutating endpoints.
+  Argon2id passwords, lockout and rate limiting. Protected state-changing routes
+  must go through `get_current_session` (directly or through an auth dependency)
+  so CSRF (`X-CSRF-Token`) is enforced. Existing authentication-flow exceptions
+  in `api/routes/auth.py` are limited to `/login`, which establishes a session
+  after credential validation with rate limiting and lockout; `/logout`,
+  which validates CSRF itself before revoking an existing non-revoked session
+  and permits cookie clearing when no such session exists; and `/register`,
+  which is rate limited to 5/minute, only creates an inactive `operator` with
+  `registration_status="pending"` (no session, no access until an Admin
+  approves), and records a `member.registration_submitted` audit event with
+  no actor and source `self_registration` in the same transaction. Preserve
+  these protections; do not extend these exceptions to other mutating endpoints.
 - **Authorization:** fixed roles `admin` and `operator` only.
   - Admin-only actions call `require_admin(user)`.
   - Any query that returns targets, checks, snapshots or artifacts must be
@@ -169,7 +178,8 @@ Treat every change here as security-sensitive.
   pass `mypy app`. Use modern typing (`X | None`, `list[str]`, `Annotated`).
 - Routes: `APIRouter(prefix=..., tags=..., dependencies=[Depends(get_current_user)])`,
   `Annotated` dependency aliases (`DbSession`, `AppSettings`), explicit
-  `response_model`. Keep business logic in `services/`, not in routes.
+  `response_model`. The existing authentication-flow exceptions are described
+  in section 3. Keep business logic in `services/`, not in routes.
 - Raise domain errors from `core/errors.py` (`NotFoundError`, `ValidationError`,
   `ConflictError`, capture errors); `main.py` maps them to HTTP responses. Do not
   invent ad-hoc error shapes.
@@ -263,12 +273,26 @@ Rules:
   operator (404) and unauthenticated (401), plus CSRF on mutations.
 - Do not delete, skip or loosen existing tests to make a change pass. If a test
   is wrong, explain why and get agreement.
-- Known: two `test_cleanup_artifacts.py` cases fail on Windows due to POSIX
-  semantics. Report them as failures; do not mark them skipped or passed.
+- Historical Windows result, reported 2026-10-19: `test_cleanup_artifacts.py`
+  recorded 7 passed / 2 failed (symlink privilege and POSIX directory operations).
+  See [the execution record](plan/Remediation_Plan_19-10-2026.md#61-test-and-tool-results)
+  and [the evidence register](plan/ROADMAP_STATUS_AND_BACKLOG.md#evidence-register)
+  for provenance limitations. Rerun for the source under review before claiming
+  a current result; this history is not an exemption for new failures. Report
+  actual failures; do not mark them skipped or passed.
 - Capture/SSRF/container behavior can only be truly verified on Linux in Docker.
   Windows results for those areas are partial evidence; say so.
 - For visible UI changes, run the app (`.claude/launch.json` defines `backend`
-  on :8000 and `frontend` on :5173) and check it in a browser.
+  on :8000 and `frontend` on :5173) and check it in a browser. Before startup,
+  explicitly set `DATABASE_URL` to a disposable test database outside
+  `backend/data/`, `DATA_DIR` to a separate disposable artifact directory, and
+  `SCHEDULER_ENABLED=false` in the backend process environment. The launch file
+  does not configure this isolation, and pytest's `conftest.py` does not apply
+  to a standalone app. Use only local fixtures or mocked API/capture responses;
+  do not trigger captures against real monitored sites. Any required capture
+  must use the existing SSRF protections in an isolated test environment.
+  Test accounts may be created only in the disposable test database. If browser
+  verification cannot be isolated, report it as not run with the reason.
 
 ---
 
@@ -356,4 +380,8 @@ A task is done only when:
 - [ ] Relevant tests, Ruff, mypy / Vitest, ESLint, build pass, or failures are reported verbatim.
 - [ ] New behavior has tests; schema changes have a reversible migration.
 - [ ] `.env.example`, README and plan/register are updated if behavior, settings or status changed.
-- [ ] No secrets, live data or artifacts were modified or committed.
+- [ ] No secrets or live data were modified or committed. Artifact changes are
+  limited to disposable test outputs or the explicit user-requested
+  `backend/data/raw_screenshots/` exception in section 10; this does not permit
+  deletion or modification of live evidence under section 9. No commit was made
+  unless the user requested it.
