@@ -22,7 +22,9 @@ from app.models import (
     UserTargetAssignment,
 )
 from app.schemas import PaginatedTargetsRead, SnapshotRead, TargetCreate, TargetRead, TargetUpdate
+from app.schemas.check_activity import CheckActivityRead
 from app.services.audit import ACTION_BASELINE_DEMOTED, record_review_event
+from app.services.check_activity import list_active_checks
 from app.services.check_progress import get_progress
 from app.services.concurrency import is_target_in_flight
 
@@ -30,6 +32,17 @@ router = APIRouter(prefix="/targets", tags=["targets"], dependencies=[Depends(ge
 
 DbSession = Annotated[Session, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
+
+
+@router.get("/check-activity", response_model=CheckActivityRead)
+async def get_check_activity(
+    db: DbSession,
+    settings: AppSettings,
+    user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CheckActivityRead:
+    return list_active_checks(db, user, settings, limit=limit, offset=offset)
 
 
 @router.post("", response_model=TargetRead, status_code=201)

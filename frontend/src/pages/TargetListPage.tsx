@@ -20,6 +20,7 @@ import { TagFilterModal } from '../components/TagFilterModal';
 import { useTagsQuery } from '../hooks/useTags';
 import { ScreenshotPreviewModal } from '../components/ScreenshotPreviewModal';
 import { useAuth } from '../hooks/authContext';
+import { ActiveChecksPanel } from '../components/ActiveChecksPanel';
 
 export function TargetListPage() {
   const [name, setName] = useState('');
@@ -36,8 +37,15 @@ export function TargetListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [wideActivityLayout, setWideActivityLayout] = useState(() => window.innerWidth >= 1680);
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+
+  useEffect(() => {
+    const updateLayout = () => setWideActivityLayout(window.innerWidth >= 1680);
+    window.addEventListener('resize', updateLayout);
+    return () => window.removeEventListener('resize', updateLayout);
+  }, []);
 
   const [page, setPage] = useState(1);
   const pageSize = 50;
@@ -207,7 +215,7 @@ export function TargetListPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 min-[1680px]:mx-0 min-[1680px]:max-w-none min-[1680px]:px-8">
       {/* Header */}
       <header className="mb-10 text-center md:text-left">
         <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 bg-clip-text text-transparent">
@@ -218,7 +226,8 @@ export function TargetListPage() {
         </p>
       </header>
 
-      <div className="flex flex-col lg:flex-row items-start gap-8">
+      <div className="flex flex-col items-start gap-8 lg:flex-row min-[1680px]:grid min-[1680px]:grid-cols-[minmax(0,1fr)_320px] min-[1680px]:gap-6">
+        <div className="flex w-full min-w-0 flex-col items-start gap-8 lg:flex-row">
         {/* Left column: Add Target Form */}
         {isAdmin && <div className="w-full lg:w-80 xl:w-96 shrink-0">
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
@@ -563,6 +572,8 @@ export function TargetListPage() {
             )}
           </div>
         </div>
+        </div>
+        <ActiveChecksPanel wide={wideActivityLayout} />
       </div>
 
       <EditTargetModal

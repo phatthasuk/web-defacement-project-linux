@@ -6,9 +6,14 @@
 
 **Scope:** Backend progress reporting and frontend popover implementation; no deployment.
 
-**Implemented:** Partial (four defects found in follow-up review). **Tested:** Partial. **Runtime verified:** Not verified.
+**Implemented:** Partial (remaining feature acceptance; the four reviewed code defects are fixed). **Tested:** Partial. **Runtime verified:** Not verified.
 
-**Open corrective work:** [Remediation plan for the four review findings](Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md).
+**Completed corrective implementation:** [Archived remediation plan](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md).
+
+**Next layout work:** [Right Active Checks plan](Dashboard_Right_Active_Checks_Plan_20-10-2026.md).
+This feature plan stays active for its outstanding acceptance. The future right
+panel replaces wide-screen list popovers only after equivalent behavior is
+verified; narrow-screen and detail-page popovers remain available.
 
 ## 1. Objective and roadmap relationship
 
@@ -21,7 +26,7 @@ continues to own Stage priorities. This document does not add a Stage, close a
 finding or authorize changes to the active Stage 2 observation run. Implementation
 was requested on 2026-10-20; production deployment remains outside this change.
 
-## 2. Current behavior confirmed in source
+## 2. Planning baseline before initial implementation
 
 | Area | Source and behavior |
 | :--- | :--- |
@@ -224,7 +229,7 @@ backend suite passed 276 tests and failed two cleanup-artifact tests because
 Windows lacks the symlink privilege and POSIX directory operations those tests
 require. Targeted Ruff and mypy passed; full Ruff still reports six existing
 findings in an applied migration. Isolated browser and Linux runtime verification
-remain open. See the [remediation plan](Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md)
+remain open. See the [remediation plan](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md)
 and [remediation evidence](../refinement/10-20-2026/Run-Check-Progress-Popover-Remediation-20-10-2026.md).
 
 ## 7. Verification plan and acceptance criteria

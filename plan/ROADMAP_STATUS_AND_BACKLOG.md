@@ -4,6 +4,13 @@
 **Source baseline:** `ba1bbf2d8933293f115a2336df57b0d5430c30b7`  
 **Scope:** Documentation reconciliation against source and existing verification records. No new application test run, migration, cleanup, deployment or live-server verification was performed.
 
+**Planning update, 2026-10-20 (Asia/Bangkok):** Added independent right Active
+Checks and left Overview delivery plans against source
+`06adbb6923713acf327da7798591da58462fe229` plus local changes. Archived only
+the implemented four-defect popover remediation plan; remaining feature,
+browser and Linux acceptance stays open. This update adds no application test
+or runtime verification evidence.
+
 The [core roadmap](PROJECT_PLAN.md) owns Stage priorities. This register owns the
 cross-document evidence status and open-work inventory. Feature plans retain their
 acceptance criteria. Existing finding IDs and Stage numbers remain unchanged;
@@ -101,7 +108,9 @@ own plans before implementation.
 
 | Proposal | Dependency / intended outcome |
 | :--- | :--- |
-| [Run Check progress popover](Run_Check_Progress_Popover_Plan_20-10-2026.md) | Source added 2026-10-20 (Asia/Bangkok); four reviewed defects fixed with focused regressions. Feature: Implemented Partial; Tested Partial; Runtime verified Not verified. Remediation: Implemented complete; Tested Partial; Runtime verified Not verified. Isolated browser and Linux runtime checks remain open. Standalone UX add-on; no Stage or production observation changes. |
+| [Right Active Checks panel](Dashboard_Right_Active_Checks_Plan_20-10-2026.md) | Partial: scoped/paginated active-check endpoint and wide-screen activity panel implemented. Backend 279 passed/2 Windows cleanup failures; frontend 104 passed, lint/build passed; targeted Ruff/mypy passed. Browser launch failed (`spawn EPERM`); Linux and production acceptance not run. Popover replacement/deduplication is explicitly paused by the user until production testing passes. See [execution record](../refinement/10-20-2026/Dashboard-Right-Active-Checks-20-10-2026.md). |
+| [Left Overview panel](Dashboard_Left_Overview_Plan_20-10-2026.md) | Separate later delivery after the shared right-panel layout: authorization-scoped full-population status counts and matching table-filter shortcuts. Never derive global counts from paginated rows. Implemented Not started; Tested Not run; Runtime verified Not verified. |
+| [Existing Run Check progress popover](Run_Check_Progress_Popover_Plan_20-10-2026.md) | Four reviewed defects fixed with focused regressions; their [remediation plan is archived](archive/implemented-20261020/Run_Check_Progress_Popover_Remediation_Plan_20-10-2026.md). Feature remains Implemented Partial; Tested Partial; Runtime verified Not verified. Remaining feature/lifecycle/authorization acceptance and isolated browser/Linux checks stay open; wide-screen layout replacement is owned by the new right-panel plan. |
 | Monitoring health and Stage 2 report | Report overdue/stuck checks, detector availability, attempt causes and per-target growth; separate liveness/readiness and external monitor failure paths. Supports Stage 2. |
 | Structured findings | Persist detector facts, availability and policy/version context to explain and group changes without parsing summary text. Review storage/privacy requirements. |
 | Incident Inbox | Group recurring findings, assign owners and track resolution independently of transient target status. New dangerous findings must not be swallowed by deduplication. |

@@ -1,3 +1,4 @@
+from app.schemas.check_activity import ActiveCheckRead, CheckActivityRead, CheckProgressRead
 from app.schemas.check_attempt import CheckAttemptRead
 from app.schemas.check_result import CheckResultRead
 from app.schemas.check_trigger import CheckTriggerResponse
@@ -11,6 +12,9 @@ __all__ = [
     "BaselineApproveRequest",
     "CheckResultRead",
     "CheckAttemptRead",
+    "ActiveCheckRead",
+    "CheckActivityRead",
+    "CheckProgressRead",
     "CheckTriggerResponse",
     "SnapshotRead",
     "TargetCreate",

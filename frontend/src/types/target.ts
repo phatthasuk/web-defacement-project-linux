@@ -33,6 +33,28 @@ export interface CheckProgress {
   steps: CheckProgressStep[];
 }
 
+export interface ActiveCheck {
+  id: string;
+  name: string;
+  status: TargetStatus;
+  url_revision: number;
+  check_run_id: string;
+  check_run_source: string | null;
+  check_attempt_count: number;
+  check_retry_max_attempts: number;
+  next_check_at: string | null;
+  last_error_code: string | null;
+  progress: CheckProgress | null;
+}
+
+export interface CheckActivity {
+  items: ActiveCheck[];
+  total: number;
+  limit: number;
+  offset: number;
+  observed_at: string;
+}
+
 export interface Target {
   id: string;
   name: string;

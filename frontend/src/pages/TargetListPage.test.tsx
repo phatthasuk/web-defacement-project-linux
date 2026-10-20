@@ -8,8 +8,11 @@ import * as useTagsHooks from '../hooks/useTags';
 
 // Mock the hooks
 vi.mock('../hooks/useTargets', () => ({
+  CHECK_ACTIVITY_QUERY_KEY: ['target-check-activity'],
   useTargetsQuery: vi.fn(),
   usePaginatedTargetsQuery: vi.fn(),
+  useCheckActivityQuery: vi.fn(),
+  useActivityTargetQuery: vi.fn(),
   useCreateTargetMutation: vi.fn(),
   useUpdateTargetMutation: vi.fn(),
   useDeleteTargetMutation: vi.fn(),
@@ -73,6 +76,19 @@ describe('TargetListPage', () => {
       error: null,
     } as unknown as ReturnType<typeof useTargetsHooks.usePaginatedTargetsQuery>);
 
+    vi.mocked(useTargetsHooks.useCheckActivityQuery).mockReturnValue({
+      data: { items: [], total: 0, limit: 20, offset: 0, observed_at: '2026-10-20T00:00:00Z' },
+      isPending: false,
+      isError: false,
+      isRefetchError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTargetsHooks.useCheckActivityQuery>);
+    vi.mocked(useTargetsHooks.useActivityTargetQuery).mockReturnValue({
+      data: undefined,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useTargetsHooks.useActivityTargetQuery>);
+
     vi.mocked(useTargetsHooks.useCreateTargetMutation).mockReturnValue({
       mutateAsync: mockMutateAsyncCreate,
       isPending: false,
@@ -106,6 +122,19 @@ describe('TargetListPage', () => {
     expect(screen.getByText('https://google.com')).toBeInTheDocument();
     expect(screen.getByText('Example')).toBeInTheDocument();
     expect(screen.getByText('https://example.com')).toBeInTheDocument();
+  });
+
+  it('polls the Active Checks panel only at wide desktop widths', () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1800 });
+    render(
+      <BrowserRouter>
+        <TargetListPage />
+      </BrowserRouter>,
+    );
+
+    expect(useTargetsHooks.useCheckActivityQuery).toHaveBeenCalledWith(true, 20, 0);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth });
   });
 
   it('shows the structural score for changed targets, including zero', () => {

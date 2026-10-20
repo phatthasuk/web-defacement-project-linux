@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import { PaginatedTargets, Target, TargetCreatePayload, TargetUpdatePayload } from '../types/target';
+import { CheckActivity, PaginatedTargets, Target, TargetCreatePayload, TargetUpdatePayload } from '../types/target';
 
 export interface CheckTriggerResponse {
   target_id: string;
@@ -34,6 +34,11 @@ export async function getPaginatedTargets(
   if (search.trim()) params.set('search', search.trim());
   tagIds.forEach((tagId) => params.append('tag_ids', tagId));
   return apiFetch<PaginatedTargets>(`/targets/page?${params.toString()}`);
+}
+
+export async function getCheckActivity(limit = 20, offset = 0): Promise<CheckActivity> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return apiFetch<CheckActivity>(`/targets/check-activity?${params.toString()}`);
 }
 
 export async function createTarget(payload: TargetCreatePayload): Promise<Target> {

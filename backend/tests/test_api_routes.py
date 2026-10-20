@@ -1,5 +1,7 @@
 import asyncio
+import secrets
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
@@ -8,7 +10,7 @@ import httpx
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_capture_func
+from app.api.deps import get_capture_func, hash_token
 from app.core.status import (
     STATUS_ACKNOWLEDGED,
     STATUS_AWAITING_BASELINE,
@@ -18,8 +20,17 @@ from app.core.status import (
     STATUS_OK,
 )
 from app.main import app
+from app.models import Session as AuthSession
 from app.models import Snapshot, Target, User, UserTargetAssignment
 from app.services.capture.capture import CaptureResult
+from app.services.check_progress import (
+    _records,
+    begin_attempt,
+    bind_progress,
+    register_queued,
+    reset_progress,
+    set_phase,
+)
 
 
 async def test_targets_crud_and_soft_delete(
@@ -1163,3 +1174,122 @@ async def test_raw_screenshot_ignores_range_headers(
             assert response.content == expected
             assert response.headers["accept-ranges"] == "none"
             assert "content-range" not in response.headers
+
+
+async def test_check_activity_is_paginated_and_excludes_inactive_targets(
+    client: httpx.AsyncClient,
+    api_session_factory: Callable[[], Session],
+) -> None:
+    with api_session_factory() as db:
+        targets = [
+            Target(
+                name=f"Active {index}",
+                url=f"https://192.0.2.{index}",
+                status=STATUS_CHECKING,
+                check_run_id=f"activity-run-{index}",
+                updated_at=datetime(2026, 1, 1, tzinfo=UTC) if index == 1 else None,
+            )
+            for index in range(1, 54)
+        ]
+        inactive = Target(
+            name="Inactive run",
+            url="https://192.0.2.9",
+            status=STATUS_CHECKING,
+            check_run_id="inactive-run",
+            is_active=False,
+        )
+        db.add_all([*targets, inactive])
+        db.commit()
+        target_ids = [target.id for target in targets]
+        target_id = target_ids[0]
+        run_id = targets[0].check_run_id
+
+    record = register_queued(target_id, run_id, 1)
+    token = bind_progress(record)
+    try:
+        begin_attempt(record, 1)
+        set_phase("opening_page")
+        first = await client.get("/targets/check-activity?limit=2&offset=0")
+        second = await client.get("/targets/check-activity?limit=2&offset=2")
+    finally:
+        reset_progress(token)
+        _records.pop(target_id, None)
+
+    assert first.status_code == second.status_code == 200
+    first_data = first.json()
+    second_data = second.json()
+    assert first_data["total"] == second_data["total"] == 53
+    assert first_data["limit"] == 2 and first_data["offset"] == 0
+    assert second_data["offset"] == 2
+    items = [*first_data["items"], *second_data["items"]]
+    assert len(items) == 4
+    assert len({item["id"] for item in items}) == 4
+    assert set(item["id"] for item in items).issubset(set(target_ids))
+    assert all("url" not in item and "last_error" not in item for item in items)
+    progress_item = next(item for item in items if item["id"] == target_id)
+    assert progress_item["progress"]["run_id"] == run_id
+    assert progress_item["progress"]["phase"] == "opening_page"
+    assert progress_item["progress"]["steps"][0]["state"] == "completed"
+
+
+async def test_check_activity_requires_authentication(unauth_client: httpx.AsyncClient) -> None:
+    response = await unauth_client.get("/targets/check-activity")
+    assert response.status_code == 401
+
+
+async def test_check_activity_is_limited_to_operator_assignments(
+    client: httpx.AsyncClient,
+    api_session_factory: Callable[[], Session],
+) -> None:
+    raw_token = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    now = datetime.now(UTC)
+    with api_session_factory() as db:
+        operator = User(
+            username="activity-operator",
+            hashed_password="not-used-in-session-test",
+            is_active=True,
+            role="operator",
+            registration_status="approved",
+        )
+        assigned = Target(
+            name="Assigned activity",
+            url="https://192.0.2.21",
+            status=STATUS_CHECKING,
+            check_run_id="assigned-activity-run",
+        )
+        unassigned = Target(
+            name="Hidden activity",
+            url="https://192.0.2.22",
+            status=STATUS_CHECKING,
+            check_run_id="hidden-activity-run",
+        )
+        db.add_all([operator, assigned, unassigned])
+        db.flush()
+        db.add(UserTargetAssignment(user_id=operator.id, target_id=assigned.id, assigned_at=now))
+        db.add(
+            AuthSession(
+                token_hash=hash_token(raw_token),
+                user_id=operator.id,
+                csrf_token=csrf_token,
+                created_at=now,
+                last_seen_at=now,
+                absolute_expires_at=now + timedelta(days=14),
+                idle_expires_at=now + timedelta(days=1),
+            )
+        )
+        db.commit()
+        assigned_id = assigned.id
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        cookies={"session_id": raw_token},
+        headers={"X-CSRF-Token": csrf_token},
+    ) as operator_client:
+        response = await operator_client.get("/targets/check-activity")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert [item["id"] for item in response.json()["items"]] == [assigned_id]
