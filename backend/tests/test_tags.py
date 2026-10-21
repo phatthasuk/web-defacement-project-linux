@@ -93,3 +93,23 @@ async def test_remove_target_tag_endpoint(client: httpx.AsyncClient):
     missing_tag = await client.delete(f"/targets/{target['id']}/tags/{uuid4()}")
     assert missing_tag.status_code == 404
 
+async def test_tag_batch_counts_with_parent_child_hierarchy(client: httpx.AsyncClient):
+    parent = await create_tag(client, "Region-North")
+    res_child = await client.post(
+        "/tags",
+        json={"name": "Chiang-Mai", "color_key": "blue", "parent_id": parent["id"]},
+    )
+    assert res_child.status_code == 201
+    child = res_child.json()
+
+    # Target 1 has parent tag, Target 2 has child tag
+    await create_target(client, "Site-Parent", [parent["id"]])
+    await create_target(client, "Site-Child", [child["id"]])
+
+    # List tags should return batched counts: parent includes child targets (2), child has 1
+    tags_res = await client.get("/tags")
+    assert tags_res.status_code == 200
+    tag_map = {item["id"]: item["target_count"] for item in tags_res.json()["items"]}
+    assert tag_map[parent["id"]] == 2
+    assert tag_map[child["id"]] == 1
+

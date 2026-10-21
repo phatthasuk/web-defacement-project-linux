@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch } from '../api/client';
+import { ApiError, apiFetch } from '../api/client';
+import { formatDateTime } from '../utils/date';
 import { MembersPage } from './MembersPage';
 
 vi.mock('../api/client', async (importOriginal) => {
@@ -209,5 +210,102 @@ describe('MembersPage behavioral regressions (F-03 & F-09)', () => {
         })
       );
     });
+  });
+
+  it('preserves form input and displays error message when member creation fails (Finding 1)', async () => {
+    mockedApiFetch.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = (options?.method || 'GET').toUpperCase();
+      if (path === '/members' && method === 'POST') {
+        throw new ApiError(409, 'Username is already registered');
+      }
+      if (path.startsWith('/members?') && method === 'GET') {
+        return { items: [activeOperator], pending_count: 0, total: 1 };
+      }
+      return {};
+    });
+
+    renderMembersPage();
+    await screen.findByText('Alice Operator');
+
+    const usernameInput = screen.getByPlaceholderText('Username') as HTMLInputElement;
+    const displayNameInput = screen.getByPlaceholderText('Display name') as HTMLInputElement;
+    const passwordInput = screen.getByPlaceholderText('Temporary password (12–200 characters)') as HTMLInputElement;
+
+    fireEvent.change(usernameInput, { target: { value: 'taken_user' } });
+    fireEvent.change(displayNameInput, { target: { value: 'Taken User' } });
+    fireEvent.change(passwordInput, { target: { value: 'VerySecurePass123!' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Operator' }));
+
+    await screen.findByText('Username is already registered');
+    expect(usernameInput.value).toBe('taken_user');
+    expect(displayNameInput.value).toBe('Taken User');
+    expect(passwordInput.value).toBe('VerySecurePass123!');
+  });
+
+  it('resets form input only after successful member creation', async () => {
+    mockedApiFetch.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = (options?.method || 'GET').toUpperCase();
+      if (path === '/members' && method === 'POST') {
+        return {
+          id: 12,
+          username: 'new_user',
+          display_name: 'New User',
+          role: 'operator',
+          is_active: true,
+          status: 'active',
+          last_login_at: null,
+          registration_at: '2026-10-21T00:00:00Z',
+          assigned_website_count: 0,
+          must_change_password: true,
+        };
+      }
+      if (path.startsWith('/members?') && method === 'GET') {
+        return { items: [activeOperator], pending_count: 0, total: 1 };
+      }
+      return {};
+    });
+
+    renderMembersPage();
+    await screen.findByText('Alice Operator');
+
+    const usernameInput = screen.getByPlaceholderText('Username') as HTMLInputElement;
+    const displayNameInput = screen.getByPlaceholderText('Display name') as HTMLInputElement;
+    const passwordInput = screen.getByPlaceholderText('Temporary password (12–200 characters)') as HTMLInputElement;
+
+    fireEvent.change(usernameInput, { target: { value: 'new_user' } });
+    fireEvent.change(displayNameInput, { target: { value: 'New User' } });
+    fireEvent.change(passwordInput, { target: { value: 'VerySecurePass123!' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Operator' }));
+
+    await waitFor(() => {
+      expect(usernameInput.value).toBe('');
+      expect(displayNameInput.value).toBe('');
+      expect(passwordInput.value).toBe('');
+    });
+  });
+
+  it('formats member timestamps with formatDateTime including naive UTC strings (Finding 3)', async () => {
+    const naiveMember = {
+      ...pendingOperator,
+      registration_at: '2026-10-19T08:30:00',
+      last_login_at: '2026-10-20T14:45:00',
+    };
+    mockedApiFetch.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = (options?.method || 'GET').toUpperCase();
+      if (path.startsWith('/members?') && method === 'GET') {
+        return { items: [naiveMember], pending_count: 1, total: 1 };
+      }
+      return {};
+    });
+
+    renderMembersPage();
+    await screen.findByText('Bob Pending');
+
+    const expectedRegText = `Registered ${formatDateTime('2026-10-19T08:30:00')}`;
+    const expectedLoginText = formatDateTime('2026-10-20T14:45:00');
+    expect(screen.getByText(expectedRegText)).toBeInTheDocument();
+    expect(screen.getByText(expectedLoginText)).toBeInTheDocument();
   });
 });

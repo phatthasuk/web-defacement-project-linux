@@ -38,4 +38,11 @@ describe('date utils', () => {
     expect(formatted).toBeTruthy();
     expect(formatted).not.toBe('N/A');
   });
+
+  it('formats naive UTC string identically to explicit Z string', () => {
+    const naive = '2026-10-19T08:30:00';
+    const withZ = '2026-10-19T08:30:00Z';
+    expect(formatDateTime(naive)).toBe(formatDateTime(withZ));
+    expect(parseDate(naive).getTime()).toBe(parseDate(withZ).getTime());
+  });
 });

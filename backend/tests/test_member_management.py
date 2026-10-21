@@ -103,3 +103,59 @@ async def test_operator_target_scope_is_applied_to_list_and_direct_ids(
         assert [item["id"] for item in result.json()["items"]] == [visible_id]
         assert (await operator_client.get(f"/targets/{hidden_id}")).status_code == 404
         assert (await operator_client.get("/members")).status_code == 403
+
+async def test_member_utc_serialization_and_batched_queries(
+    client: httpx.AsyncClient,
+    api_session_factory: Callable[[], DbSession],
+) -> None:
+    now = utcnow()
+    with api_session_factory() as db:
+        op1 = User(
+            username="batch-op-1",
+            display_name="Batch Op 1",
+            hashed_password=get_password_hash("password123456"),
+            is_active=True,
+            role="operator",
+            registration_status="approved",
+            created_at=now,
+        )
+        op2 = User(
+            username="batch-op-2",
+            display_name="Batch Op 2",
+            hashed_password=get_password_hash("password123456"),
+            is_active=True,
+            role="operator",
+            registration_status="approved",
+            created_at=now,
+        )
+        site1 = Target(
+            name="Batch Site 1", url="https://site1.example.com", is_active=True, status="OK"
+        )
+        site2 = Target(
+            name="Batch Site 2", url="https://site2.example.com", is_active=True, status="OK"
+        )
+        db.add_all([op1, op2, site1, site2])
+        db.flush()
+        db.add(UserTargetAssignment(user_id=op1.id, target_id=site1.id, assigned_at=now))
+        db.add(UserTargetAssignment(user_id=op1.id, target_id=site2.id, assigned_at=now))
+        db.add(UserTargetAssignment(user_id=op2.id, target_id=site1.id, assigned_at=now))
+        db.commit()
+
+    res = await client.get("/members?limit=50")
+    assert res.status_code == 200
+    data = res.json()
+    items = {item["username"]: item for item in data["items"]}
+    assert "batch-op-1" in items
+    assert "batch-op-2" in items
+    assert items["batch-op-1"]["assigned_website_count"] == 2
+    assert items["batch-op-2"]["assigned_website_count"] == 1
+    assert items["batch-op-1"]["registration_at"].endswith("Z")
+    assert items["batch-op-1"]["created_at"].endswith("Z")
+
+    res2 = await client.get("/member-assignments/websites?search=Batch+Site+1")
+    assert res2.status_code == 200
+    websites = res2.json()["items"]
+    assert len(websites) == 1
+    assignee_names = {a["username"] for a in websites[0]["assignees"]}
+    assert assignee_names == {"batch-op-1", "batch-op-2"}
+

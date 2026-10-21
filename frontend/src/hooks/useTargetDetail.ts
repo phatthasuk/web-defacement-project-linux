@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { getTarget } from '../api/targets';
 import {
   demoteTargetBaseline,
@@ -11,6 +11,40 @@ import type { Snapshot } from '../types/snapshot';
 import { listTargetChecks, acknowledgeCheck, confirmDefacedCheck, getCheck } from '../api/checks';
 import { approveBaseline } from '../api/review';
 import { getConfig } from '../api/config';
+
+export const TARGET_DETAIL_QUERY_KEYS = {
+  root: ['targets'] as const,
+  detail: (targetId: string) => ['targets', targetId] as const,
+  snapshots: (targetId: string) => ['snapshots', targetId] as const,
+  baseline: (targetId: string) => ['baseline', targetId] as const,
+  baselines: (targetId: string) => ['baselines', targetId] as const,
+  checks: (targetId: string) => ['checks', targetId] as const,
+  check: (checkId: string) => ['check', checkId] as const,
+};
+
+export function refreshTargetDetailQueries(
+  queryClient: QueryClient,
+  targetId: string,
+  options: { includeBaselines?: boolean; invalidateRoot?: boolean } = {}
+) {
+  const { includeBaselines = false, invalidateRoot = true } = options;
+  if (invalidateRoot) {
+    queryClient.invalidateQueries({ queryKey: TARGET_DETAIL_QUERY_KEYS.root });
+  }
+  const keys = [
+    TARGET_DETAIL_QUERY_KEYS.detail(targetId),
+    TARGET_DETAIL_QUERY_KEYS.snapshots(targetId),
+    TARGET_DETAIL_QUERY_KEYS.baseline(targetId),
+    ...(includeBaselines ? [TARGET_DETAIL_QUERY_KEYS.baselines(targetId)] : []),
+    TARGET_DETAIL_QUERY_KEYS.checks(targetId),
+  ];
+  for (const queryKey of keys) {
+    queryClient.invalidateQueries({ queryKey });
+  }
+  for (const queryKey of keys) {
+    queryClient.refetchQueries({ queryKey, type: 'active' });
+  }
+}
 
 export function useConfigQuery() {
   return useQuery({
@@ -77,18 +111,7 @@ export function useApproveBaselineMutation() {
     mutationFn: ({ targetId, snapshotId }: { targetId: string; snapshotId: string }) =>
       approveBaseline(targetId, snapshotId),
     onSuccess: (_, { targetId }) => {
-      queryClient.invalidateQueries({ queryKey: ['targets'] });
-      queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['baselines', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
-      // Proactive refetch
-      queryClient.refetchQueries({ queryKey: ['targets', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['snapshots', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['baseline', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['baselines', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['checks', targetId], type: 'active' });
+      refreshTargetDetailQueries(queryClient, targetId, { includeBaselines: true, invalidateRoot: true });
     },
   });
 }
@@ -99,17 +122,7 @@ export function useDemoteBaselineMutation() {
     mutationFn: ({ targetId, snapshotId }: { targetId: string; snapshotId: string }) =>
       demoteTargetBaseline(targetId, snapshotId),
     onSuccess: (_, { targetId }) => {
-      queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['baselines', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
-      // Proactive refetch
-      queryClient.refetchQueries({ queryKey: ['targets', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['snapshots', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['baseline', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['baselines', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['checks', targetId], type: 'active' });
+      refreshTargetDetailQueries(queryClient, targetId, { includeBaselines: true, invalidateRoot: true });
     },
   });
 }
@@ -120,16 +133,7 @@ export function useAcknowledgeCheckMutation() {
     mutationFn: ({ checkId }: { targetId: string; checkId: string }) =>
       acknowledgeCheck(checkId),
     onSuccess: (_, { targetId }) => {
-      queryClient.invalidateQueries({ queryKey: ['targets'] });
-      queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
-      // Proactive refetch
-      queryClient.refetchQueries({ queryKey: ['targets', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['snapshots', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['baseline', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['checks', targetId], type: 'active' });
+      refreshTargetDetailQueries(queryClient, targetId, { includeBaselines: false, invalidateRoot: true });
     },
   });
 }
@@ -140,16 +144,7 @@ export function useConfirmDefacedMutation() {
     mutationFn: ({ checkId }: { targetId: string; checkId: string }) =>
       confirmDefacedCheck(checkId),
     onSuccess: (_, { targetId }) => {
-      queryClient.invalidateQueries({ queryKey: ['targets'] });
-      queryClient.invalidateQueries({ queryKey: ['targets', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['snapshots', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['baseline', targetId] });
-      queryClient.invalidateQueries({ queryKey: ['checks', targetId] });
-      // Proactive refetch
-      queryClient.refetchQueries({ queryKey: ['targets', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['snapshots', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['baseline', targetId], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['checks', targetId], type: 'active' });
+      refreshTargetDetailQueries(queryClient, targetId, { includeBaselines: false, invalidateRoot: true });
     },
   });
 }

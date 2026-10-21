@@ -26,6 +26,13 @@ Node 20 and Linux/runtime acceptance remain open. See the
 [execution record](../refinement/10-20-2026/Run-Check-Popover-Removal-20-10-2026.md).
 Completed-card retention remains unchanged.
 
+## Audit reports
+
+- [Code cleanliness audit 2026-10-21](Code_Cleanliness_Audit_21-10-2026.md)
+  records eight proposed cleanup items and the checks actually run. Remediation
+  implemented and verified in
+  [execution record](../refinement/10-21-2026/Code-Cleanliness-Audit-Remediation-21-10-2026.md).
+
 ## Archived UI deliveries on 2026-10-20
 
 - [Right Active Checks panel](archive/delivered-ui-20261020/Dashboard_Right_Active_Checks_Plan_20-10-2026.md)

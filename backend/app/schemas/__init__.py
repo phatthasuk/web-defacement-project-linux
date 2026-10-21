@@ -3,6 +3,22 @@ from app.schemas.check_attempt import CheckAttemptRead
 from app.schemas.check_result import CheckResultRead
 from app.schemas.check_trigger import CheckTriggerResponse
 from app.schemas.config import ConfigRead
+from app.schemas.member import (
+    MemberCreate,
+    MemberRead,
+    MemberRole,
+    MemberState,
+    MemberUpdate,
+    MemberWebsiteRead,
+    MemberWebsitesCountsRead,
+    MemberWebsitesListRead,
+    PaginatedMembersRead,
+    PaginatedMemberWebsitesRead,
+    RegistrationStatus,
+    RejectMember,
+    ResetPassword,
+    TargetAssigneeRead,
+)
 from app.schemas.review import BaselineApproveRequest
 from app.schemas.snapshot import SnapshotRead
 from app.schemas.tag import PaginatedTagsRead, TagCreate, TagRead, TagUpdate
@@ -26,4 +42,18 @@ __all__ = [
     "TagRead",
     "TagUpdate",
     "PaginatedTagsRead",
+    "MemberCreate",
+    "MemberUpdate",
+    "RejectMember",
+    "ResetPassword",
+    "MemberRead",
+    "PaginatedMembersRead",
+    "TargetAssigneeRead",
+    "MemberWebsiteRead",
+    "MemberWebsitesCountsRead",
+    "PaginatedMemberWebsitesRead",
+    "MemberWebsitesListRead",
+    "MemberState",
+    "MemberRole",
+    "RegistrationStatus",
 ]

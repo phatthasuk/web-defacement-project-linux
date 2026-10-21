@@ -1,195 +1,222 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ApiError, apiFetch } from '../api/client';
-import { useQueryClient } from '@tanstack/react-query';
-
-type Member = {
-  id: number;
-  username: string;
-  display_name: string;
-  role: string;
-  is_active: boolean;
-  status: string;
-  last_login_at: string | null;
-  registration_at: string;
-  assigned_website_count: number;
-  must_change_password: boolean;
-};
-
-type Website = {
-  id: string;
-  name: string;
-  url: string;
-  is_active: boolean;
-  tags: { id: string; name: string; color_key: string }[];
-  assignees?: { id: number; username: string; display_name: string; is_active: boolean }[];
-};
+import { useEffect, useState } from 'react';
+import { ApiError } from '../api/client';
+import { useTagsQuery } from '../hooks/useTags';
+import {
+  useApproveMemberMutation,
+  useAssignableWebsitesQuery,
+  useAssignmentWebsitesQuery,
+  useAssignMemberWebsiteMutation,
+  useCreateMemberMutation,
+  useMemberQuery,
+  useMembersQuery,
+  useMemberWebsitesQuery,
+  useRejectMemberMutation,
+  useResetMemberPasswordMutation,
+  useUnassignMemberWebsiteMutation,
+  useUpdateMemberMutation,
+} from '../hooks/useMembers';
+import type { Member, MemberWebsite } from '../types/member';
+import { formatDateTime } from '../utils/date';
 
 const inputClass = 'rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200';
 const buttonClass =
   'rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50';
 
 export function MembersPage() {
-  const queryClient = useQueryClient();
   const [tab, setTab] = useState<'members' | 'assignments'>('members');
 
-  // Members tab state
-  const [members, setMembers] = useState<Member[]>([]);
-  const [pending, setPending] = useState(0);
+  // Members tab filters & pagination
   const [status, setStatus] = useState('');
   const [memberSearch, setMemberSearch] = useState('');
   const [memberOffset, setMemberOffset] = useState(0);
-  const [memberTotal, setMemberTotal] = useState(0);
-  const [memberForm, setMemberForm] = useState({ username: '', display_name: '', temporary_password: '' });
 
-  // Selected member details state
-  const [selected, setSelected] = useState<Member | null>(null);
+  // Selected member
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editDisplayName, setEditDisplayName] = useState('');
   const [memberIncludeInactive, setMemberIncludeInactive] = useState(false);
-  const [assignedWebsites, setAssignedWebsites] = useState<Website[]>([]);
-  const [assignableWebsites, setAssignableWebsites] = useState<Website[]>([]);
   const [candidateWebsiteId, setCandidateWebsiteId] = useState('');
 
-  // Assignments tab state
-  const [assignmentWebsites, setAssignmentWebsites] = useState<Website[]>([]);
-  const [assignmentSearch, setAssignmentSearch] = useState('');
-  const [assignmentOffset, setAssignmentOffset] = useState(0);
-  const [assignmentTotal, setAssignmentTotal] = useState(0);
-  const [view, setView] = useState('all');
-  const [operatorId, setOperatorId] = useState('');
-  const [operatorOptions, setOperatorOptions] = useState<Member[]>([]);
-  const [includeInactive, setIncludeInactive] = useState(false);
-  const [tagId, setTagId] = useState('');
-  const [tagOptions, setTagOptions] = useState<{ id: string; name: string }[]>([]);
-  const [counts, setCounts] = useState({ all: 0, unassigned: 0, assigned: 0 });
+  // Create member form
+  const [memberForm, setMemberForm] = useState({ username: '', display_name: '', temporary_password: '' });
+  const [formError, setFormError] = useState('');
+
+  // Reset password modal
   const [resetTarget, setResetTarget] = useState<Member | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
 
-  const [error, setError] = useState('');
+  // Action / mutation error
+  const [actionError, setActionError] = useState('');
 
-  const loadMembers = useCallback(async () => {
-    try {
-      const q = new URLSearchParams({ limit: '50', offset: String(memberOffset) });
-      if (status) q.set('status', status);
-      if (memberSearch) q.set('search', memberSearch);
-      const data = await apiFetch<{ items: Member[]; pending_count: number; total: number }>(`/members?${q}`);
-      setMembers(data.items);
-      setPending(data.pending_count);
-      setMemberTotal(data.total);
-      setError('');
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : 'Unable to load members.');
-    }
-  }, [status, memberSearch, memberOffset]);
+  // Assignments tab filters & pagination
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [assignmentOffset, setAssignmentOffset] = useState(0);
+  const [view, setView] = useState('all');
+  const [operatorId, setOperatorId] = useState('');
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [tagId, setTagId] = useState('');
 
-  const loadAssignments = useCallback(async () => {
-    try {
-      const q = new URLSearchParams({
-        view,
-        search: assignmentSearch,
-        limit: '50',
-        offset: String(assignmentOffset),
-        include_inactive: String(includeInactive),
-      });
-      if (operatorId) q.set('operator_id', operatorId);
-      if (tagId) q.append('tag_ids', tagId);
-      const data = await apiFetch<{
-        items: Website[];
-        total: number;
-        counts: { all: number; unassigned: number; assigned: number };
-      }>(`/member-assignments/websites?${q}`);
-      setAssignmentWebsites(data.items);
-      setAssignmentTotal(data.total);
-      setCounts(data.counts);
+  // Queries
+  const {
+    data: membersData,
+    isLoading: isMembersLoading,
+    isError: isMembersError,
+    error: membersError,
+  } = useMembersQuery({
+    limit: 50,
+    offset: memberOffset,
+    status: status || undefined,
+    search: memberSearch || undefined,
+  });
 
-      const people = await apiFetch<{ items: Member[] }>('/members?limit=200');
-      setOperatorOptions(people.items);
+  const { data: selectedMember } = useMemberQuery(selectedId ?? undefined);
 
-      const tags = await apiFetch<{ items: { id: string; name: string }[] }>('/tags?limit=200');
-      setTagOptions(tags.items);
-      setError('');
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : 'Unable to load assignments.');
-    }
-  }, [view, assignmentSearch, operatorId, assignmentOffset, includeInactive, tagId]);
-
-  const loadMemberSites = useCallback(
-    async (member: Member) => {
-      try {
-        const include = String(memberIncludeInactive);
-        const data = await apiFetch<{ items: Website[] }>(
-          `/members/${member.id}/websites?include_inactive=${include}`
-        );
-        setAssignedWebsites(data.items);
-        const all = await apiFetch<{ items: Website[] }>(
-          `/member-assignments/websites?view=all&include_inactive=${include}&limit=200`
-        );
-        setAssignableWebsites(all.items);
-      } catch (e) {
-        setError(e instanceof ApiError ? e.detail : 'Unable to load member websites.');
-      }
-    },
-    [memberIncludeInactive]
+  const { data: memberWebsitesData } = useMemberWebsitesQuery(
+    selectedId ?? undefined,
+    memberIncludeInactive
   );
 
-  useEffect(() => {
-    if (tab === 'members') void loadMembers();
-    else void loadAssignments();
-  }, [tab, loadMembers, loadAssignments]);
+  const { data: assignableWebsitesData } = useAssignableWebsitesQuery(memberIncludeInactive, 200);
+
+  const {
+    data: assignmentData,
+    isLoading: isAssignmentsLoading,
+    isError: isAssignmentsError,
+    error: assignmentsError,
+  } = useAssignmentWebsitesQuery({
+    view,
+    search: assignmentSearch || undefined,
+    limit: 50,
+    offset: assignmentOffset,
+    includeInactive,
+    operatorId: operatorId || undefined,
+    tagIds: tagId ? [tagId] : undefined,
+  });
+
+  const { data: operatorOptionsData } = useMembersQuery({ limit: 200 });
+  const { data: tagOptionsData } = useTagsQuery();
+
+  // Mutations
+  const createMemberMutation = useCreateMemberMutation();
+  const approveMemberMutation = useApproveMemberMutation();
+  const rejectMemberMutation = useRejectMemberMutation();
+  const updateMemberMutation = useUpdateMemberMutation();
+  const resetPasswordMutation = useResetMemberPasswordMutation();
+  const assignMutation = useAssignMemberWebsiteMutation();
+  const unassignMutation = useUnassignMemberWebsiteMutation();
+
+  const members = membersData?.items ?? [];
+  const pending = membersData?.pending_count ?? 0;
+  const memberTotal = membersData?.total ?? 0;
+
+  const assignedWebsites = memberWebsitesData?.items ?? [];
+  const assignableWebsites = assignableWebsitesData?.items ?? [];
+
+  const assignmentWebsites = assignmentData?.items ?? [];
+  const assignmentTotal = assignmentData?.total ?? 0;
+  const counts = assignmentData?.counts ?? { all: 0, unassigned: 0, assigned: 0 };
+
+  const operatorOptions = operatorOptionsData?.items ?? [];
+  const tagOptions = tagOptionsData?.items ?? [];
 
   useEffect(() => {
-    if (selected) {
-      setEditDisplayName(selected.display_name);
-      void loadMemberSites(selected);
+    if (selectedMember) {
+      setEditDisplayName(selectedMember.display_name);
     }
-  }, [selected, loadMemberSites]);
+  }, [selectedMember]);
 
-  const act = async (path: string, method = 'POST', body?: unknown) => {
-    try {
-      await apiFetch(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
-      await queryClient.invalidateQueries({ queryKey: ['targets'] });
-      await queryClient.invalidateQueries({ queryKey: ['tags'] });
-      await loadMembers();
-      if (selected) {
-        try {
-          const freshMember = await apiFetch<Member>(`/members/${selected.id}`);
-          setSelected(freshMember);
-          setEditDisplayName(freshMember.display_name);
-          await loadMemberSites(freshMember);
-        } catch {
-          await loadMemberSites(selected);
-        }
-      }
-      await loadAssignments();
-      setError('');
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : 'The request failed.');
-    }
-  };
-
-  const addMember = async (e: React.FormEvent) => {
+  const addMember = (e: React.FormEvent) => {
     e.preventDefault();
-    await act('/members', 'POST', memberForm);
-    setMemberForm({ username: '', display_name: '', temporary_password: '' });
+    setFormError('');
+    setActionError('');
+    createMemberMutation.mutate(memberForm, {
+      onSuccess: () => {
+        setMemberForm({ username: '', display_name: '', temporary_password: '' });
+        setFormError('');
+      },
+      onError: (err) => {
+        setFormError(err instanceof ApiError ? err.detail : 'Unable to create member.');
+      },
+    });
   };
 
-  const assign = async () => {
-    if (!selected || !candidateWebsiteId) return;
-    await act(`/members/${selected.id}/websites/${candidateWebsiteId}`, 'PUT');
-    setCandidateWebsiteId('');
+  const handleSaveDisplayName = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMember) return;
+    setActionError('');
+    updateMemberMutation.mutate(
+      { memberId: selectedMember.id, payload: { display_name: editDisplayName } },
+      {
+        onError: (err) => {
+          setActionError(err instanceof ApiError ? err.detail : 'Unable to update display name.');
+        },
+      }
+    );
   };
 
-  const remove = async (targetId: string) => {
-    if (!selected) return;
-    await act(`/members/${selected.id}/websites/${targetId}`, 'DELETE');
+  const assign = () => {
+    if (!selectedMember || !candidateWebsiteId) return;
+    setActionError('');
+    assignMutation.mutate(
+      { memberId: selectedMember.id, targetId: candidateWebsiteId },
+      {
+        onSuccess: () => {
+          setCandidateWebsiteId('');
+        },
+        onError: (err) => {
+          setActionError(err instanceof ApiError ? err.detail : 'Unable to assign website.');
+        },
+      }
+    );
   };
 
-  const assignForTarget = async (target: Website, memberId: number) => {
-    await act(`/members/${memberId}/websites/${target.id}`, 'PUT');
+  const remove = (targetId: string) => {
+    if (!selectedMember) return;
+    setActionError('');
+    unassignMutation.mutate(
+      { memberId: selectedMember.id, targetId },
+      {
+        onError: (err) => {
+          setActionError(err instanceof ApiError ? err.detail : 'Unable to remove website assignment.');
+        },
+      }
+    );
   };
 
-  const removeForTarget = async (target: Website, memberId: number) => {
-    await act(`/members/${memberId}/websites/${target.id}`, 'DELETE');
+  const assignForTarget = (target: MemberWebsite, memberId: number) => {
+    setActionError('');
+    assignMutation.mutate(
+      { memberId, targetId: target.id },
+      {
+        onError: (err) => {
+          setActionError(err instanceof ApiError ? err.detail : 'Unable to assign operator.');
+        },
+      }
+    );
   };
+
+  const removeForTarget = (target: MemberWebsite, memberId: number) => {
+    setActionError('');
+    unassignMutation.mutate(
+      { memberId, targetId: target.id },
+      {
+        onError: (err) => {
+          setActionError(err instanceof ApiError ? err.detail : 'Unable to remove operator assignment.');
+        },
+      }
+    );
+  };
+
+  const activeError =
+    actionError ||
+    (tab === 'members' && isMembersError
+      ? membersError instanceof ApiError
+        ? membersError.detail
+        : 'Unable to load members.'
+      : tab === 'assignments' && isAssignmentsError
+      ? assignmentsError instanceof ApiError
+        ? assignmentsError.detail
+        : 'Unable to load assignments.'
+      : '');
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -203,7 +230,8 @@ export function MembersPage() {
           className={buttonClass}
           onClick={() => {
             setTab('members');
-            setSelected(null);
+            setSelectedId(null);
+            setActionError('');
           }}
         >
           Members <span className="ml-1 rounded-full bg-amber-900 px-2 text-amber-200">{pending} pending</span>
@@ -212,16 +240,17 @@ export function MembersPage() {
           className={buttonClass}
           onClick={() => {
             setTab('assignments');
-            setSelected(null);
+            setSelectedId(null);
+            setActionError('');
           }}
         >
           Website Assignments
         </button>
       </div>
 
-      {error && (
+      {activeError && (
         <p role="alert" className="mb-4 rounded border border-rose-800 bg-rose-950/50 p-3 text-rose-300">
-          {error}
+          {activeError}
         </p>
       )}
 
@@ -234,11 +263,19 @@ export function MembersPage() {
             e.preventDefault();
             const target = resetTarget;
             const password = resetPasswordValue;
-            setResetTarget(null);
-            setResetPasswordValue('');
-            void act(`/members/${target.id}/reset-password`, 'POST', {
-              temporary_password: password,
-            });
+            setActionError('');
+            resetPasswordMutation.mutate(
+              { memberId: target.id, payload: { temporary_password: password } },
+              {
+                onSuccess: () => {
+                  setResetTarget(null);
+                  setResetPasswordValue('');
+                },
+                onError: (err) => {
+                  setActionError(err instanceof ApiError ? err.detail : 'Unable to reset password.');
+                },
+              }
+            );
           }}
         >
           <span className="text-sm font-medium text-slate-200">
@@ -315,7 +352,13 @@ export function MembersPage() {
                   {members.map((m) => (
                     <tr key={m.id} className="border-t border-slate-800">
                       <td className="p-2">
-                        <button className="text-cyan-300 hover:underline" onClick={() => setSelected(m)}>
+                        <button
+                          className="text-cyan-300 hover:underline"
+                          onClick={() => {
+                            setSelectedId(m.id);
+                            setEditDisplayName(m.display_name);
+                          }}
+                        >
                           {m.display_name}
                         </button>
                         <div className="text-xs text-slate-500">
@@ -323,13 +366,13 @@ export function MembersPage() {
                         </div>
                         {m.status === 'pending' && (
                           <div className="text-xs text-amber-300">
-                            Registered {m.registration_at ? new Date(m.registration_at).toLocaleString() : '—'}
+                            Registered {m.registration_at ? formatDateTime(m.registration_at) : '—'}
                           </div>
                         )}
                       </td>
                       <td className="p-2 capitalize">{m.status}</td>
                       <td className="p-2 text-slate-400">
-                        {m.last_login_at ? new Date(m.last_login_at).toLocaleString() : '—'}
+                        {m.last_login_at ? formatDateTime(m.last_login_at) : '—'}
                       </td>
                       <td className="p-2">{m.assigned_website_count}</td>
                       <td className="p-2">
@@ -339,7 +382,15 @@ export function MembersPage() {
                               <button
                                 className={buttonClass}
                                 onClick={() => {
-                                  if (window.confirm(`Approve ${m.username}?`)) void act(`/members/${m.id}/approve`);
+                                  if (window.confirm(`Approve ${m.username}?`)) {
+                                    setActionError('');
+                                    approveMemberMutation.mutate(m.id, {
+                                      onError: (err) =>
+                                        setActionError(
+                                          err instanceof ApiError ? err.detail : 'Unable to approve member.'
+                                        ),
+                                    });
+                                  }
                                 }}
                               >
                                 Approve
@@ -350,8 +401,19 @@ export function MembersPage() {
                                   if (window.confirm(`Reject ${m.username}?`)) {
                                     const rawReason = window.prompt('Optional rejection reason');
                                     if (rawReason === null) return;
-                                    const reason = rawReason.trim() || null;
-                                    void act(`/members/${m.id}/reject`, 'POST', { reason });
+                                    const reason = rawReason.trim() || undefined;
+                                    setActionError('');
+                                    rejectMemberMutation.mutate(
+                                      { memberId: m.id, payload: reason ? { reason } : undefined },
+                                      {
+                                        onError: (err) =>
+                                          setActionError(
+                                            err instanceof ApiError
+                                              ? err.detail
+                                              : 'Unable to reject member.'
+                                          ),
+                                      }
+                                    );
                                   }
                                 }}
                               >
@@ -362,8 +424,20 @@ export function MembersPage() {
                             <button
                               className={buttonClass}
                               onClick={() => {
-                                if (window.confirm(`${m.is_active ? 'Suspend' : 'Re-enable'} ${m.username}?`))
-                                  void act(`/members/${m.id}`, 'PATCH', { is_active: !m.is_active });
+                                if (window.confirm(`${m.is_active ? 'Suspend' : 'Re-enable'} ${m.username}?`)) {
+                                  setActionError('');
+                                  updateMemberMutation.mutate(
+                                    { memberId: m.id, payload: { is_active: !m.is_active } },
+                                    {
+                                      onError: (err) =>
+                                        setActionError(
+                                          err instanceof ApiError
+                                            ? err.detail
+                                            : 'Unable to update member status.'
+                                        ),
+                                    }
+                                  );
+                                }
                               }}
                             >
                               {m.is_active ? 'Suspend' : 'Re-enable'}
@@ -386,7 +460,12 @@ export function MembersPage() {
                   ))}
                 </tbody>
               </table>
-              {members.length === 0 && <p className="p-5 text-center text-slate-500">No members match these filters.</p>}
+              {isMembersLoading && members.length === 0 && (
+                <p className="p-5 text-center text-slate-500">Loading members…</p>
+              )}
+              {!isMembersLoading && members.length === 0 && (
+                <p className="p-5 text-center text-slate-500">No members match these filters.</p>
+              )}
               <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
                 <span>{memberTotal} members</span>
                 <div className="flex gap-2">
@@ -410,6 +489,11 @@ export function MembersPage() {
 
             <form onSubmit={addMember} className="mt-6 border-t border-slate-800 pt-5">
               <h2 className="mb-3 font-semibold text-slate-200">Add Operator</h2>
+              {formError && (
+                <p role="alert" className="mb-3 rounded border border-rose-800 bg-rose-950/50 p-2 text-sm text-rose-300">
+                  {formError}
+                </p>
+              )}
               <div className="grid gap-2 sm:grid-cols-2">
                 <input
                   required
@@ -436,33 +520,31 @@ export function MembersPage() {
                   onChange={(e) => setMemberForm({ ...memberForm, temporary_password: e.target.value })}
                 />
               </div>
-              <button className={`${buttonClass} mt-3`}>Create Operator</button>
+              <button type="submit" className={`${buttonClass} mt-3`}>
+                Create Operator
+              </button>
             </form>
           </section>
 
           <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
             <h2 className="text-lg font-semibold text-white">
-              {selected ? `Member details · ${selected.display_name}` : 'Member details'}
+              {selectedMember ? `Member details · ${selectedMember.display_name}` : 'Member details'}
             </h2>
-            {selected ? (
+            {selectedMember ? (
               <>
                 <p className="mt-1 text-xs text-slate-500">
                   Assignments remain in place while this account is suspended.
                 </p>
-                <form
-                  className="mt-4 flex gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void act(`/members/${selected.id}`, 'PATCH', { display_name: editDisplayName });
-                  }}
-                >
+                <form className="mt-4 flex gap-2" onSubmit={handleSaveDisplayName}>
                   <input
                     className={`${inputClass} min-w-0 flex-1`}
                     aria-label="Display name"
                     value={editDisplayName}
                     onChange={(e) => setEditDisplayName(e.target.value)}
                   />
-                  <button className={buttonClass}>Save name</button>
+                  <button type="submit" className={buttonClass}>
+                    Save name
+                  </button>
                 </form>
 
                 <label className="mt-4 flex items-center gap-2 text-sm text-slate-400">
@@ -490,7 +572,12 @@ export function MembersPage() {
                         </option>
                       ))}
                   </select>
-                  <button className={buttonClass} disabled={!candidateWebsiteId} onClick={() => void assign()}>
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={!candidateWebsiteId}
+                    onClick={assign}
+                  >
                     Assign
                   </button>
                 </div>
@@ -505,7 +592,7 @@ export function MembersPage() {
                         </div>
                         <div className="text-xs text-slate-500">{w.url}</div>
                       </div>
-                      <button className={buttonClass} onClick={() => void remove(w.id)}>
+                      <button type="button" className={buttonClass} onClick={() => remove(w.id)}>
                         Remove
                       </button>
                     </li>
@@ -618,8 +705,9 @@ export function MembersPage() {
                             {a.display_name}
                             {a.is_active ? '' : ' (suspended)'}{' '}
                             <button
+                              type="button"
                               aria-label={`Remove ${a.display_name}`}
-                              onClick={() => void removeForTarget(w, a.id)}
+                              onClick={() => removeForTarget(w, a.id)}
                               className="ml-1 text-rose-300"
                             >
                               ×
@@ -630,7 +718,7 @@ export function MembersPage() {
                           className={`${inputClass} py-1 text-xs`}
                           defaultValue=""
                           onChange={(e) => {
-                            if (e.target.value) void assignForTarget(w, Number(e.target.value));
+                            if (e.target.value) assignForTarget(w, Number(e.target.value));
                             e.target.value = '';
                           }}
                         >
@@ -656,7 +744,10 @@ export function MembersPage() {
                 ))}
               </tbody>
             </table>
-            {assignmentWebsites.length === 0 && (
+            {isAssignmentsLoading && assignmentWebsites.length === 0 && (
+              <p className="p-6 text-center text-slate-500">Loading websites…</p>
+            )}
+            {!isAssignmentsLoading && assignmentWebsites.length === 0 && (
               <p className="p-6 text-center text-slate-500">No websites match these filters.</p>
             )}
             <div className="mt-3 flex items-center justify-between text-xs text-slate-400">

@@ -21,19 +21,46 @@ def as_tag_read(tag: Tag, target_count: int = 0) -> TagRead:
     return TagRead.model_validate(tag).model_copy(update={"target_count": target_count})
 
 
-def active_target_count(db: Session, tag_id: str, user: User) -> int:
-    tag_ids = [tag_id]
-    tag_ids.extend(db.scalars(select(Tag.id).where(Tag.parent_id == tag_id)))
+def batch_active_target_counts(db: Session, tag_ids: list[str], user: User) -> dict[str, int]:
+    if not tag_ids:
+        return {}
+    children = db.execute(select(Tag.id, Tag.parent_id).where(Tag.parent_id.in_(tag_ids))).all()
+    tag_family: dict[str, set[str]] = {tid: {tid} for tid in tag_ids}
+    all_relevant_tag_ids: set[str] = set(tag_ids)
+    for child_id, parent_id in children:
+        if parent_id in tag_family:
+            tag_family[parent_id].add(child_id)
+        all_relevant_tag_ids.add(child_id)
+
     statement = (
-        select(func.count(func.distinct(TargetTag.target_id)))
+        select(TargetTag.tag_id, TargetTag.target_id)
         .join(Target, Target.id == TargetTag.target_id)
-        .where(TargetTag.tag_id.in_(tag_ids), Target.is_active.is_(True))
+        .where(TargetTag.tag_id.in_(all_relevant_tag_ids), Target.is_active.is_(True))
     )
     if user.role == "operator":
         statement = statement.join(
             UserTargetAssignment, UserTargetAssignment.target_id == Target.id
         ).where(UserTargetAssignment.user_id == user.id)
-    return int(db.scalar(statement) or 0)
+
+    pairs = db.execute(statement).all()
+    targets_by_tag: dict[str, set[str]] = {}
+    for tag_id, target_id in pairs:
+        if tag_id not in targets_by_tag:
+            targets_by_tag[tag_id] = set()
+        targets_by_tag[tag_id].add(target_id)
+
+    counts: dict[str, int] = {}
+    for tid in tag_ids:
+        matched: set[str] = set()
+        for family_tid in tag_family[tid]:
+            if family_tid in targets_by_tag:
+                matched.update(targets_by_tag[family_tid])
+        counts[tid] = len(matched)
+    return counts
+
+
+def active_target_count(db: Session, tag_id: str, user: User) -> int:
+    return batch_active_target_counts(db, [tag_id], user).get(tag_id, 0)
 
 
 @router.get("", response_model=PaginatedTagsRead)
@@ -70,8 +97,10 @@ async def list_tags(
     tags = list(
         db.scalars(statement.order_by(Tag.name.asc(), Tag.id.asc()).limit(limit).offset(offset))
     )
+    tag_ids = [tag.id for tag in tags]
+    counts_by_tag = batch_active_target_counts(db, tag_ids, user)
     return PaginatedTagsRead(
-        items=[as_tag_read(tag, active_target_count(db, tag.id, user)) for tag in tags],
+        items=[as_tag_read(tag, counts_by_tag.get(tag.id, 0)) for tag in tags],
         total=total,
         limit=limit,
         offset=offset,

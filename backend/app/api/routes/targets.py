@@ -474,13 +474,10 @@ async def demote_target_baseline(
     if not snapshot.is_baseline:
         raise ValidationError(f"Snapshot {snapshot_id} is not an active baseline")
 
-    # Refuse to remove the last baseline. With none left, the next check takes the
-    # `baseline is None` path in run_target_check, which adopts whatever the site
-    # is serving at that moment as the new baseline and reports OK without a
-    # CheckResult. If the site were defaced at that point the defacement would
-    # become the reference silently — the exact failure mode described in
-    # plan/archive/auto-rebaseline.md. To replace the only baseline, approve the
-    # new one first, then demote the old one.
+    # Refuse to remove the last baseline. With none left, subsequent checks
+    # would have no baseline to compare against and would revert the target to
+    # `Awaiting Baseline` (requiring manual operator approval of a candidate snapshot).
+    # To replace the only baseline, approve the new one first, then demote the old one.
     remaining = (
         db.scalar(
             select(func.count())
@@ -497,8 +494,8 @@ async def demote_target_baseline(
     if remaining == 0:
         raise ValidationError(
             "Cannot remove the only baseline for this target. Approve another "
-            "snapshot as a baseline first, otherwise the next check would adopt "
-            "the live page as the new baseline without review."
+            "snapshot as a baseline first, otherwise the target will have no approved "
+            "baseline and will require manual approval on the next check."
         )
 
     snapshot.is_baseline = False

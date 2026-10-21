@@ -1,4 +1,18 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from datetime import UTC, datetime
+from typing import Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+
+MemberState = Literal["pending", "active", "suspended", "rejected"]
+MemberRole = Literal["admin", "operator"]
+RegistrationStatus = Literal["pending", "approved", "rejected"]
 
 
 class MemberCreate(BaseModel):
@@ -47,3 +61,93 @@ class RejectMember(BaseModel):
 class ResetPassword(BaseModel):
     temporary_password: str = Field(min_length=12, max_length=200)
     model_config = ConfigDict(extra="forbid")
+
+
+class MemberRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: str
+    role: MemberRole
+    is_active: bool
+    status: MemberState
+    registration_status: RegistrationStatus
+    registration_at: datetime
+    registration_reviewed_at: datetime | None = None
+    registration_reviewed_by: int | None = None
+    registration_rejection_reason: str | None = None
+    last_login_at: datetime | None = None
+    must_change_password: bool
+    assigned_website_count: int
+    created_at: datetime
+
+    @field_serializer(
+        "registration_at",
+        "registration_reviewed_at",
+        "last_login_at",
+        "created_at",
+    )
+    def serialize_datetime(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.isoformat().replace("+00:00", "Z")
+
+
+class PaginatedMembersRead(BaseModel):
+    items: list[MemberRead]
+    total: int
+    pending_count: int
+    limit: int
+    offset: int
+
+
+class TargetAssigneeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: str
+    is_active: bool
+
+
+class MemberWebsiteTagRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    color_key: str
+
+
+class MemberWebsiteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    url: str
+    is_active: bool
+    tags: list[MemberWebsiteTagRead] = Field(default_factory=list)
+    assignees: list[TargetAssigneeRead] = Field(default_factory=list)
+
+
+class MemberWebsitesCountsRead(BaseModel):
+    all: int
+    unassigned: int
+    assigned: int
+
+
+class PaginatedMemberWebsitesRead(BaseModel):
+    items: list[MemberWebsiteRead]
+    total: int
+    counts: MemberWebsitesCountsRead
+    limit: int
+    offset: int
+
+
+class MemberWebsitesListRead(BaseModel):
+    items: list[MemberWebsiteRead]
+    total: int
+    limit: int
+    offset: int

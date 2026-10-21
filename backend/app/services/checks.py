@@ -180,6 +180,44 @@ def _promote_staging_artifacts(
     return fallback_paths
 
 
+def _persist_promoted_snapshot(
+    db: Session,
+    capture: CaptureResult,
+    target: Target,
+    staging_dir: Path | None,
+    data_dir_path: Path,
+) -> tuple[Snapshot, tuple[str, str | None, str, str]]:
+    perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
+        capture.id,
+        staging_dir,
+        data_dir_path,
+        (
+            capture.screenshot_path,
+            capture.text_path,
+            capture.html_path,
+            capture.raw_screenshot_path,
+        ),
+    )
+    snapshot = Snapshot(
+        id=capture.id,
+        target_id=target.id,
+        url_revision=target.url_revision,
+        final_url=capture.final_url,
+        http_status=capture.http_status,
+        title=capture.title,
+        screenshot_path=perm_screenshot,
+        raw_screenshot_path=perm_raw_screenshot,
+        viewport_width=capture.viewport_width,
+        document_width=capture.document_width,
+        screenshot_format_version=capture.screenshot_format_version,
+        text_path=perm_text,
+        html_path=perm_html,
+        is_baseline=False,
+    )
+    db.add(snapshot)
+    return snapshot, (perm_screenshot, perm_raw_screenshot, perm_text, perm_html)
+
+
 def _cleanup_promoted_files(*paths: str | None) -> None:
     """Clean up files promoted to permanent storage if database commit failed."""
     for p in paths:
@@ -298,35 +336,11 @@ async def run_target_check(
             set_phase("saving_result")
             # Every new URL revision, including the first, must be reviewed
             # before it can be trusted as a baseline.
-            perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
-                capture.id,
-                staging_dir,
-                settings.data_dir_path,
-                (
-                    capture.screenshot_path,
-                    capture.text_path,
-                    capture.html_path,
-                    capture.raw_screenshot_path,
-                ),
+            snapshot, promoted_files = _persist_promoted_snapshot(
+                db, capture, target, staging_dir, settings.data_dir_path
             )
+            perm_screenshot, perm_raw_screenshot, perm_text, perm_html = promoted_files
             artifacts_promoted = True
-            snapshot = Snapshot(
-                id=capture.id,
-                target_id=target_id,
-                url_revision=target.url_revision,
-                final_url=capture.final_url,
-                http_status=capture.http_status,
-                title=capture.title,
-                screenshot_path=perm_screenshot,
-                raw_screenshot_path=perm_raw_screenshot,
-                viewport_width=capture.viewport_width,
-                document_width=capture.document_width,
-                screenshot_format_version=capture.screenshot_format_version,
-                text_path=perm_text,
-                html_path=perm_html,
-                is_baseline=False,
-            )
-            db.add(snapshot)
             snapshot_id = snapshot.id
             next_status = STATUS_AWAITING_BASELINE
             target.last_http_status = capture.http_status
@@ -402,35 +416,11 @@ async def run_target_check(
 
         if has_changes:
             # Genuine change: promote staged artifacts to permanent storage
-            perm_screenshot, perm_text, perm_html, perm_raw_screenshot = _promote_staging_artifacts(
-                capture.id,
-                staging_dir,
-                settings.data_dir_path,
-                (
-                    capture.screenshot_path,
-                    capture.text_path,
-                    capture.html_path,
-                    capture.raw_screenshot_path,
-                ),
+            snapshot, promoted_files = _persist_promoted_snapshot(
+                db, capture, target, staging_dir, settings.data_dir_path
             )
+            perm_screenshot, perm_raw_screenshot, perm_text, perm_html = promoted_files
             artifacts_promoted = True
-            snapshot = Snapshot(
-                id=capture.id,
-                target_id=target_id,
-                url_revision=target.url_revision,
-                final_url=capture.final_url,
-                http_status=capture.http_status,
-                title=capture.title,
-                screenshot_path=perm_screenshot,
-                raw_screenshot_path=perm_raw_screenshot,
-                viewport_width=capture.viewport_width,
-                document_width=capture.document_width,
-                screenshot_format_version=capture.screenshot_format_version,
-                text_path=perm_text,
-                html_path=perm_html,
-                is_baseline=False,
-            )
-            db.add(snapshot)
             db.flush()
             check_result = CheckResult(
                 target_id=target_id,
