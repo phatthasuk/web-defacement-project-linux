@@ -18,6 +18,7 @@ from app.core.errors import (
     CaptureBudgetExceeded,
     CaptureError,
     DnsResolutionError,
+    ScreenshotCaptureError,
     SsrfBlockedError,
     UpstreamConnectionError,
     ValidationError,
@@ -85,6 +86,8 @@ def classify_capture_error(exc: Exception) -> tuple[str, bool]:
         return "resource_budget_exceeded", False
     if isinstance(exc, SsrfBlockedError):
         return "ssrf_blocked", False
+    if isinstance(exc, ScreenshotCaptureError):
+        return "screenshot_capture_failed", True
     if isinstance(exc, DnsResolutionError):
         return "dns_resolution", True
     if isinstance(exc, UpstreamConnectionError):

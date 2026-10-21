@@ -27,6 +27,7 @@ from app.core.errors import (
     CaptureBudgetExceeded,
     CaptureError,
     DnsResolutionError,
+    ScreenshotCaptureError,
     SsrfBlockedError,
     UpstreamConnectionError,
 )
@@ -526,7 +527,17 @@ async def _capture_snapshot_impl(
                 raise ssrf_proxy.budget_error
             await _enforce_render_budget(context, page, settings)
 
-            raw_screenshot_bytes = await page.screenshot(full_page=True)
+            try:
+                raw_screenshot_bytes = await page.screenshot(full_page=True)
+            except PlaywrightError as exc:
+                message = str(exc)
+                is_screenshot_capture_failure = (
+                    "Page.captureScreenshot" in message
+                    and "Unable to capture screenshot" in message
+                )
+                if is_screenshot_capture_failure:
+                    raise ScreenshotCaptureError(message) from exc
+                raise
             if ssrf_proxy.budget_error is not None:
                 raise ssrf_proxy.budget_error
             if len(raw_screenshot_bytes) > max_bytes:

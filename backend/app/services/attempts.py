@@ -4,6 +4,8 @@ import logging
 import random
 from datetime import timedelta
 
+from sqlalchemy import select
+
 from app.core.config import Settings
 from app.core.time import utcnow
 from app.db.session import SessionLocal
@@ -22,6 +24,8 @@ from app.services.checks import CaptureFunc, TargetCheckResult
 from app.services.concurrency import SessionFactory, release_in_flight, run_checks_for_targets
 
 logger = logging.getLogger("app.attempts")
+
+SCREENSHOT_RETRY_DELAY_SECONDS = 120
 
 
 def _recover_attempt_finalization_failure(
@@ -87,6 +91,7 @@ def _is_retryable(error_code: str | None) -> bool:
     if error_code in {
         "check_timeout",
         "capture_timeout",
+        "screenshot_capture_failed",
         "dns_resolution",
         "upstream_connection",
         "network_unavailable",
@@ -187,14 +192,34 @@ async def run_check_attempt(
                     retryable = _is_retryable(result.error_code)
                     retry_limit = settings.CHECK_RETRY_MAX_ATTEMPTS
                     delays = settings.check_retry_delays_list
+                    prior_screenshot_failure = False
+                    if result.error_code == "screenshot_capture_failed":
+                        prior_screenshot_failure = (
+                            db.scalar(
+                                select(CheckAttempt.id)
+                                .where(
+                                    CheckAttempt.run_id == run_id,
+                                    CheckAttempt.error_code == "screenshot_capture_failed",
+                                    CheckAttempt.id != attempt_id,
+                                )
+                                .limit(1)
+                            )
+                            is not None
+                        )
                     if (
                         result.error_code
                         and settings.CHECK_RETRY_ENABLED
                         and retryable
+                        and not prior_screenshot_failure
                         and attempt_number < retry_limit
                         and attempt_number <= len(delays)
                     ):
-                        delay = delays[attempt_number - 1] + random.uniform(
+                        base_delay = (
+                            SCREENSHOT_RETRY_DELAY_SECONDS
+                            if result.error_code == "screenshot_capture_failed"
+                            else delays[attempt_number - 1]
+                        )
+                        delay = base_delay + random.uniform(
                             0, settings.CHECK_RETRY_JITTER_MAX_SECONDS
                         )
                         if result.retry_after_seconds is not None:

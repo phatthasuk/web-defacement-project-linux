@@ -6,6 +6,10 @@ class CaptureBudgetExceeded(CaptureError):
     """A page used more network, DOM or screenshot resources than allowed."""
 
 
+class ScreenshotCaptureError(CaptureError):
+    """Chromium failed to capture a screenshot for a potentially transient reason."""
+
+
 class DnsResolutionError(CaptureError):
     pass
 

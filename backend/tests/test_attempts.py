@@ -10,13 +10,23 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
+from app.core.errors import CaptureBudgetExceeded, ScreenshotCaptureError, SsrfBlockedError
 from app.core.status import STATUS_CHANGED, STATUS_OK
 from app.core.time import utcnow
 from app.db.session import Base
 from app.models import CheckAttempt, CheckResult, Snapshot, Target
-from app.services.attempts import _recover_attempt_finalization_failure, run_check_attempt
+from app.services.attempts import (
+    _is_retryable,
+    _recover_attempt_finalization_failure,
+    run_check_attempt,
+)
 from app.services.capture.capture import CaptureResult
-from app.services.checks import TargetCheckResult, recover_stale_checks, run_target_check
+from app.services.checks import (
+    TargetCheckResult,
+    classify_capture_error,
+    recover_stale_checks,
+    run_target_check,
+)
 from app.services.concurrency import try_acquire_in_flight
 from app.services.review import approve_baseline
 from app.services.scheduler import CheckScheduler
@@ -49,6 +59,25 @@ def make_capture(out_dir: Path, snapshot_id: str, text: str, color: str) -> Capt
         html_path=str(html_path),
         redirect_count=0,
     )
+
+
+def test_only_the_recognized_screenshot_capture_error_is_retryable() -> None:
+    code, retryable = classify_capture_error(
+        ScreenshotCaptureError(
+            "Page.screenshot: Protocol error (Page.captureScreenshot): "
+            "Unable to capture screenshot"
+        )
+    )
+    assert code == "screenshot_capture_failed"
+    assert retryable and _is_retryable(code)
+
+    budget_code, budget_retryable = classify_capture_error(
+        CaptureBudgetExceeded("screenshot exceeds budget")
+    )
+    ssrf_code, ssrf_retryable = classify_capture_error(SsrfBlockedError("blocked by SSRF guard"))
+    assert not budget_retryable and not _is_retryable(budget_code)
+    assert not ssrf_retryable and not _is_retryable(ssrf_code)
+    assert not _is_retryable("internal_error")
 
 
 async def test_ok_attempt_records_primitive_ids_and_next_schedule(tmp_path: Path) -> None:
@@ -500,5 +529,169 @@ def test_startup_recovery_releases_ok_target_with_unfinished_attempt(tmp_path: P
             assert target is not None and target.next_check_at is not None
             assert attempt is not None and attempt.finished_at is not None
             assert attempt.error_code == "process_interrupted"
+    finally:
+        engine.dispose()
+
+
+async def test_screenshot_capture_failure_retries_once_and_can_succeed(tmp_path: Path) -> None:
+    session_factory, engine = make_db(tmp_path)
+    settings = Settings(
+        DATA_DIR=str(tmp_path),
+        CHECK_INTERVAL_SECONDS=3600,
+        CHECK_JITTER_MAX_SECONDS=0,
+        CHECK_RETRY_JITTER_MAX_SECONDS=0,
+    )
+    try:
+        with session_factory() as db:
+            target = Target(name="Screenshot retry", url="https://example.com")
+            db.add(target)
+            db.commit()
+            target_id = target.id
+
+        async def baseline_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            return make_capture(out_dir, "screenshot-retry-baseline", "Same page", "white")
+
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            assert target is not None
+            await run_target_check(db, target, settings, baseline_capture)
+            approve_baseline(db, target_id, "screenshot-retry-baseline", settings)
+            target = db.get(Target, target_id)
+            assert target is not None
+            target.check_run_id = "screenshot-retry-run"
+            target.check_run_source = "scheduled"
+            db.commit()
+
+        async def transient_failure(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            raise ScreenshotCaptureError(
+                "Page.screenshot: Protocol error (Page.captureScreenshot): "
+                "Unable to capture screenshot"
+            )
+
+        assert try_acquire_in_flight(target_id)
+        first_result = await run_check_attempt(
+            target_id,
+            settings,
+            run_id="screenshot-retry-run",
+            initial_source="scheduled",
+            capture_func=transient_failure,
+            session_factory=session_factory,
+        )
+        assert first_result is not None and first_result.status == "Failed"
+        assert first_result.error_code == "screenshot_capture_failed"
+
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            assert target is not None and target.next_check_at is not None
+            assert 119 <= (target.next_check_at - utcnow()).total_seconds() <= 120
+            target.next_check_at = utcnow() - timedelta(seconds=1)
+            db.commit()
+
+        async def recovered_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            return make_capture(out_dir, "screenshot-retry-recovered", "Same page", "white")
+
+        assert try_acquire_in_flight(target_id)
+        second_result = await run_check_attempt(
+            target_id,
+            settings,
+            run_id="screenshot-retry-run",
+            initial_source="scheduled",
+            capture_func=recovered_capture,
+            session_factory=session_factory,
+        )
+        assert second_result is not None and second_result.status == STATUS_OK
+
+        with session_factory() as db:
+            attempts = list(
+                db.scalars(
+                    select(CheckAttempt)
+                    .where(CheckAttempt.run_id == "screenshot-retry-run")
+                    .order_by(CheckAttempt.attempt_number)
+                )
+            )
+            assert len(attempts) == 2
+            assert attempts[0].error_code == "screenshot_capture_failed"
+            assert attempts[0].source == "scheduled"
+            assert attempts[1].error_code is None
+            assert attempts[1].source == "retry"
+    finally:
+        engine.dispose()
+
+
+async def test_screenshot_capture_failure_does_not_retry_twice(tmp_path: Path) -> None:
+    session_factory, engine = make_db(tmp_path)
+    settings = Settings(
+        DATA_DIR=str(tmp_path),
+        CHECK_INTERVAL_SECONDS=3600,
+        CHECK_JITTER_MAX_SECONDS=0,
+        CHECK_RETRY_JITTER_MAX_SECONDS=0,
+    )
+    try:
+        with session_factory() as db:
+            target = Target(name="Screenshot retry limit", url="https://example.com")
+            db.add(target)
+            db.commit()
+            target_id = target.id
+
+        async def baseline_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            return make_capture(out_dir, "screenshot-limit-baseline", "Same page", "white")
+
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            assert target is not None
+            await run_target_check(db, target, settings, baseline_capture)
+            approve_baseline(db, target_id, "screenshot-limit-baseline", settings)
+            target = db.get(Target, target_id)
+            assert target is not None
+            target.check_run_id = "screenshot-limit-run"
+            target.check_run_source = "scheduled"
+            db.commit()
+
+        async def failed_capture(url: str, current: Settings, out_dir: Path) -> CaptureResult:
+            raise ScreenshotCaptureError(
+                "Page.screenshot: Protocol error (Page.captureScreenshot): "
+                "Unable to capture screenshot"
+            )
+
+        assert try_acquire_in_flight(target_id)
+        await run_check_attempt(
+            target_id,
+            settings,
+            run_id="screenshot-limit-run",
+            initial_source="scheduled",
+            capture_func=failed_capture,
+            session_factory=session_factory,
+        )
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            assert target is not None and target.next_check_at is not None
+            target.next_check_at = utcnow() - timedelta(seconds=1)
+            db.commit()
+
+        assert try_acquire_in_flight(target_id)
+        result = await run_check_attempt(
+            target_id,
+            settings,
+            run_id="screenshot-limit-run",
+            initial_source="scheduled",
+            capture_func=failed_capture,
+            session_factory=session_factory,
+        )
+        assert result is not None and result.error_code == "screenshot_capture_failed"
+
+        with session_factory() as db:
+            target = db.get(Target, target_id)
+            attempts = list(
+                db.scalars(
+                    select(CheckAttempt)
+                    .where(CheckAttempt.run_id == "screenshot-limit-run")
+                    .order_by(CheckAttempt.attempt_number)
+                )
+            )
+            assert target is not None and target.check_run_id is None
+            assert target.next_check_at is not None
+            assert (target.next_check_at - utcnow()).total_seconds() >= 3590
+            assert len(attempts) == 2
+            assert all(item.error_code == "screenshot_capture_failed" for item in attempts)
     finally:
         engine.dispose()
