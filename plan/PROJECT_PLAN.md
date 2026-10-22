@@ -1,7 +1,8 @@
 # Website Defacement Monitoring System — Project Plan
 
-**Documentation updated:** 2026-10-19 (source/evidence reconciliation; no new application test or runtime verification)
-**Source baseline:** `ba1bbf2d8933293f115a2336df57b0d5430c30b7`
+**Documentation updated:** 2026-10-22 (Asia/Bangkok; Stage 2/3 acceptance review; documentation only)
+**Source reviewed for this update:** `00ae0599f6b2859ffc1c8a1c80573e0714b93453`
+**Earlier reconciliation baseline:** `ba1bbf2d8933293f115a2336df57b0d5430c30b7`
 **Last recorded operational update:** 2026-09-07 (Stage 2 restarted; previous run cancelled; not reverified by this planning update)
 **Supersedes:** every document in [`plan/archive/`](archive). Those are kept for history only; where they disagree with this file, **this file wins**.
 
@@ -259,8 +260,11 @@ Stage 4.2 remains planned and must use reviewed observations.
 - **Single worker required.** Concurrency limits and duplicate suppression are
   process-local, and startup stale-check recovery assumes no sibling worker is
   mid-check. Run `uvicorn --workers 1`.
-- **Snapshots without an HTML artifact** make the structural detector report
-  "Structural comparison unavailable" rather than failing the check.
+- **Missing or unreadable HTML:** the diff helper returns structural unavailable,
+  but the current check pipeline raises `CaptureError` if any compared baseline
+  has unavailable structural evidence. The check fails instead of reporting OK;
+  this also applies when another approved baseline has readable HTML. This
+  corrects the earlier helper-only description; it is not a new code change.
 - **Allowlist is API-only.** `Target.allowed_domains` can be set through
   POST/PATCH but has no UI field yet.
 - **The captured page is not pixel-identical to a visitor's view** (see 4.2).
@@ -366,16 +370,70 @@ test the archived production plan called for, and it is the input to Stage 3.
 
 | # | What to measure | Feeds |
 | :--- | :--- | :--- |
-| 2.1 | How often each detector (text / visual / structural) fires, **per target** | Stage 3.2 notification policy |
-| 2.2 | Distribution of visual scores on unchanged pages, **per target** — each site's own noise floor | Stage 4.2 per-target thresholds |
-| 2.3 | Check failure rate and cause (timeout, DNS, 5xx) | Stage 3.2, and whether `PAGE_TIMEOUT_SECONDS` needs raising |
-| 2.4 | Actual storage growth after 1.2 | Retention policy in 9.3 |
-| 2.5 | Check duration per target, and whether hourly rounds overlap | Concurrency settings |
+| 2.1 | Per-target detector firing counts/rates, denominator, detector availability and independently reviewed labels; separate scheduled, manual and network-retry attempts | Stage 3.2 notification policy |
+| 2.2 | Per-target score distributions on human-labelled unchanged and legitimate-change samples, including Changed results; report sample count, median, p95 and maximum separately by label | Stage 3.2 policy and Stage 4.2 reviewed calibration |
+| 2.3 | Attempt and final-run failure rates separately, by timeout/DNS/HTTP/SSRF/budget/internal error; include unfinished attempts and unavailable detector evidence | Stage 3.4 availability and monitoring health |
+| 2.4 | Timestamped start/end storage inventories for DB, staging, retained artifacts and raw screenshots separately; bytes/day and bytes/target/day | Retention policy in 9.3 |
+| 2.5 | Per-target queue delay, duration and completion spacing (median/p95/max), same-target and cross-target overlap, missed/late runs | Concurrency settings and coverage acceptance |
 
-**Exit criteria before designing notification:** every target has run for at
-least two weeks, and for each target it is known which detectors are quiet
-(0.000000 on an unchanged page) and which are not. Only quiet detectors are
-candidates for immediate notification.
+#### Stage 2 evidence and exit contract (updated 2026-10-22)
+
+The following are planning acceptance defaults, not measured results or changes
+to scheduler settings. Record any owner-approved exception and its effect on
+policy confidence before accepting a target; do not silently relax a failed gate.
+
+1. **Freeze the observation manifest.** Record the agreed target IDs and expected
+   site inventory, active periods, URL revisions, approved baseline IDs and
+   approval dates, source commit/image digest/browser version, and effective
+   non-secret capture/detector/scheduler settings. Reconcile the seven expected
+   sites against the actual deployment; missing sites need an explicit scope
+   decision. Name an observation reviewer and notification-policy owner.
+2. **Measure at least 14 consecutive days per in-scope target.** Report eligible
+   monitoring time, pending-baseline holds, disabled periods and maintenance
+   separately; excluded time must not establish 14 days of monitoring. Require
+   at least 95% of expected scheduled runs to have a terminal attempt record and
+   no unexplained gap over 3 hours. Successful comparisons and failed runs must
+   be reported separately: a completed failure is not detector coverage.
+   Derive expected runs from the deployed interval, completion-based scheduling,
+   jitter, duration and poll allowance; do not assume exactly 336 completions.
+   Count each scheduled run once using run IDs; manual checks and retries do not
+   replace missing scheduled runs. If historic deadlines cannot be reconstructed,
+   report coverage as unknown rather than inferring a pass from first/last dates.
+3. **Label independently of detector status.** Use unchanged, legitimate change,
+   suspicious/confirmed incident, and unknown. Review at least two samples per
+   day per target across different times throughout the observation window,
+   include both OK and Changed where present, and review detector combinations,
+   high scores and new structural finding types. Record the sampling method,
+   reviewer, evidence IDs and uncertainty. Do not equate OK with unchanged or
+   Changed with noise. OK artifacts are discarded by current design; a baseline
+   substituted as current_snapshot_id is not proof of the actual page state.
+   If independent evidence cannot support a label, keep it unknown and extend
+   evidence collection without changing retention or baselines automatically.
+4. **Keep comparable segments.** Record baseline, URL, allowlist, threshold,
+   capture configuration and software changes. Analyse affected segments
+   separately and extend observation when a segment lacks adequate evidence;
+   do not combine different versions into one claimed noise floor. Historical
+   detector columns defaulted to zero are not proof a detector actually ran.
+5. **Produce a per-target decision sheet.** Include all five measurements above,
+   availability denominators, unexplained gaps, unknown labels, score outliers,
+   artifact growth and next action. No unresolved suspicious sample or unknown
+   that could change the proposed routing may be treated as benign. A finite
+   sample with zero observed noise is not proof of zero false-positive risk.
+   Missing attempt history or start-of-window disk inventory remains an explicit
+   limitation, not a zero failure rate or measured disk-growth claim.
+6. **Approve the policy input.** The reviewer signs the evidence sheet and policy
+   owner records routing for every detector/target, review workload and residual
+   risks. Structural/text quietness remains a hypothesis: the historical
+   [audit](../audit%20stage2.md) shows frequent firing on all four sampled sites,
+   without establishing whether those changes were benign. Only validated quiet
+   signals are candidates for immediate notification; noisy signals still need
+   a bounded review route. Stage 2 is not complete until each in-scope target
+   has evidence or a documented scope decision, and all five measurements have
+   acceptance evidence.
+
+This update does not restart or reset an observation run. Use read-only evidence
+collection first. Reporting automation remains a separately scoped add-on;
+manual evidence sheets can satisfy Stage 2 without new application features.
 
 ### Stage 3 — Notification, designed from Stage 2 data
 
@@ -385,10 +443,81 @@ Recipient routing must respect active Admin/Operator assignment scope at deliver
 
 | # | Work |
 | :--- | :--- |
-| 3.1 | **Choose the channel** — email or webhook (Line / Teams / Slack). **Deferred question, still open.** One channel only |
-| 3.2 | **Tiered policy.** Working hypothesis from BCH data, to be confirmed or replaced by Stage 2: notify on structural and text changes (both measured 0.000000 on an unchanged page), do not notify on visual-only changes (measured 0.028-0.054). Every notification names the detector that fired and includes the structural summary |
-| 3.3 | **Verification retry before notifying** — re-check after 1-2 minutes and notify only if the finding persists. Removes transient false positives before they reach the one operator |
-| 3.4 | **Escalation alert for sustained `Availability Issue`** — an attacker taking a site down or triggering 500 errors must not stay silent indefinitely. A target remaining in `Availability Issue` across several consecutive checks (e.g. 2-3 hours) must escalate as an availability incident |
+| 3.1 | **Choose one channel** — email or webhook. Selection, recipients, destination validation, secret handling, delivery timeouts and operator ownership remain open. Use a controlled test destination before deployment |
+| 3.2 | **Evidence-based tiered policy.** Validate structural/text routing per target from Stage 2 labels; the old single-page quietness hypothesis is not a production policy. Visual-only findings retain full detection/evidence and require a bounded human-review route, even when immediate interruption is deferred |
+| 3.3 | **Content confirmation** — target a fresh check after 1-2 minutes, independently of network retries. Match the original finding, preserve both outcomes, and treat failed/late confirmation as unknown. Persist scheduling and identity so restart cannot silently lose pending work |
+| 3.4 | **Availability and monitoring-health escalation.** Define sustained site unavailability separately from overdue/stuck checks, repeated Failed results, detector unavailability and scheduler/service failure. Specify timers, recovery and a failure path independent of the monitored process |
+
+#### Stage 3 implementation and acceptance contract (planned)
+
+These requirements describe future behavior. They do not mark notification,
+structured findings, monitoring health or delivery persistence as implemented.
+Do not add a distributed capture queue or change the single-worker constraint.
+
+- **Policy coverage:** version the per-target routing decision and show the
+  detector(s), relevant finding and authorized evidence link in each message.
+  Do not send raw HTML, tokens or sensitive page content to the channel. For
+  visual-only findings, agree a digest/review deadline and overdue escalation
+  before release; blanket indefinite silence is not an accepted policy. Keep
+  initial and transient findings visible even if confirmation does not persist.
+  The owner must decide whether high-risk findings can wait for confirmation;
+  do not introduce an unapproved immediate-alert exception or silently drop a
+  brief attack. Detection thresholds and human baseline approval remain intact.
+- **Finding identity:** persist structured facts or stable fingerprints tied to
+  target ID, URL revision, originating result, baseline context and policy
+  version. Match the same relevant facts at confirmation, not merely Changed
+  status or equal scores. Current CheckResult stores scores and summary only;
+  the structural preview is truncated and cannot serve as a complete identity.
+  Use a defined content/visual identity when applicable. A new finding during
+  confirmation gets its own evaluation and must not be swallowed by cooldown.
+- **Confirmation lifecycle:** persist due time, original evidence, outcome and
+  links to confirmation attempts. Define completed, not reproduced, failed,
+  overdue and superseded outcomes. Recheck URL revision, baseline context and
+  target activity before execution; changed context supersedes pending work
+  with an auditable reason, never by auto-approving a new baseline. Failed or
+  overdue confirmation must have a bounded health/review escalation rather
+  than being interpreted as recovery. Preserve original evidence and respect
+  existing SSRF, budgets, concurrency and run ownership. Confirmation must not
+  overwrite the hourly/network-retry deadline; specify collision handling and
+  maximum lateness before implementation.
+- **Delivery persistence:** create notification intent transactionally with the
+  eligible persisted decision. Keep durable delivery state, retry deadline,
+  bounded backoff, idempotency/dedup key and terminal-failure escalation.
+  Recover work after restart. Document the unavoidable ambiguous-send window
+  where a provider accepted a message before local acknowledgement; do not
+  promise exactly-once delivery without provider support. Deduplication must
+  distinguish new findings and URL revisions from reminders of the same event.
+- **Recipient authorization:** re-evaluate active users and target assignments
+  immediately before every send/retry. Unassigned targets route to active
+  Admins. Define behavior when no eligible recipient exists and alert the
+  channel owner without exposing evidence to a revoked recipient. Shared
+  channel membership and evidence-link authentication must preserve target
+  scope; checking an application's assignment alone does not authorize every
+  member of a shared webhook destination.
+- **Availability and health:** use final run outcomes and elapsed time, not
+  network-retry attempts as consecutive hourly failures. Select explicit
+  thresholds for site outages, missing results, stuck checks, repeated Failed
+  and unavailable detectors, plus recovery/reminder rules. SSRF blocks remain
+  Failed security events and are never retried as availability errors. A
+  missing observation is unknown, never a recovered site. Monitoring health
+  is a separately scoped prerequisite before claiming unattended protection;
+  define an independent watchdog/delivery-failure path because a dead process
+  cannot notify through its own scheduler. Static /health liveness is insufficient.
+
+**Release evidence required:** isolated fixtures and a controlled channel must
+demonstrate persistent and transient findings, different findings on successive
+checks, image/CSS changes at unchanged URLs with unchanged text/HTML, failed and
+late confirmation, baseline/URL changes, hourly/retry collisions, process restart
+before and after delivery, provider timeouts/429/5xx, duplicate suppression without
+losing new findings, recipient suspension/reassignment and no eligible recipient.
+Exercise sustained outages, repeated Failed, detector failure, a stopped scheduler,
+stuck work and recovery separately. Record exact policy timers, expected routing,
+actual delivery latency, remaining duplicates/limitations and reviewer decisions.
+Test authorization/CSRF for any new control APIs. Use reversible SQLite migrations
+and temporary databases for persistent state; preserve existing production data.
+Close Stage 3 only after controlled end-to-end delivery and intended Linux/runtime
+acceptance are evidenced in the register. Channel choice, policy values, visual
+review deadline, health thresholds and named owners remain open decisions.
 
 ### Stage 4 — Make it comfortable for one person
 
